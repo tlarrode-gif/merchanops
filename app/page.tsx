@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Copy, CreditCard, FileDown, MessageCircle, Package, Plus, Search, Trash2, Users } from "lucide-react";
-import * as XLSX from "xlsx";
+import { AlertTriangle, CheckCircle2, CreditCard, FileDown, MessageCircle, Package, Plus, Search, Trash2, Users } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 type Client = { id: string; name: string; ceco?: string; notes?: string };
@@ -200,13 +199,13 @@ export default function Home() {
   };
 
   function exportPayments() {
-    const rows = [["Trabajador", "Cliente", "CECO", "Campaña", "Provincia", "Punto", "Importe", "Estado", "Reporte"]];
+    const rows: unknown[][] = [["Trabajador", "Cliente", "CECO", "Campaña", "Provincia", "Punto", "Importe", "Estado", "Reporte"]];
     services.forEach((s) => (s.points || []).forEach((p) => rows.push([s.worker_name || "Sin asignar", s.client, s.ceco || "", s.campaign, s.province || "", p.name, p.fee, s.status || "", s.reporting_channel || ""])));
     downloadCSV("pagos_merchanops.csv", rows);
   }
 
   function exportWorkers() {
-    const rows = [["Nombre", "Teléfono", "Provincia", "Capacidad", "Horas comprometidas", "Especialidades"]];
+    const rows: unknown[][] = [["Nombre", "Teléfono", "Provincia", "Capacidad", "Horas comprometidas", "Especialidades"]];
     workers.forEach((w) => rows.push([w.name, w.phone || "", w.province || "", w.capacity || 0, w.active_hours || 0, w.skills || ""]));
     downloadCSV("trabajadores_merchanops.csv", rows);
   }
