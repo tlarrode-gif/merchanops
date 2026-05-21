@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CalendarDays, CheckCircle2, CreditCard, Edit3, FileDown, MessageCircle, Plus, Search, Trash2, Users, X } from "lucide-react";
+import { AlertTriangle, CalendarDays, CheckCircle2, CreditCard, Edit3, FileDown, MessageCircle, Package, Plus, Search, Trash2, Users, X } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 type Client = { id: string; name: string; ceco?: string; notes?: string };
