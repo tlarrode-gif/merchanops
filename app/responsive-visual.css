@@ -1,0 +1,156 @@
+/*
+  MerchanOps responsive final visual polish
+  CSS-only layer for responsive behavior, table scrolling and global consistency.
+  No React, Supabase, calculations or business logic are modified.
+*/
+
+/* Top navigation responsive behavior */
+body > .sticky.top-0.z-40 nav {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+body > .sticky.top-0.z-40 nav::-webkit-scrollbar {
+  display: none;
+}
+
+body > .sticky.top-0.z-40 nav a {
+  white-space: nowrap;
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+
+body > .sticky.top-0.z-40 nav a:hover {
+  transform: translateY(-1px);
+}
+
+@media (max-width: 720px) {
+  body > .sticky.top-0.z-40 nav {
+    flex-wrap: nowrap !important;
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  body > .sticky.top-0.z-40 nav a {
+    padding: 0.5rem 0.78rem !important;
+    font-size: 0.78rem !important;
+  }
+}
+
+/* Main app spacing on smaller screens */
+@media (max-width: 768px) {
+  main.min-h-screen.bg-slate-100 section.mx-auto,
+  body main section.mx-auto,
+  body main .mx-auto {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  main.min-h-screen.bg-slate-100 header .mx-auto {
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  main.min-h-screen.bg-slate-100 h1,
+  body main h1 {
+    font-size: 1.35rem !important;
+  }
+
+  main.min-h-screen.bg-slate-100 h2,
+  body main h2 {
+    font-size: 1.05rem !important;
+  }
+}
+
+/* Horizontal table safety */
+body main .overflow-auto,
+main.min-h-screen.bg-slate-100 .overflow-auto {
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+body main table,
+main.min-h-screen.bg-slate-100 table {
+  min-width: max-content;
+}
+
+@media (max-width: 900px) {
+  body main table,
+  main.min-h-screen.bg-slate-100 table {
+    font-size: 0.78rem !important;
+  }
+
+  body main th,
+  body main td,
+  main.min-h-screen.bg-slate-100 th,
+  main.min-h-screen.bg-slate-100 td {
+    padding: 0.62rem 0.68rem !important;
+  }
+}
+
+/* Prevent controls from becoming unusable in dense tables */
+body main table input,
+body main table select,
+body main table textarea,
+main.min-h-screen.bg-slate-100 table input,
+main.min-h-screen.bg-slate-100 table select,
+main.min-h-screen.bg-slate-100 table textarea {
+  min-width: 110px;
+}
+
+body main table button,
+main.min-h-screen.bg-slate-100 table button {
+  white-space: nowrap;
+}
+
+/* Better focus visibility */
+body main button:focus-visible,
+body main a:focus-visible,
+body main input:focus-visible,
+body main select:focus-visible,
+body main textarea:focus-visible,
+main.min-h-screen.bg-slate-100 button:focus-visible,
+main.min-h-screen.bg-slate-100 a:focus-visible,
+main.min-h-screen.bg-slate-100 input:focus-visible,
+main.min-h-screen.bg-slate-100 select:focus-visible,
+main.min-h-screen.bg-slate-100 textarea:focus-visible {
+  outline: 2px solid rgba(15, 23, 42, 0.28) !important;
+  outline-offset: 2px;
+}
+
+/* Dense button groups wrap cleanly */
+body main .flex.flex-wrap.gap-2,
+main.min-h-screen.bg-slate-100 .flex.flex-wrap.gap-2 {
+  row-gap: 0.5rem;
+}
+
+@media (max-width: 640px) {
+  body main button,
+  body main a,
+  main.min-h-screen.bg-slate-100 button,
+  main.min-h-screen.bg-slate-100 a {
+    min-height: 36px;
+  }
+
+  body main .grid,
+  main.min-h-screen.bg-slate-100 .grid {
+    gap: 0.75rem !important;
+  }
+}
+
+/* Cards avoid excessive crowding */
+@media (max-width: 640px) {
+  body main .rounded-3xl.border.bg-white,
+  body main .rounded-2xl.border.bg-white,
+  main.min-h-screen.bg-slate-100 .rounded-3xl.border.bg-white,
+  main.min-h-screen.bg-slate-100 .rounded-2xl.border.bg-white {
+    border-radius: 1rem !important;
+    padding: 0.9rem !important;
+  }
+}
+
+/* Subtle global selection color */
+::selection {
+  background: rgba(233, 69, 96, 0.22);
+  color: #0f172a;
+}
