@@ -1,5 +1,6 @@
 import "./globals.css";
 import "./services-visual.css";
+import "./panel-visual.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
