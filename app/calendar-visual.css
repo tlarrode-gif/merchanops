@@ -1,0 +1,110 @@
+/*
+  MerchanOps calendar visual migration
+  CSS-only layer focused on Calendario instalador.
+  No dates, filters, worker assignment, service data or business logic are modified.
+*/
+
+/* Calendar main container/cards */
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-3xl.border.bg-white:has(input[type="month"]),
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-2xl.border.bg-white:has(input[type="month"]) {
+  border-color: rgba(226, 232, 240, 0.86) !important;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 input[type="month"] {
+  max-width: 18rem;
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Worker month sections */
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-3xl.border.bg-white:not(:has(input[type="month"])),
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-2xl.border.bg-white:not(:has(input[type="month"])) {
+  border-radius: 1.15rem !important;
+  border-color: rgba(226, 232, 240, 0.86) !important;
+  background: #fff !important;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 h2,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 h3 {
+  font-weight: 650 !important;
+  letter-spacing: -0.03em;
+}
+
+/* Calendar service grid */
+@media (min-width: 768px) {
+  main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .md\:grid-cols-4 {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Calendar service blocks */
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.p-3,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.p-3,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.bg-white.p-3,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.bg-white.p-3 {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.95rem !important;
+  border-color: #e2e8f0 !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.p-3:hover,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.p-3:hover,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.bg-white.p-3:hover,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.bg-white.p-3:hover {
+  transform: translateY(-1px);
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.p-3::before,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.p-3::before,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.bg-white.p-3::before,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.bg-white.p-3::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, #e94560, #0f172a);
+  opacity: .9;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.p-3 b,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.p-3 b,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.bg-white.p-3 b,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.bg-white.p-3 b {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.86rem;
+  line-height: 1.25;
+  color: #0f172a;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.p-3 p,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.p-3 p,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.bg-white.p-3 p,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.bg-white.p-3 p {
+  color: #64748b !important;
+  font-size: 0.73rem !important;
+}
+
+/* Dates/codes in calendar cards */
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.p-3 .font-mono,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.p-3 .font-mono,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.bg-white.p-3 .font-mono,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.bg-white.p-3 .font-mono {
+  font-family: "DM Mono", ui-monospace, monospace !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Empty calendar messages */
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .text-sm.text-slate-500,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .text-xs.text-slate-500 {
+  color: #64748b !important;
+}
