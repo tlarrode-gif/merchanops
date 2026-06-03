@@ -280,6 +280,155 @@ main.min-h-screen.bg-slate-100 .rounded-xl.bg-slate-900 {
   background: #0f172a !important;
 }
 
+/* Phase 3: SaaS dashboard refinement, CSS-only */
+main.min-h-screen.bg-slate-100 section.mx-auto,
+main.min-h-screen.bg-slate-100 .mx-auto.max-w-7xl {
+  max-width: 1480px !important;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto.space-y-5,
+main.min-h-screen.bg-slate-100 section.mx-auto.space-y-4 {
+  row-gap: 1.25rem;
+}
+
+main.min-h-screen.bg-slate-100 .rounded-3xl.border.bg-white:hover,
+main.min-h-screen.bg-slate-100 .rounded-2xl.border.bg-white:hover {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 16px 36px rgba(15, 23, 42, 0.055);
+}
+
+main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-3xl.border.bg-white,
+main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-2xl.border.bg-white {
+  position: relative;
+  overflow: hidden;
+}
+
+main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-3xl.border.bg-white::before,
+main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-2xl.border.bg-white::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 3px;
+  width: 100%;
+  background: linear-gradient(90deg, rgba(233,69,96,.95), rgba(15,23,42,.75));
+  opacity: .85;
+}
+
+main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-3xl.border.bg-white p.text-sm.text-slate-500,
+main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-2xl.border.bg-white p.text-sm.text-slate-500 {
+  font-size: .68rem !important;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-3xl.border.bg-white p.text-2xl,
+main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-2xl.border.bg-white p.text-2xl,
+main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-3xl.border.bg-white .text-2xl,
+main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-2xl.border.bg-white .text-2xl {
+  font-size: 1.55rem !important;
+}
+
+main.min-h-screen.bg-slate-100 input[type="checkbox"] {
+  accent-color: #0f172a;
+}
+
+main.min-h-screen.bg-slate-100 input[type="date"],
+main.min-h-screen.bg-slate-100 input[type="month"],
+main.min-h-screen.bg-slate-100 input[type="number"] {
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+main.min-h-screen.bg-slate-100 select {
+  cursor: pointer;
+}
+
+main.min-h-screen.bg-slate-100 table td .rounded-xl.border,
+main.min-h-screen.bg-slate-100 table td .rounded-lg.border,
+main.min-h-screen.bg-slate-100 table td select,
+main.min-h-screen.bg-slate-100 table td input {
+  min-height: 32px;
+}
+
+main.min-h-screen.bg-slate-100 table th:first-child,
+main.min-h-screen.bg-slate-100 table td:first-child {
+  padding-left: 1rem !important;
+}
+
+main.min-h-screen.bg-slate-100 table th:last-child,
+main.min-h-screen.bg-slate-100 table td:last-child {
+  padding-right: 1rem !important;
+}
+
+main.min-h-screen.bg-slate-100 table tbody tr:last-child td {
+  border-bottom: 0 !important;
+}
+
+main.min-h-screen.bg-slate-100 .overflow-auto {
+  border-radius: 1rem;
+}
+
+main.min-h-screen.bg-slate-100 .max-h-64.overflow-auto,
+main.min-h-screen.bg-slate-100 .max-h-80.overflow-auto {
+  padding-right: .25rem;
+}
+
+main.min-h-screen.bg-slate-100 .rounded-xl.border.px-3.py-1,
+main.min-h-screen.bg-slate-100 .rounded-xl.border.px-3.py-1.text-sm {
+  box-shadow: 0 1px 1px rgba(15, 23, 42, 0.03);
+}
+
+main.min-h-screen.bg-slate-100 .rounded-xl.border.px-3.py-1:hover,
+main.min-h-screen.bg-slate-100 .rounded-xl.border.px-3.py-1.text-sm:hover {
+  border-color: #cbd5e1 !important;
+}
+
+main.min-h-screen.bg-slate-100 .rounded-xl.bg-slate-900.px-3.py-1,
+main.min-h-screen.bg-slate-100 .rounded-xl.bg-slate-900.px-3.py-1.text-sm {
+  box-shadow: 0 7px 14px rgba(15, 23, 42, .16);
+}
+
+main.min-h-screen.bg-slate-100 a.rounded-2xl.border.bg-white,
+main.min-h-screen.bg-slate-100 a.rounded-2xl.bg-slate-900,
+main.min-h-screen.bg-slate-100 button.rounded-2xl.border,
+main.min-h-screen.bg-slate-100 button.rounded-2xl.bg-slate-900 {
+  font-weight: 500;
+}
+
+main.min-h-screen.bg-slate-100 .text-xs.text-slate-500,
+main.min-h-screen.bg-slate-100 .text-sm.text-slate-500 {
+  color: #64748b !important;
+}
+
+main.min-h-screen.bg-slate-100 .border-t.py-2,
+main.min-h-screen.bg-slate-100 .border-t.p-2,
+main.min-h-screen.bg-slate-100 .border-t.p-3 {
+  border-color: #f1f5f9 !important;
+}
+
+main.min-h-screen.bg-slate-100 .bg-purple-50 {
+  background: #faf5ff !important;
+  border-color: #e9d5ff !important;
+}
+
+main.min-h-screen.bg-slate-100 .bg-blue-50 {
+  background: #eff6ff !important;
+}
+
+main.min-h-screen.bg-slate-100 .bg-green-50 {
+  background: #f0fdf4 !important;
+}
+
+main.min-h-screen.bg-slate-100 .bg-orange-50,
+main.min-h-screen.bg-slate-100 .bg-amber-50 {
+  background: #fffbeb !important;
+}
+
+main.min-h-screen.bg-slate-100 .bg-red-50 {
+  background: #fef2f2 !important;
+}
+
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: #f8fafc; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; border: 2px solid #f8fafc; }
