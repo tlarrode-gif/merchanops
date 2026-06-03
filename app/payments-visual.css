@@ -1,0 +1,112 @@
+/*
+  MerchanOps payments visual migration
+  CSS-only layer focused on Pagos.
+  No calculations, exports, filters, Supabase calls or business logic are modified.
+*/
+
+/* Payments filter/header card */
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-3xl.border.bg-white:first-child:has(button),
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-2xl.border.bg-white:first-child:has(button) {
+  border-color: rgba(226, 232, 240, 0.86) !important;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-3xl.border.bg-white:first-child button,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-2xl.border.bg-white:first-child button {
+  border-radius: 0.85rem !important;
+  background: #0f172a !important;
+  border-color: #0f172a !important;
+  color: white !important;
+  font-weight: 550;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.13);
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-3xl.border.bg-white:first-child button:hover,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-2xl.border.bg-white:first-child button:hover {
+  background: #1e293b !important;
+}
+
+/* Payment KPI cards */
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .grid.gap-3.md\:grid-cols-3 > .rounded-3xl.border.bg-white,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .grid.gap-3.md\:grid-cols-3 > .rounded-2xl.border.bg-white {
+  position: relative;
+  overflow: hidden;
+  min-height: 116px;
+  border-radius: 1.1rem !important;
+  border-color: rgba(226, 232, 240, 0.86) !important;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .grid.gap-3.md\:grid-cols-3 > .rounded-3xl.border.bg-white::before,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .grid.gap-3.md\:grid-cols-3 > .rounded-2xl.border.bg-white::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, #e94560, #0f172a);
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .grid.gap-3.md\:grid-cols-3 p.text-sm,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .grid.gap-3.md\:grid-cols-3 .text-sm.text-slate-500 {
+  font-size: 0.68rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+  font-weight: 500;
+  color: #64748b !important;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .grid.gap-3.md\:grid-cols-3 p.text-2xl,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .grid.gap-3.md\:grid-cols-3 .text-2xl {
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-size: 1.55rem !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.04em;
+}
+
+/* Payments table */
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 table {
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid #e2e8f0;
+  background: white;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 table thead tr {
+  background: #f8fafc !important;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 table th {
+  padding: 0.72rem 0.85rem !important;
+  font-size: 0.68rem !important;
+  color: #64748b !important;
+  letter-spacing: 0.06em;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 table td {
+  padding: 0.78rem 0.85rem !important;
+  vertical-align: middle;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 table td:last-child,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 table td:nth-last-child(2) {
+  font-family: "DM Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 table tbody tr:hover {
+  background: #f8fafc !important;
+}
+
+/* Worker/payment names */
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 table td:first-child,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 table td:nth-child(2) {
+  color: #0f172a;
+  font-weight: 500;
+}
+
+/* Export row / subtle notes */
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .text-xs.text-slate-500,
+main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .text-sm.text-slate-500 {
+  color: #64748b !important;
+}
