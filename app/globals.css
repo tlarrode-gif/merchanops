@@ -7,6 +7,7 @@
   - DM Sans applied globally to the interface.
   - DM Mono kept available through Tailwind's font-mono utility for money, CECO and codes.
   - Low-risk visual utilities added without touching app logic.
+  - Progressive visual polish applied globally to existing MerchanOps surfaces.
 */
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -64,6 +65,120 @@ button, input, select, textarea { font: inherit; }
   .table-cell {
     @apply px-3 py-3 align-middle text-sm text-slate-700;
   }
+}
+
+/* Progressive polish for the current main app without touching React logic */
+main.min-h-screen.bg-slate-100 {
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+main.min-h-screen.bg-slate-100 > header {
+  border-bottom: 1px solid rgba(226, 232, 240, 0.9) !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: blur(10px);
+}
+
+main.min-h-screen.bg-slate-100 h1,
+main.min-h-screen.bg-slate-100 h2,
+main.min-h-screen.bg-slate-100 h3 {
+  letter-spacing: -0.025em;
+}
+
+main.min-h-screen.bg-slate-100 button {
+  transition: background-color .18s ease, color .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+
+main.min-h-screen.bg-slate-100 button:hover {
+  transform: translateY(-1px);
+}
+
+main.min-h-screen.bg-slate-100 input,
+main.min-h-screen.bg-slate-100 select,
+main.min-h-screen.bg-slate-100 textarea {
+  border-color: #e2e8f0 !important;
+  background-color: #f8fafc;
+  color: #0f172a;
+  font-size: 0.875rem;
+  transition: all .18s ease;
+}
+
+main.min-h-screen.bg-slate-100 input:focus,
+main.min-h-screen.bg-slate-100 select:focus,
+main.min-h-screen.bg-slate-100 textarea:focus {
+  outline: none !important;
+  border-color: #94a3b8 !important;
+  background-color: white !important;
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.08);
+}
+
+main.min-h-screen.bg-slate-100 label > span {
+  margin-bottom: 0.25rem;
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #475569;
+  letter-spacing: .015em;
+}
+
+main.min-h-screen.bg-slate-100 .rounded-3xl.border.bg-white,
+main.min-h-screen.bg-slate-100 .rounded-2xl.border.bg-white,
+main.min-h-screen.bg-slate-100 .rounded-3xl.border.bg-white.p-5,
+main.min-h-screen.bg-slate-100 .rounded-2xl.border.bg-white.px-4,
+main.min-h-screen.bg-slate-100 .rounded-2xl.border.bg-white.p-5 {
+  border-color: rgba(226, 232, 240, 0.75) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 28px rgba(15, 23, 42, 0.035);
+}
+
+main.min-h-screen.bg-slate-100 table {
+  border-collapse: collapse;
+}
+
+main.min-h-screen.bg-slate-100 thead tr,
+main.min-h-screen.bg-slate-100 thead.bg-slate-50 {
+  background: #f8fafc !important;
+}
+
+main.min-h-screen.bg-slate-100 th {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+main.min-h-screen.bg-slate-100 td {
+  border-bottom-color: #f1f5f9;
+}
+
+main.min-h-screen.bg-slate-100 tbody tr {
+  transition: background-color .16s ease;
+}
+
+main.min-h-screen.bg-slate-100 tbody tr:hover {
+  background: rgba(248, 250, 252, 0.85);
+}
+
+main.min-h-screen.bg-slate-100 .font-mono,
+main.min-h-screen.bg-slate-100 [class*="font-mono"] {
+  font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
+  font-variant-numeric: tabular-nums;
+}
+
+main.min-h-screen.bg-slate-100 .fixed.right-4.top-24,
+main.min-h-screen.bg-slate-100 .fixed.right-4.top-6 {
+  border: 0 !important;
+  background: #0f172a !important;
+  color: white !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.22) !important;
+}
+
+main.min-h-screen.bg-slate-100 .bg-red-50,
+main.min-h-screen.bg-slate-100 .bg-orange-50,
+main.min-h-screen.bg-slate-100 .bg-amber-50,
+main.min-h-screen.bg-slate-100 .bg-blue-50,
+main.min-h-screen.bg-slate-100 .bg-green-50 {
+  border-color: rgba(226, 232, 240, 0.75);
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
