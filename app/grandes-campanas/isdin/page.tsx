@@ -19,7 +19,7 @@ function nowISO(){return new Date().toISOString()}function today(){return new Da
 function eur(v:number){return new Intl.NumberFormat("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(v||0))+" €"}
 function n(v:any){return Number(String(v??"").replace("€","").replace(/\s/g,"").replace(",","."))||0}
 function clean(s:any){return String(s??"").trim()}function dateOnly(v?:string|null){return v?String(v).slice(0,10):""}function pct(a:number,b:number){return b?Math.round(a/b*100):0}
-function weekLabel(date:string){if(!date)return"";const d=new Date(date+"T12:00:00");if(isNaN(d.getTime()))return"";const one=new Date(d.getFullYear(),0,1);const w=Math.ceil((((d.getTime()-one.getTime())/86400000)+one.getDay()+1)/7);const m=new Intl.DateTimeFormat("es-ES",{month:"long"}).format(d);return`Semana ${w} ${m.charAt(0).toUpperCase()+m.slice(1)} ${d.getFullYear()}`}
+function weekLabel(date:string){if(!date)return"";const d=new Date(date+"T12:00:00");if(isNaN(d.getTime()))return"";const jsDay=d.getDay();const diff=jsDay===0?-6:1-jsDay;d.setDate(d.getDate()+diff);const m=new Intl.DateTimeFormat("es-ES",{month:"long"}).format(d);return`Semana ${d.getDate()} ${m.charAt(0).toUpperCase()+m.slice(1)} ${d.getFullYear()}`}
 function weekMaybe(date?:string|null,fallback?:string|null){return date?weekLabel(dateOnly(date)):(fallback||"Sin semana")}
 function resolvedAfter(v:V){return v.status==="Finalizado"&&!!v.incident_opened_at}
 function calc(v:V){const b=Number(v.base_payment||0);if(v.status==="Finalizado")return resolvedAfter(v)?b+FAILED:b;if(v.status==="Incidencia")return FAILED;if(v.status==="Incidencia llamada")return 0;if(v.status==="Resuelto - Pendiente colocador")return b+FAILED;if(v.status==="Cancelado")return FAILED;return 0}
