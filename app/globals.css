@@ -181,6 +181,105 @@ main.min-h-screen.bg-slate-100 .bg-green-50 {
   border-color: rgba(226, 232, 240, 0.75);
 }
 
+/* Second-pass app polish: closer to the visual system, still CSS-only */
+main.min-h-screen.bg-slate-100 > header .text-3xl,
+main.min-h-screen.bg-slate-100 > header h1 {
+  font-size: 1.45rem !important;
+  line-height: 1.15 !important;
+}
+
+main.min-h-screen.bg-slate-100 > header p {
+  color: #64748b !important;
+}
+
+main.min-h-screen.bg-slate-100 nav button {
+  border-radius: 999px !important;
+  border-color: #e2e8f0 !important;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+main.min-h-screen.bg-slate-100 nav button.bg-slate-900 {
+  background: #0f172a !important;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
+}
+
+main.min-h-screen.bg-slate-100 nav button:not(.bg-slate-900):hover {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+main.min-h-screen.bg-slate-100 header button.bg-slate-900,
+main.min-h-screen.bg-slate-100 section button.bg-slate-900 {
+  background: #0f172a !important;
+  border-color: #0f172a !important;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.13);
+}
+
+main.min-h-screen.bg-slate-100 header button.border,
+main.min-h-screen.bg-slate-100 section button.border {
+  border-color: #e2e8f0 !important;
+  background: #fff;
+}
+
+main.min-h-screen.bg-slate-100 .grid > .rounded-3xl.border.bg-white svg,
+main.min-h-screen.bg-slate-100 .grid > .rounded-2xl.border.bg-white svg {
+  color: #64748b;
+}
+
+main.min-h-screen.bg-slate-100 .grid > .rounded-3xl.border.bg-white p.text-2xl,
+main.min-h-screen.bg-slate-100 .grid > .rounded-2xl.border.bg-white p.text-2xl {
+  font-weight: 650;
+  letter-spacing: -0.04em;
+}
+
+main.min-h-screen.bg-slate-100 .h-2.overflow-hidden.rounded-full.bg-slate-100,
+main.min-h-screen.bg-slate-100 .h-2.rounded-full.bg-slate-100 {
+  height: 0.65rem !important;
+  background: #eef2f7 !important;
+}
+
+main.min-h-screen.bg-slate-100 .h-full.bg-slate-900,
+main.min-h-screen.bg-slate-100 .h-2.rounded-full.bg-slate-900 {
+  background: #0f172a !important;
+}
+
+main.min-h-screen.bg-slate-100 .rounded-2xl.bg-slate-50,
+main.min-h-screen.bg-slate-100 .rounded-xl.bg-slate-50 {
+  background: #f8fafc !important;
+  border: 1px solid rgba(226, 232, 240, 0.7);
+}
+
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 {
+  backdrop-filter: blur(6px);
+}
+
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 > div {
+  border: 1px solid #f1f5f9;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24) !important;
+}
+
+main.min-h-screen.bg-slate-100 textarea[readonly] {
+  background: #fff7ed !important;
+  border-color: #fed7aa !important;
+  color: #7c2d12;
+}
+
+main.min-h-screen.bg-slate-100 tr.bg-red-50,
+main.min-h-screen.bg-slate-100 tr.bg-red-50\/60 {
+  background: rgba(254, 242, 242, 0.75) !important;
+  box-shadow: inset 3px 0 0 #f87171;
+}
+
+main.min-h-screen.bg-slate-100 .text-red-600:hover {
+  color: #b91c1c !important;
+}
+
+main.min-h-screen.bg-slate-100 .rounded-2xl.bg-slate-900,
+main.min-h-screen.bg-slate-100 .rounded-xl.bg-slate-900 {
+  background: #0f172a !important;
+}
+
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: #f8fafc; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; border: 2px solid #f8fafc; }
