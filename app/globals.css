@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  UI/UX refresh foundation
+  - DM Sans applied globally to the interface.
+  - DM Mono kept available through Tailwind's font-mono utility for money, CECO and codes.
+  - Base surface and form inheritance preserved.
+*/
 * { box-sizing: border-box; }
-body { margin: 0; background: #f1f5f9; color: #0f172a; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: #f8fafc;
+  color: #0f172a;
+  font-family: "DM Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
 button, input, select, textarea { font: inherit; }
