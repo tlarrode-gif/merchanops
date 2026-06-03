@@ -1,0 +1,145 @@
+/*
+  MerchanOps forms and modals visual migration
+  CSS-only layer focused on create/edit forms and modal surfaces.
+  No validation, state, Supabase calls, handlers or business logic are modified.
+*/
+
+/* Form cards */
+main.min-h-screen.bg-slate-100 section.mx-auto form,
+main.min-h-screen.bg-slate-100 section.mx-auto .rounded-3xl.border.bg-white:has(input):has(label),
+main.min-h-screen.bg-slate-100 section.mx-auto .rounded-2xl.border.bg-white:has(input):has(label) {
+  border-color: rgba(226, 232, 240, 0.86) !important;
+}
+
+main.min-h-screen.bg-slate-100 section.mx-auto .rounded-3xl.border.bg-white:has(input):has(label),
+main.min-h-screen.bg-slate-100 section.mx-auto .rounded-2xl.border.bg-white:has(input):has(label) {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
+}
+
+/* Inputs/selects/textareas in forms */
+main.min-h-screen.bg-slate-100 form input,
+main.min-h-screen.bg-slate-100 form select,
+main.min-h-screen.bg-slate-100 form textarea,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 input,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 select,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 textarea {
+  min-height: 40px;
+  border-radius: 0.85rem !important;
+  border-color: #e2e8f0 !important;
+  background: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+main.min-h-screen.bg-slate-100 form textarea,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+main.min-h-screen.bg-slate-100 form input:focus,
+main.min-h-screen.bg-slate-100 form select:focus,
+main.min-h-screen.bg-slate-100 form textarea:focus,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 input:focus,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 select:focus,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 textarea:focus {
+  background: #fff !important;
+  border-color: #94a3b8 !important;
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.08) !important;
+}
+
+main.min-h-screen.bg-slate-100 form label > span,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 label > span {
+  margin-bottom: 0.35rem !important;
+  font-size: 0.72rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+  color: #64748b !important;
+}
+
+/* Form sections/grids */
+main.min-h-screen.bg-slate-100 form .grid,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 .grid {
+  gap: 0.95rem !important;
+}
+
+/* Submit/save buttons */
+main.min-h-screen.bg-slate-100 form button.bg-slate-900,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 button.bg-slate-900,
+main.min-h-screen.bg-slate-100 form button[type="submit"] {
+  border-radius: 0.9rem !important;
+  background: #0f172a !important;
+  border-color: #0f172a !important;
+  color: white !important;
+  font-weight: 600;
+  box-shadow: 0 9px 18px rgba(15, 23, 42, 0.16);
+}
+
+main.min-h-screen.bg-slate-100 form button.bg-slate-900:hover,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 button.bg-slate-900:hover,
+main.min-h-screen.bg-slate-100 form button[type="submit"]:hover {
+  background: #1e293b !important;
+}
+
+main.min-h-screen.bg-slate-100 form button.border,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 button.border {
+  border-radius: 0.85rem !important;
+  border-color: #e2e8f0 !important;
+  background: white !important;
+  font-weight: 500;
+}
+
+main.min-h-screen.bg-slate-100 form button.border:hover,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 button.border:hover {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Modal overlay and panel */
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 {
+  background: rgba(15, 23, 42, 0.55) !important;
+  backdrop-filter: blur(7px);
+}
+
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 > div {
+  border-radius: 1.25rem !important;
+  border: 1px solid rgba(241, 245, 249, 0.95) !important;
+  background: #fff !important;
+  box-shadow: 0 26px 70px rgba(15, 23, 42, 0.28) !important;
+}
+
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 h2,
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 h3 {
+  font-size: 1.08rem !important;
+  font-weight: 650 !important;
+  letter-spacing: -0.03em;
+}
+
+/* Modal close button */
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 button:has(svg) {
+  border-radius: 0.75rem !important;
+}
+
+/* Point editor tables inside service edit modal */
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 table {
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid #e2e8f0;
+}
+
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 table th {
+  padding: 0.65rem 0.75rem !important;
+  font-size: 0.68rem !important;
+}
+
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 table td {
+  padding: 0.72rem 0.75rem !important;
+}
+
+/* Numeric/money/date fields */
+main.min-h-screen.bg-slate-100 form input[type="number"],
+main.min-h-screen.bg-slate-100 form input[type="date"],
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 input[type="number"],
+main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 input[type="date"] {
+  font-family: "DM Mono", ui-monospace, monospace !important;
+  font-variant-numeric: tabular-nums;
+}
