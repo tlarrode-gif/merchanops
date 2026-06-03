@@ -4,6 +4,7 @@ import "./panel-visual.css";
 import "./people-visual.css";
 import "./payments-visual.css";
 import "./calendar-visual.css";
+import "./forms-visual.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
