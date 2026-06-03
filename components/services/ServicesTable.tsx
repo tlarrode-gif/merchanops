@@ -28,6 +28,7 @@ type ServiceLike = {
   status?: string | null;
   payment_type?: string | null;
   calendar_color?: string | null;
+  communication_sent_at?: string | null;
   points?: PointLike[];
 };
 
