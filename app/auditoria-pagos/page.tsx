@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { auditService, effectivePaymentDate, serviceTotal, shouldAppearInPayments, type AuditService } from "@/lib/payment-audit";
+import { auditService, effectivePaymentDate, serviceTotal, shouldAppearInPayments, type AuditPoint, type AuditService } from "@/lib/payment-audit";
 
 type AnyObj = Record<string, any>;
 const INCIDENT_FEE = 8.56;
@@ -14,6 +14,7 @@ function monthEnd() { const d = new Date(); return new Date(d.getFullYear(), d.g
 function pStatus(p: AnyObj) { return p.point_status || p.status || "Pendiente"; }
 function isFailedStatus(st: string) { return ["Incidencia", "Pospuesto", "Pendiente recepción post-incidencia"].includes(st); }
 function originalFee(p: AnyObj) { return Number(p.original_fee ?? p.fee ?? 0); }
+function toAuditPoint(p: AnyObj): AuditPoint { return { ...p, id: String(p.id || crypto.randomUUID?.() || Math.random()) }; }
 
 export default function PaymentAuditPage() {
   const [services, setServices] = useState<AnyObj[]>([]);
@@ -42,11 +43,12 @@ export default function PaymentAuditPage() {
 
   useEffect(() => { load(); }, []);
 
-  const hydrated = useMemo<AuditService[]>(() => services.map((s: AnyObj) => ({
-    ...s,
-    id: String(s.id),
-    points: points.filter((p: AnyObj) => p.service_id === s.id || (s.points || []).some((sp: AnyObj) => sp.id === p.id))
-  })), [services, points]);
+  const hydrated = useMemo<AuditService[]>(() => services.map((s: AnyObj) => {
+    const rowPoints = points
+      .filter((p: AnyObj) => p.service_id === s.id || (s.points || []).some((sp: AnyObj) => sp.id === p.id))
+      .map(toAuditPoint);
+    return { ...s, id: String(s.id), points: rowPoints };
+  }), [services, points]);
 
   const audit = useMemo(() => hydrated.map(s => ({ s, issues: auditService(s), appears: shouldAppearInPayments(s, from, to), total: serviceTotal(s), payDate: effectivePaymentDate(s) })), [hydrated, from, to]);
   const withIssues = audit.filter(x => x.issues.length > 0);
