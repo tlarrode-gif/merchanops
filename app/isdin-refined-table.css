@@ -1,0 +1,130 @@
+/*
+  ISDIN refined full table view
+  Keeps the previous full-column workflow, but improves density and readability.
+  No columns are hidden and no business logic is modified.
+*/
+
+body main:has(h1) table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+
+body main:has(h1) table th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #0f172a !important;
+  color: rgba(255,255,255,.78) !important;
+  font-size: .66rem !important;
+  letter-spacing: .065em !important;
+  text-transform: uppercase;
+  padding: .62rem .7rem !important;
+  border-bottom: 0 !important;
+}
+
+body main:has(h1) table th:first-child {
+  border-top-left-radius: .9rem;
+}
+
+body main:has(h1) table th:last-child {
+  border-top-right-radius: .9rem;
+}
+
+body main:has(h1) table td {
+  padding: .56rem .7rem !important;
+  font-size: .76rem !important;
+  line-height: 1.25;
+  border-bottom: 1px solid #eef2f7 !important;
+  background-clip: padding-box;
+}
+
+body main:has(h1) table tbody tr:hover td {
+  background: rgba(248,250,252,.95) !important;
+}
+
+body main:has(h1) table td:nth-child(1) {
+  min-width: 220px;
+  max-width: 280px;
+  white-space: normal;
+  font-weight: 650;
+  color: #0f172a;
+}
+
+body main:has(h1) table td:nth-child(2),
+body main:has(h1) table td:nth-child(12),
+body main:has(h1) table td:nth-child(13) {
+  font-family: "DM Mono", ui-monospace, monospace !important;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+body main:has(h1) table input,
+body main:has(h1) table select {
+  min-height: 30px !important;
+  border-radius: .65rem !important;
+  font-size: .74rem !important;
+}
+
+body main:has(h1) table input[type="number"] {
+  max-width: 86px;
+}
+
+body main:has(h1) .overflow-auto {
+  border-radius: 1rem;
+  border: 1px solid #e2e8f0;
+  background: white;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 12px 30px rgba(15,23,42,.035);
+}
+
+body main:has(h1) .overflow-auto::-webkit-scrollbar {
+  height: 11px;
+}
+
+body main:has(h1) .overflow-auto::-webkit-scrollbar-track {
+  background: #f8fafc;
+}
+
+body main:has(h1) .overflow-auto::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+  border: 2px solid #f8fafc;
+}
+
+body main:has(h1) .overflow-auto::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+body main:has(h1) tr.bg-orange-50 td,
+body main:has(h1) tr.bg-purple-50 td,
+body main:has(h1) tr.bg-green-50 td,
+body main:has(h1) tr.bg-red-50 td,
+body main:has(h1) tr.bg-blue-50 td {
+  background: inherit !important;
+}
+
+body main:has(h1) tr.bg-orange-50 {
+  box-shadow: inset 3px 0 0 #f97316;
+}
+
+body main:has(h1) tr.bg-purple-50 {
+  box-shadow: inset 3px 0 0 #a855f7;
+}
+
+body main:has(h1) tr.bg-green-50 {
+  box-shadow: inset 3px 0 0 #22c55e;
+}
+
+body main:has(h1) tr.bg-red-50 {
+  box-shadow: inset 3px 0 0 #ef4444;
+}
+
+body main:has(h1) tr.bg-blue-50 {
+  box-shadow: inset 3px 0 0 #3b82f6;
+}
+
+body main:has(h1) .rounded-xl.border.px-3.py-1,
+body main:has(h1) .rounded-xl.border.px-3.py-1.text-sm {
+  border-radius: 999px !important;
+  padding: .32rem .72rem !important;
+  font-size: .75rem !important;
+}
