@@ -7,7 +7,6 @@ import "./calendar-visual.css";
 import "./forms-visual.css";
 import "./campaigns-visual.css";
 import "./final-ui-shell.css";
-import "./isdin-operational-view.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -34,7 +33,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </nav>
         </div>
         {children}
-        <script src="/isdin-operational-view.js" defer></script>
       </body>
     </html>
   );
