@@ -140,6 +140,6 @@ main.min-h-screen.bg-slate-100 form input[type="number"],
 main.min-h-screen.bg-slate-100 form input[type="date"],
 main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 input[type="number"],
 main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 input[type="date"] {
-  font-family: "DM Mono", ui-monospace, monospace !important;
+  font-family: var(--font-dm-mono), ui-monospace, monospace !important;
   font-variant-numeric: tabular-nums;
 }

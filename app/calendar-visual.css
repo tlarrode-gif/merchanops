@@ -13,7 +13,7 @@ main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-2xl.bo
 
 main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 input[type="month"] {
   max-width: 18rem;
-  font-family: "DM Mono", ui-monospace, monospace;
+  font-family: var(--font-dm-mono), ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
 }
 
@@ -99,7 +99,7 @@ main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.borde
 main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.p-3 .font-mono,
 main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-xl.border.bg-white.p-3 .font-mono,
 main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 .rounded-2xl.border.bg-white.p-3 .font-mono {
-  font-family: "DM Mono", ui-monospace, monospace !important;
+  font-family: var(--font-dm-mono), ui-monospace, monospace !important;
   font-variant-numeric: tabular-nums;
 }
 

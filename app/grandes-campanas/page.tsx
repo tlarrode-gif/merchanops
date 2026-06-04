@@ -58,6 +58,7 @@ const localKey = "merchanops_big_campaigns_local_v2";
 const provinces = ["", "Asturias", "Huesca", "Teruel", "Zaragoza", "Alicante", "Castellón", "Valencia", "Lleida", "Sevilla", "Córdoba", "Jaén", "Almería"];
 const campaignStatuses = ["Activa", "En ejecución", "Reportada", "Validada", "Cerrada", "Pausada"];
 const pointStatuses = ["Pendiente", "Revisado", "Reportado", "Incidencia", "Pospuesto", "Finalizado", "Pendiente recepción post-incidencia"];
+const payableFailedPointStatuses = ["Incidencia", "Pospuesto"];
 const colors: Record<string, string> = { slate: "#0f172a", blue: "#2563eb", sky: "#0284c7", violet: "#7c3aed", pink: "#db2777", orange: "#ea580c", green: "#16a34a", amber: "#d97706", red: "#dc2626", teal: "#0d9488" };
 const colorLabels: Record<string, string> = { slate: "Gris", blue: "Azul", sky: "Celeste", violet: "Violeta", pink: "Rosa", orange: "Naranja", green: "Verde", amber: "Ámbar", red: "Rojo", teal: "Turquesa" };
 
@@ -66,14 +67,16 @@ function nowISO() { return new Date().toISOString(); }
 function dateOnly(v?: string | null) { return v ? v.slice(0, 10) : ""; }
 function eur(v: number) { return new Intl.NumberFormat("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v || 0)) + " €"; }
 function statusOf(p: BigPoint) { return p.point_status || "Pendiente"; }
-function isIncidentActive(p: BigPoint) { return statusOf(p) === "Incidencia" && p.incident_status !== "Resuelta" && !p.incident_resolved_at; }
+function isPayableFailedStatus(status: string) { return payableFailedPointStatuses.includes(status); }
+function isPostIncidentPending(p: BigPoint) { return statusOf(p) === "Pendiente recepción post-incidencia"; }
+function isIncidentActive(p: BigPoint) { return isPayableFailedStatus(statusOf(p)) && p.incident_status !== "Resuelta" && !p.incident_resolved_at; }
 function isIncidentResolved(p: BigPoint) { return p.incident_status === "Resuelta" || !!p.incident_resolved_at; }
 function originalFee(p: BigPoint) { return Number(p.original_fee ?? p.fee ?? 0); }
-function payable(p: BigPoint) { const incident = Number(p.incident_fee || INCIDENT_FEE); const original = Number(p.original_fee || 0); if (isIncidentActive(p)) return incident; if (isIncidentResolved(p)) return original ? original + incident : Number(p.fee || 0); return Number(p.fee || 0); }
+function payable(p: BigPoint) { const incident = Number(p.incident_fee || INCIDENT_FEE); const original = Number(p.original_fee || 0); if (isPostIncidentPending(p)) return 0; if (isIncidentActive(p)) return incident; if (isIncidentResolved(p)) return original ? original + incident : Number(p.fee || 0); return Number(p.fee || 0); }
 function csvEscape(v: unknown) { const s = String(v ?? ""); return s.includes(";") || s.includes("\n") || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s; }
 function downloadCSV(name: string, rows: unknown[][]) { const blob = new Blob(["\ufeff" + rows.map(r => r.map(csvEscape).join(";")).join("\n")], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); }
 function findWorkerByName(workers: Worker[], raw?: string) { const name = String(raw || "").trim(); if (!name) return null; return workers.find(w => String(w.name).trim() === name) || null; }
-function parseBigPoints(text: string, defaultFee: number, workers: Worker[]): BigPoint[] { return text.split("\n").map(line => line.trim()).filter(Boolean).map(line => { const [name, address, fee, reportCode, province, workerName, ...notes] = line.split(";"); const worker = findWorkerByName(workers, workerName); return { id: uid(), name: name || "Punto sin nombre", address: address || "", fee: Number(fee || defaultFee || 0), report_code: reportCode || "", province: province || "", worker_id: worker?.id || null, worker_name: worker?.name || null, notes: notes.join(";") || "", point_status: "Pendiente", incident_fee: INCIDENT_FEE }; }); }
+function parseBigPoints(text: string, defaultFee: number, workers: Worker[]): BigPoint[] { return text.split("\n").map(line => line.trim()).filter(Boolean).map(line => { const [name, address, fee, reportCode, province, workerName, ...notes] = line.split(";"); const worker = findWorkerByName(workers, workerName); const parsedFee = Number(fee || defaultFee || 0); return { id: uid(), name: name || "Punto sin nombre", address: address || "", fee: Number.isFinite(parsedFee) ? parsedFee : 0, report_code: reportCode || "", province: province || "", worker_id: worker?.id || null, worker_name: worker?.name || null, notes: notes.join(";") || "", point_status: "Pendiente", incident_fee: INCIDENT_FEE }; }); }
 function loadLocal(): LocalData { try { const raw = localStorage.getItem(localKey); if (raw) return JSON.parse(raw); } catch {} return { clients: [], workers: [], campaigns: [] }; }
 
 export default function GrandesCampanasPage() {
@@ -109,7 +112,9 @@ export default function GrandesCampanasPage() {
   useEffect(() => { if (!isSupabaseConfigured) localStorage.setItem(localKey, JSON.stringify({ clients, workers, campaigns })); }, [clients, workers, campaigns]);
 
   async function createCampaign(form: Omit<BigCampaign, "id">, points: BigPoint[]) {
-    const clean = { ...form, status: form.status || "Activa", calendar_color: form.calendar_color || "blue" };
+    const clean = { ...form, client: String(form.client || "").trim(), name: String(form.name || "").trim(), status: form.status || "Activa", calendar_color: form.calendar_color || "blue" };
+    if (!clean.client || !clean.name) { saved("Faltan cliente y nombre de campaña"); return; }
+    if (!points.length) { saved("Añade al menos un punto"); return; }
     if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase.from("big_campaigns").insert(clean).select().single();
       if (error) { saved(error.message); return; }
@@ -117,7 +122,7 @@ export default function GrandesCampanasPage() {
       let insertedPoints: BigPoint[] = [];
       if (points.length) {
         const { data: pointData, error: pointError } = await supabase.from("big_campaign_points").insert(points.map(p => ({ big_campaign_id: inserted.id, worker_id: p.worker_id || null, worker_name: p.worker_name || null, name: p.name, address: p.address, province: p.province, fee: p.fee, report_code: p.report_code, notes: p.notes, point_status: p.point_status, incident_fee: INCIDENT_FEE }))).select();
-        if (pointError) { saved(pointError.message); return; }
+        if (pointError) { await supabase.from("big_campaigns").delete().eq("id", inserted.id); saved(pointError.message); return; }
         insertedPoints = (pointData || []) as BigPoint[];
       }
       setCampaigns(prev => [{ ...inserted, points: insertedPoints }, ...prev]);
@@ -130,7 +135,8 @@ export default function GrandesCampanasPage() {
 
   async function updatePoint(point: BigPoint, patch: Partial<BigPoint>) {
     const extra: Partial<BigPoint> = {};
-    if (patch.point_status === "Incidencia" && !isIncidentActive(point) && !isIncidentResolved(point)) { extra.original_fee = Number(point.original_fee ?? point.fee ?? 0); extra.incident_fee = INCIDENT_FEE; extra.fee = INCIDENT_FEE; extra.incident_status = "Abierta"; extra.incident_opened_at = nowISO(); }
+    if (patch.point_status && isPayableFailedStatus(patch.point_status) && !isIncidentActive(point) && !isIncidentResolved(point)) { extra.original_fee = Number(point.original_fee ?? point.fee ?? 0); extra.incident_fee = INCIDENT_FEE; extra.fee = INCIDENT_FEE; extra.incident_status = "Abierta"; extra.incident_opened_at = nowISO(); }
+    if (patch.point_status === "Pendiente recepción post-incidencia" && isIncidentActive(point)) { extra.fee = 0; extra.incident_status = null; }
     if (patch.point_status === "Reportado") extra.reported_at = nowISO();
     if (patch.point_status === "Finalizado") extra.finished_at = nowISO();
     const finalPatch = { ...patch, ...extra };
@@ -139,7 +145,7 @@ export default function GrandesCampanasPage() {
     saved();
   }
   async function resolveIncident(point: BigPoint) { const finalFee = originalFee(point) + Number(point.incident_fee || INCIDENT_FEE); await updatePoint(point, { point_status: "Finalizado", incident_status: "Resuelta", incident_resolved_at: nowISO(), fee: finalFee, point_comment: point.point_comment || point.incident_comment || "Incidencia finalizada" }); saved("Incidencia finalizada y pago actualizado"); }
-  async function addPoint(campaign: BigCampaign, raw: Omit<BigPoint, "id">) { const point = { ...raw, incident_fee: INCIDENT_FEE }; if (isSupabaseConfigured && supabase) { const { data, error } = await supabase.from("big_campaign_points").insert({ ...point, big_campaign_id: campaign.id }).select().single(); if (error) { saved(error.message); return; } setCampaigns(prev => prev.map(c => c.id === campaign.id ? { ...c, points: [...(c.points || []), data as BigPoint] } : c)); } else setCampaigns(prev => prev.map(c => c.id === campaign.id ? { ...c, points: [...(c.points || []), { id: uid(), ...point }] } : c)); saved("Punto añadido"); }
+  async function addPoint(campaign: BigCampaign, raw: Omit<BigPoint, "id">) { const point = { ...raw, name: String(raw.name || "").trim(), fee: Number.isFinite(Number(raw.fee)) ? Number(raw.fee) : 0, incident_fee: INCIDENT_FEE }; if (!point.name) { saved("Falta nombre del punto"); return; } if (isSupabaseConfigured && supabase) { const { data, error } = await supabase.from("big_campaign_points").insert({ ...point, big_campaign_id: campaign.id }).select().single(); if (error) { saved(error.message); return; } setCampaigns(prev => prev.map(c => c.id === campaign.id ? { ...c, points: [...(c.points || []), data as BigPoint] } : c)); } else setCampaigns(prev => prev.map(c => c.id === campaign.id ? { ...c, points: [...(c.points || []), { id: uid(), ...point }] } : c)); saved("Punto añadido"); }
   async function deletePoint(point: BigPoint) { if (!confirm("¿Borrar punto?")) return; setCampaigns(prev => prev.map(c => ({ ...c, points: (c.points || []).filter(p => p.id !== point.id) }))); if (isSupabaseConfigured && supabase) await supabase.from("big_campaign_points").delete().eq("id", point.id); saved("Punto borrado"); }
 
   const stats = useMemo(() => { const pts = campaigns.flatMap(c => c.points || []); return { campaigns: campaigns.length, points: pts.length, assigned: pts.filter(p => p.worker_id).length, incidents: pts.filter(isIncidentActive).length, total: pts.reduce((a, p) => a + payable(p), 0) }; }, [campaigns]);

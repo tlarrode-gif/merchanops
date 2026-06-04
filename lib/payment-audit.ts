@@ -41,7 +41,11 @@ export function pointStatus(point: AuditPoint) {
 }
 
 export function isFailedVisitStatus(status: string) {
-  return ["Incidencia", "Pospuesto", "Pendiente recepción post-incidencia"].includes(status);
+  return ["Incidencia", "Pospuesto"].includes(status);
+}
+
+export function isPostIncidentPendingStatus(status: string) {
+  return status === "Pendiente recepción post-incidencia";
 }
 
 export function isIncidentActive(point: AuditPoint) {
@@ -61,6 +65,7 @@ export function pointIncident(point: AuditPoint) {
 }
 
 export function pointPay(point: AuditPoint) {
+  if (isPostIncidentPendingStatus(pointStatus(point))) return 0;
   if (isIncidentActive(point)) return pointIncident(point);
   if (isIncidentResolved(point)) return pointOriginal(point) + pointIncident(point);
   return Number(point.fee || 0);

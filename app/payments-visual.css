@@ -57,7 +57,7 @@ main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .grid.gap-3.md\
 
 main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .grid.gap-3.md\:grid-cols-3 p.text-2xl,
 main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .grid.gap-3.md\:grid-cols-3 .text-2xl {
-  font-family: "DM Mono", ui-monospace, monospace;
+  font-family: var(--font-dm-mono), ui-monospace, monospace;
   font-size: 1.55rem !important;
   font-weight: 600 !important;
   letter-spacing: -0.04em;
@@ -89,7 +89,7 @@ main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 table td {
 
 main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 table td:last-child,
 main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 table td:nth-last-child(2) {
-  font-family: "DM Mono", ui-monospace, monospace;
+  font-family: var(--font-dm-mono), ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }

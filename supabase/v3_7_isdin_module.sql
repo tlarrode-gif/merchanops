@@ -2,8 +2,10 @@
 -- Módulo específico ISDIN dentro de Grandes Campañas.
 -- No borra datos existentes.
 
+create extension if not exists "uuid-ossp";
+
 create table if not exists isdin_vinyls (
-  id uuid primary key default gen_random_uuid(),
+  id uuid primary key default uuid_generate_v4(),
   pharmacy_name text not null,
   vinyl text not null,
   status text default 'Nuevo',

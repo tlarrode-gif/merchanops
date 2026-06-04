@@ -121,6 +121,6 @@ main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-5 .border-t.py-3 bu
 /* Incident amount values */
 main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-5 .text-sm p b,
 main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-5 .text-sm b {
-  font-family: "DM Mono", ui-monospace, monospace;
+  font-family: var(--font-dm-mono), ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
 }

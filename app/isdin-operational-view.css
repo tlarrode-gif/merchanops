@@ -105,14 +105,14 @@
   }
 
   .isdin-compact-table td:nth-child(2) {
-    font-family: "DM Mono", ui-monospace, monospace;
+    font-family: var(--font-dm-mono), ui-monospace, monospace;
     font-weight: 600;
     color: #0f172a;
   }
 
   .isdin-compact-table td:nth-child(13),
   .isdin-compact-table td:nth-child(14) {
-    font-family: "DM Mono", ui-monospace, monospace;
+    font-family: var(--font-dm-mono), ui-monospace, monospace;
   }
 
   .isdin-compact-table input,

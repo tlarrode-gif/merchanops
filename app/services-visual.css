@@ -149,7 +149,7 @@ main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-2xl.bo
 
 main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-3xl.border.bg-white:not(:first-child) table td:last-child,
 main.min-h-screen.bg-slate-100 section.mx-auto > div.space-y-4 > .rounded-2xl.border.bg-white:not(:first-child) table td:last-child {
-  font-family: "DM Mono", ui-monospace, monospace;
+  font-family: var(--font-dm-mono), ui-monospace, monospace;
   font-weight: 600;
 }
 

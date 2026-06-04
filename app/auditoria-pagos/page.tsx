@@ -10,11 +10,10 @@ const INCIDENT_FEE = 8.56;
 function todayISO() { return new Date().toISOString(); }
 function eur(v: number) { return new Intl.NumberFormat("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v || 0)) + " €"; }
 function monthStart() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`; }
-function monthEnd() { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10); }
+function monthEnd() { const d = new Date(); const last = new Date(d.getFullYear(), d.getMonth() + 1, 0); return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}-${String(last.getDate()).padStart(2, "0")}`; }
 function pStatus(p: AnyObj) { return p.point_status || p.status || "Pendiente"; }
-function isFailedStatus(st: string) { return ["Incidencia", "Pospuesto", "Pendiente recepción post-incidencia"].includes(st); }
+function isFailedStatus(st: string) { return ["Incidencia", "Pospuesto"].includes(st); }
 function originalFee(p: AnyObj) { return Number(p.original_fee ?? p.fee ?? 0); }
-function toAuditPoint(p: AnyObj): AuditPoint { return { ...p, id: String(p.id || crypto.randomUUID?.() || Math.random()) }; }
 
 export default function PaymentAuditPage() {
   const [services, setServices] = useState<AnyObj[]>([]);
@@ -44,10 +43,12 @@ export default function PaymentAuditPage() {
   useEffect(() => { load(); }, []);
 
   const hydrated = useMemo<AuditService[]>(() => services.map((s: AnyObj) => {
-    const rowPoints = points
-      .filter((p: AnyObj) => p.service_id === s.id || (s.points || []).some((sp: AnyObj) => sp.id === p.id))
-      .map(toAuditPoint);
-    return { ...s, id: String(s.id), points: rowPoints };
+    const servicePoints = points.filter((p: AnyObj) => p.service_id === s.id || (s.points || []).some((sp: AnyObj) => sp.id === p.id));
+    return {
+      ...s,
+      id: String(s.id),
+      points: servicePoints.filter((p: AnyObj) => p.id).map((p: AnyObj): AuditPoint => ({ ...p, id: String(p.id) }))
+    };
   }), [services, points]);
 
   const audit = useMemo(() => hydrated.map(s => ({ s, issues: auditService(s), appears: shouldAppearInPayments(s, from, to), total: serviceTotal(s), payDate: effectivePaymentDate(s) })), [hydrated, from, to]);

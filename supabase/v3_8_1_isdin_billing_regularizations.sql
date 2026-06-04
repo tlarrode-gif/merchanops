@@ -2,6 +2,8 @@
 -- Mejoras de ISDIN: regularizaciones, observaciones, andamio y revisitas.
 -- No borra datos existentes.
 
+create extension if not exists "uuid-ossp";
+
 alter table isdin_vinyls
 add column if not exists client_observations text,
 add column if not exists scaffold_required boolean default false,
