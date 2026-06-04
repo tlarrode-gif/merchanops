@@ -1,0 +1,244 @@
+/*
+  ISDIN operational compact view
+  - turns the dense VIN table into a compact operational list
+  - keeps full data available through a side detail panel
+  - does not alter React state, Supabase, payments, billing or exports
+*/
+
+@media (min-width: 1024px) {
+  body:has(main) .isdin-compact-table {
+    min-width: 1180px !important;
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+    table-layout: auto !important;
+  }
+
+  .isdin-compact-table th,
+  .isdin-compact-table td {
+    white-space: nowrap;
+    vertical-align: middle !important;
+  }
+
+  /* Hide secondary columns in the default operational view.
+     Full information remains available in the right detail panel and in exports. */
+  .isdin-compact-table th:nth-child(4),
+  .isdin-compact-table td:nth-child(4),
+  .isdin-compact-table th:nth-child(5),
+  .isdin-compact-table td:nth-child(5),
+  .isdin-compact-table th:nth-child(8),
+  .isdin-compact-table td:nth-child(8),
+  .isdin-compact-table th:nth-child(9),
+  .isdin-compact-table td:nth-child(9),
+  .isdin-compact-table th:nth-child(10),
+  .isdin-compact-table td:nth-child(10),
+  .isdin-compact-table th:nth-child(11),
+  .isdin-compact-table td:nth-child(11),
+  .isdin-compact-table th:nth-child(12),
+  .isdin-compact-table td:nth-child(12),
+  .isdin-compact-table th:nth-child(15),
+  .isdin-compact-table td:nth-child(15),
+  .isdin-compact-table th:nth-child(16),
+  .isdin-compact-table td:nth-child(16),
+  .isdin-compact-table th:nth-child(17),
+  .isdin-compact-table td:nth-child(17),
+  .isdin-compact-table th:nth-child(18),
+  .isdin-compact-table td:nth-child(18),
+  .isdin-compact-table th:nth-child(19),
+  .isdin-compact-table td:nth-child(19),
+  .isdin-compact-table th:nth-child(20),
+  .isdin-compact-table td:nth-child(20),
+  .isdin-compact-table th:nth-child(21),
+  .isdin-compact-table td:nth-child(21),
+  .isdin-compact-table th:nth-child(22),
+  .isdin-compact-table td:nth-child(22) {
+    display: none !important;
+  }
+
+  .isdin-compact-table thead tr {
+    background: #0f172a !important;
+  }
+
+  .isdin-compact-table th {
+    padding: 0.8rem 0.9rem !important;
+    color: rgba(255,255,255,0.72) !important;
+    font-size: 0.68rem !important;
+    letter-spacing: 0.07em !important;
+    text-transform: uppercase;
+    border-bottom: 0 !important;
+  }
+
+  .isdin-compact-table th:first-child {
+    border-top-left-radius: 1rem;
+  }
+
+  .isdin-compact-table th:last-child {
+    border-top-right-radius: 1rem;
+  }
+
+  .isdin-compact-table tbody tr {
+    cursor: pointer;
+    transition: background-color .16s ease, box-shadow .16s ease, transform .16s ease;
+  }
+
+  .isdin-compact-table tbody tr:hover {
+    background: #f8fafc !important;
+    box-shadow: inset 3px 0 0 #e94560;
+  }
+
+  .isdin-compact-table tbody tr.isdin-selected-row {
+    background: #fff1f2 !important;
+    box-shadow: inset 3px 0 0 #e94560;
+  }
+
+  .isdin-compact-table td {
+    padding: 0.78rem 0.9rem !important;
+    border-bottom: 1px solid #eef2f7 !important;
+    color: #334155;
+    font-size: 0.8rem;
+  }
+
+  .isdin-compact-table td:nth-child(1) {
+    max-width: 260px;
+    white-space: normal;
+    font-weight: 650;
+    color: #0f172a;
+  }
+
+  .isdin-compact-table td:nth-child(2) {
+    font-family: "DM Mono", ui-monospace, monospace;
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  .isdin-compact-table td:nth-child(13),
+  .isdin-compact-table td:nth-child(14) {
+    font-family: "DM Mono", ui-monospace, monospace;
+  }
+
+  .isdin-compact-table input,
+  .isdin-compact-table select {
+    min-height: 32px !important;
+    border-radius: 0.7rem !important;
+  }
+
+  .isdin-operational-note {
+    margin: 0 0 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 1rem;
+    background: #fff;
+    padding: 0.75rem 1rem;
+    color: #475569;
+    font-size: 0.82rem;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  }
+
+  .isdin-detail-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 90;
+    width: min(460px, 92vw);
+    height: 100vh;
+    transform: translateX(105%);
+    transition: transform .22s ease;
+    background: #fff;
+    border-left: 1px solid #e2e8f0;
+    box-shadow: -24px 0 70px rgba(15,23,42,0.2);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .isdin-detail-panel.is-open {
+    transform: translateX(0);
+  }
+
+  .isdin-detail-header {
+    padding: 1rem 1.1rem;
+    border-bottom: 1px solid #e2e8f0;
+    background: linear-gradient(180deg,#fff,#f8fafc);
+  }
+
+  .isdin-detail-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: -0.03em;
+  }
+
+  .isdin-detail-subtitle {
+    margin-top: 0.15rem;
+    font-size: 0.78rem;
+    color: #64748b;
+  }
+
+  .isdin-detail-close {
+    position: absolute;
+    top: 0.85rem;
+    right: 0.85rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.75rem;
+    background: #fff;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.82rem;
+    color: #334155;
+  }
+
+  .isdin-detail-body {
+    overflow: auto;
+    padding: 1rem;
+  }
+
+  .isdin-detail-section {
+    margin-bottom: 0.85rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 1rem;
+    background: #fff;
+    overflow: hidden;
+  }
+
+  .isdin-detail-section h3 {
+    margin: 0;
+    padding: 0.65rem 0.8rem;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+  }
+
+  .isdin-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .isdin-detail-field {
+    display: grid;
+    gap: 0.16rem;
+    padding: 0.62rem 0.8rem;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .isdin-detail-field:last-child {
+    border-bottom: 0;
+  }
+
+  .isdin-detail-label {
+    font-size: 0.68rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .isdin-detail-value {
+    font-size: 0.86rem;
+    color: #0f172a;
+    word-break: break-word;
+  }
+}
+
+@media (max-width: 1023px) {
+  .isdin-compact-table {
+    min-width: 980px !important;
+  }
+}
