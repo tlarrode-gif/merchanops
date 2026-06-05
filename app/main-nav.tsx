@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 const links = [
   { href: "/", label: "Inicio", exact: true },
   { href: "/grandes-campanas", label: "Grandes Campañas" },
-  { href: "/grandes-campanas/isdin", label: "ISDIN" },
+  { href: "/grandes-campanas/isdin", label: "ISDIN", exact: true },
+  { href: "/grandes-campanas/isdin/llamadas", label: "Llamadas ISDIN" },
   { href: "/grandes-campanas/isdin/dashboard", label: "KPIs ISDIN" },
   { href: "/grandes-campanas/isdin/facturacion", label: "Facturación ISDIN" }
 ];
