@@ -128,3 +128,332 @@ body main.isdin-page .rounded-xl.border.px-3.py-1.text-sm {
   padding: .32rem .72rem !important;
   font-size: .75rem !important;
 }
+
+/* ISDIN V3.9.1 advanced vinyl table */
+body main.isdin-page .isdin-filter-group {
+  border-radius: 1rem;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  padding: .85rem;
+}
+
+body main.isdin-page .isdin-filter-title {
+  margin-bottom: .55rem;
+  color: #475569;
+  font-size: .74rem;
+  font-weight: 650;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+body main.isdin-page .isdin-filter-chip,
+body main.isdin-page .isdin-tool-button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: .38rem;
+  border-radius: 999px !important;
+  border: 1px solid #dbe3ee !important;
+  background: #fff !important;
+  padding: .38rem .78rem !important;
+  color: #334155 !important;
+  font-size: .76rem !important;
+  font-weight: 600;
+  line-height: 1.1;
+  box-shadow: 0 1px 2px rgba(15,23,42,.035);
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+}
+
+body main.isdin-page .isdin-filter-chip:hover,
+body main.isdin-page .isdin-tool-button:hover {
+  transform: translateY(-1px);
+  border-color: #94a3b8 !important;
+  background: #f8fafc !important;
+}
+
+body main.isdin-page .isdin-filter-chip.is-active,
+body main.isdin-page .isdin-tool-button.is-active {
+  border-color: #0f172a !important;
+  background: #0f172a !important;
+  color: #fff !important;
+}
+
+body main.isdin-page .isdin-filter-chip.is-status.is-active {
+  box-shadow: inset 0 -2px 0 rgba(255,255,255,.26), 0 8px 18px rgba(15,23,42,.12);
+}
+
+body main.isdin-page .isdin-view-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .55rem;
+  align-items: center;
+}
+
+body main.isdin-page .isdin-column-panel {
+  display: grid;
+  width: 100%;
+  gap: .45rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  border-radius: 1rem;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  padding: .85rem;
+}
+
+body main.isdin-page .isdin-column-option {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: .5rem;
+  border-radius: .75rem;
+  background: #fff;
+  padding: .35rem .55rem;
+  color: #334155;
+  font-size: .76rem;
+}
+
+body main.isdin-page .isdin-column-option input {
+  min-height: auto !important;
+}
+
+body main.isdin-page .isdin-column-option em {
+  margin-left: auto;
+  border-radius: 999px;
+  background: #e2e8f0;
+  padding: .1rem .38rem;
+  color: #475569;
+  font-size: .62rem;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+body main.isdin-page .isdin-column-option.is-locked {
+  color: #0f172a;
+  font-weight: 650;
+}
+
+body main.isdin-page .isdin-vinyl-table-wrap {
+  max-height: calc(100vh - 150px);
+  position: relative;
+}
+
+body main.isdin-page .isdin-vinyl-table {
+  display: block;
+  table-layout: auto;
+}
+
+body main.isdin-page .isdin-vinyl-table thead,
+body main.isdin-page .isdin-vinyl-table tbody {
+  display: block;
+}
+
+body main.isdin-page .isdin-vinyl-table .isdin-grid-row {
+  display: grid;
+  min-width: max-content;
+  align-items: stretch;
+}
+
+body main.isdin-page .isdin-vinyl-table th,
+body main.isdin-page .isdin-vinyl-table td {
+  display: block;
+  min-width: 0;
+}
+
+body main.isdin-page .isdin-vinyl-table th {
+  position: relative;
+  top: 0;
+  z-index: 8;
+  background: #111827 !important;
+  color: rgba(255,255,255,.86) !important;
+  transform: translateY(var(--isdin-scroll-top, 0px));
+}
+
+body main.isdin-page .isdin-vinyl-table th:hover {
+  background: #1f2937 !important;
+}
+
+body main.isdin-page .isdin-vinyl-table th:nth-child(1),
+body main.isdin-page .isdin-vinyl-table td:nth-child(1) {
+  position: relative;
+  left: auto;
+  z-index: 6;
+  width: 240px;
+  min-width: 240px;
+  max-width: 260px;
+  transform: translateX(var(--isdin-scroll-left, 0px));
+}
+
+body main.isdin-page .isdin-vinyl-table th:nth-child(2),
+body main.isdin-page .isdin-vinyl-table td:nth-child(2) {
+  position: relative;
+  left: auto;
+  z-index: 6;
+  width: 132px;
+  min-width: 132px;
+  max-width: 132px;
+  transform: translateX(var(--isdin-scroll-left, 0px));
+}
+
+body main.isdin-page .isdin-vinyl-table th:nth-child(3),
+body main.isdin-page .isdin-vinyl-table td:nth-child(3) {
+  position: relative;
+  left: auto;
+  z-index: 6;
+  width: 190px;
+  min-width: 190px;
+  max-width: 190px;
+  transform: translateX(var(--isdin-scroll-left, 0px));
+}
+
+body main.isdin-page .isdin-vinyl-table th:nth-child(-n+3) {
+  z-index: 14;
+  transform: translate(var(--isdin-scroll-left, 0px), var(--isdin-scroll-top, 0px));
+}
+
+body main.isdin-page .isdin-vinyl-table td:nth-child(1)::after,
+body main.isdin-page .isdin-vinyl-table td:nth-child(2)::after,
+body main.isdin-page .isdin-vinyl-table th:nth-child(1)::after,
+body main.isdin-page .isdin-vinyl-table th:nth-child(2)::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: -1px;
+  bottom: 0;
+  width: 1px;
+  background: rgba(148,163,184,.45);
+}
+
+body main.isdin-page .isdin-vinyl-table td:nth-child(3)::after,
+body main.isdin-page .isdin-vinyl-table th:nth-child(3)::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: -10px;
+  bottom: 0;
+  width: 10px;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(15,23,42,.12), rgba(15,23,42,0));
+}
+
+body main.isdin-page .isdin-row-nuevo td {
+  background: #ffffff !important;
+}
+
+body main.isdin-page .isdin-row-finalizado td {
+  background: #f0fdf4 !important;
+}
+
+body main.isdin-page .isdin-row-pospuesto td {
+  background: #eff6ff !important;
+}
+
+body main.isdin-page .isdin-row-incidencia td {
+  background: #fff7ed !important;
+}
+
+body main.isdin-page .isdin-row-llamada td {
+  background: #faf5ff !important;
+}
+
+body main.isdin-page .isdin-row-cancelado td {
+  background: #fef2f2 !important;
+}
+
+body main.isdin-page .isdin-row-finalizado {
+  box-shadow: inset 3px 0 0 #16a34a;
+}
+
+body main.isdin-page .isdin-row-pospuesto {
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+body main.isdin-page .isdin-row-incidencia {
+  box-shadow: inset 3px 0 0 #f97316;
+}
+
+body main.isdin-page .isdin-row-llamada {
+  box-shadow: inset 3px 0 0 #9333ea;
+}
+
+body main.isdin-page .isdin-row-cancelado {
+  box-shadow: inset 3px 0 0 #dc2626;
+}
+
+body main.isdin-page .isdin-vinyl-table tbody tr:hover td {
+  filter: brightness(.985);
+}
+
+body main.isdin-page .isdin-vinyl-table td:nth-child(3) select {
+  width: 100%;
+  border-color: rgba(148,163,184,.55) !important;
+  background: rgba(255,255,255,.82) !important;
+  font-weight: 650;
+}
+
+body main.isdin-page .isdin-compact .isdin-vinyl-table th {
+  padding-top: .46rem !important;
+  padding-bottom: .46rem !important;
+}
+
+body main.isdin-page .isdin-compact .isdin-vinyl-table td {
+  padding-top: .38rem !important;
+  padding-bottom: .38rem !important;
+  font-size: .72rem !important;
+}
+
+body main.isdin-page .isdin-compact .isdin-vinyl-table input,
+body main.isdin-page .isdin-compact .isdin-vinyl-table select {
+  min-height: 26px !important;
+  font-size: .7rem !important;
+}
+
+body main.isdin-page .isdin-compact .isdin-vinyl-table th:nth-child(1),
+body main.isdin-page .isdin-compact .isdin-vinyl-table td:nth-child(1) {
+  width: 210px;
+  min-width: 210px;
+  max-width: 230px;
+}
+
+body main.isdin-page .isdin-compact .isdin-vinyl-table th:nth-child(2),
+body main.isdin-page .isdin-compact .isdin-vinyl-table td:nth-child(2) {
+  left: auto;
+  width: 118px;
+  min-width: 118px;
+  max-width: 118px;
+}
+
+body main.isdin-page .isdin-compact .isdin-vinyl-table th:nth-child(3),
+body main.isdin-page .isdin-compact .isdin-vinyl-table td:nth-child(3) {
+  left: auto;
+  width: 176px;
+  min-width: 176px;
+  max-width: 176px;
+}
+
+@media (max-width: 760px) {
+  body main.isdin-page .isdin-vinyl-table th:nth-child(1),
+  body main.isdin-page .isdin-vinyl-table td:nth-child(1) {
+    width: 190px;
+    min-width: 190px;
+    max-width: 210px;
+  }
+
+  body main.isdin-page .isdin-vinyl-table th:nth-child(2),
+  body main.isdin-page .isdin-vinyl-table td:nth-child(2) {
+    left: auto;
+    width: 108px;
+    min-width: 108px;
+    max-width: 108px;
+  }
+
+  body main.isdin-page .isdin-vinyl-table th:nth-child(3),
+  body main.isdin-page .isdin-vinyl-table td:nth-child(3) {
+    left: auto;
+    width: 150px;
+    min-width: 150px;
+    max-width: 150px;
+  }
+}
