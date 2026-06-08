@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileDown } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { createIncident, loadLogistics, saveLogistics } from "@/lib/logistics";
+import { createIncident } from "@/lib/logistics";
+import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
 import { syncIsdinVinylToLogistics } from "@/lib/logistics-sync";
 import {
   IsdinCall,
@@ -84,9 +85,10 @@ function baseChanged(a: IsdinCall, b: IsdinCall) {
   ].some(key => (a as Record<string, unknown>)[key] !== (b as Record<string, unknown>)[key]);
 }
 
-function syncCallLogisticsImpact(call: IsdinCall) {
+async function syncCallLogisticsImpact(call: IsdinCall) {
   if (!call.requires_logistics_action) return;
-  const logistics = loadLogistics();
+  const loaded = await loadLogisticsState();
+  const logistics = loaded.state;
   const { requirement } = syncIsdinVinylToLogistics(logistics, {
     id: call.isdin_vinyl_id || call.vin,
     vinyl: call.vin,
@@ -121,7 +123,7 @@ function syncCallLogisticsImpact(call: IsdinCall) {
     requirement.pending_arrival_id = incident.pendiente_llegada_id || null;
     requirement.status = "con_incidencia";
   }
-  saveLogistics(logistics);
+  await saveLogisticsState(logistics, loaded.remote);
 }
 
 export default function IsdinCallsPage() {
@@ -215,8 +217,8 @@ export default function IsdinCallsPage() {
       }
     } else {
       saveLocalCalls(nextCalls);
-      syncCallLogisticsImpact(next);
     }
+    await syncCallLogisticsImpact(next);
 
     flash(message);
     setSaving(false);
