@@ -36,6 +36,8 @@ export type IsdinCall = {
   call_time_slot?: string | null;
   contact_person?: string | null;
   phone_number?: string | null;
+  height?: number | null;
+  width?: number | null;
   call_comment?: string | null;
   backoffice_user?: string | null;
   next_visit_date?: string | null;
@@ -57,9 +59,14 @@ export type IsdinVinylBase = {
   postal_code?: string | null;
   province?: string | null;
   city?: string | null;
+  phone_number?: string | null;
+  pharmacy_phone?: string | null;
+  phone?: string | null;
   installer_name?: string | null;
   client_observations?: string | null;
   scaffold_required?: boolean | null;
+  height?: number | null;
+  width?: number | null;
 };
 
 export type CallsFilters = {
@@ -75,13 +82,7 @@ export type CallsFilters = {
   to: string;
 };
 
-export const callAlertStatuses: IsdinCallStatus[] = [
-  "Incidencia en llamada",
-  "Pospuesto en llamada",
-  "Cancelado en llamada",
-  "Requiere revisión operaciones"
-];
-
+export const callAlertStatuses: IsdinCallStatus[] = ["Incidencia en llamada", "Pospuesto en llamada", "Cancelado en llamada", "Requiere revisión operaciones"];
 export const CALLS_DO_NOT_GENERATE_PAYMENTS = "Los estados de llamada son preventivos y no generan pagos ni visitas fallidas.";
 
 export function uid() {
@@ -101,8 +102,7 @@ export function isdinWeekLabel(date: string) {
   const d = new Date(`${dateOnly(date)}T12:00:00`);
   if (Number.isNaN(d.getTime())) return "";
   const jsDay = d.getDay();
-  const diff = jsDay === 0 ? -6 : 1 - jsDay;
-  d.setDate(d.getDate() + diff);
+  d.setDate(d.getDate() + (jsDay === 0 ? -6 : 1 - jsDay));
   const month = cap(new Intl.DateTimeFormat("es-ES", { month: "long" }).format(d));
   return `Semana ${d.getDate()} ${month} ${d.getFullYear()}`;
 }
@@ -112,8 +112,7 @@ export function cleanCallStatus(value?: string | null): IsdinCallStatus {
 }
 
 export function callNeedsOperationsAlert(call?: Pick<IsdinCall, "call_status" | "requires_operations_review"> | null) {
-  if (!call) return false;
-  return Boolean(call.requires_operations_review) || callAlertStatuses.includes(cleanCallStatus(call.call_status));
+  return !!call && (Boolean(call.requires_operations_review) || callAlertStatuses.includes(cleanCallStatus(call.call_status)));
 }
 
 export function callIsCompleted(status?: string | null) {
@@ -126,8 +125,7 @@ export function callStatusGroup(status?: string | null, requiresReview?: boolean
   if (clean === "Llamada realizada") return "Contactada";
   if (clean === "Confirmado") return "Confirmada";
   if (clean === "No contesta") return "Sin respuesta";
-  if (requiresReview || callAlertStatuses.includes(clean)) return "Alerta";
-  return "Contactada";
+  return requiresReview || callAlertStatuses.includes(clean) ? "Alerta" : "Contactada";
 }
 
 export function callBaseFromVinyl(v: IsdinVinylBase): Omit<IsdinCall, "id" | "call_status"> {
@@ -144,23 +142,27 @@ export function callBaseFromVinyl(v: IsdinVinylBase): Omit<IsdinCall, "id" | "ca
     postal_code: v.postal_code || null,
     province: v.province || null,
     city: v.city || null,
+    phone_number: v.phone_number || v.pharmacy_phone || v.phone || null,
     worker_name: v.installer_name || null,
     installer_name: v.installer_name || null,
     client_observations: v.client_observations || null,
-    scaffold_required: Boolean(v.scaffold_required)
+    scaffold_required: Boolean(v.scaffold_required),
+    height: v.height ?? null,
+    width: v.width ?? null
   };
 }
 
 export function mergeCallBase(existing: IsdinCall, vinyl: IsdinVinylBase): IsdinCall {
+  const base = callBaseFromVinyl(vinyl);
   return {
     ...existing,
-    ...callBaseFromVinyl(vinyl),
+    ...base,
     id: existing.id,
     call_status: cleanCallStatus(existing.call_status),
     call_datetime: existing.call_datetime || null,
     call_time_slot: existing.call_time_slot || null,
     contact_person: existing.contact_person || null,
-    phone_number: existing.phone_number || null,
+    phone_number: existing.phone_number || base.phone_number || null,
     call_comment: existing.call_comment || null,
     backoffice_user: existing.backoffice_user || null,
     next_visit_date: existing.next_visit_date || null,
@@ -179,7 +181,6 @@ export function newCallFromVinyl(vinyl: IsdinVinylBase): IsdinCall {
     call_datetime: null,
     call_time_slot: null,
     contact_person: null,
-    phone_number: null,
     call_comment: null,
     backoffice_user: null,
     next_visit_date: null,
@@ -209,10 +210,7 @@ export function callForDb(call: IsdinCall) {
 export function applyCallPatch(call: IsdinCall, patch: Partial<IsdinCall>): IsdinCall {
   const nextDate = patch.next_visit_date !== undefined ? dateOnly(patch.next_visit_date) : dateOnly(call.next_visit_date);
   const callStatus = patch.call_status ? cleanCallStatus(patch.call_status) : cleanCallStatus(call.call_status);
-  const requiresReview = patch.requires_operations_review !== undefined
-    ? Boolean(patch.requires_operations_review)
-    : callStatus === "Requiere revisión operaciones" || Boolean(call.requires_operations_review);
-
+  const requiresReview = patch.requires_operations_review !== undefined ? Boolean(patch.requires_operations_review) : callStatus === "Requiere revisión operaciones" || Boolean(call.requires_operations_review);
   return {
     ...call,
     ...patch,
@@ -236,22 +234,7 @@ export function getCallStats(rows: IsdinCall[]) {
   const cancelados = rows.filter(x => cleanCallStatus(x.call_status) === "Cancelado en llamada").length;
   const revision = rows.filter(x => cleanCallStatus(x.call_status) === "Requiere revisión operaciones" || x.requires_operations_review).length;
   const alertas = rows.filter(callNeedsOperationsAlert).length;
-  return {
-    total,
-    pendientes,
-    realizadas,
-    contactadas: realizadas,
-    confirmados,
-    noContesta,
-    incidencias,
-    pospuestos,
-    cancelados,
-    revision,
-    alertas,
-    completado: total ? Math.round((realizadas / total) * 100) : 0,
-    confirmacion: realizadas ? Math.round((confirmados / realizadas) * 100) : 0,
-    problemasPreventivos: total ? Math.round((alertas / total) * 100) : 0
-  };
+  return { total, pendientes, realizadas, contactadas: realizadas, confirmados, noContesta, incidencias, pospuestos, cancelados, revision, alertas, completado: total ? Math.round((realizadas / total) * 100) : 0, confirmacion: realizadas ? Math.round((confirmados / realizadas) * 100) : 0, problemasPreventivos: total ? Math.round((alertas / total) * 100) : 0 };
 }
 
 export function groupCallsBy(rows: IsdinCall[], key: (row: IsdinCall) => string) {
@@ -267,45 +250,18 @@ export function filterIsdinCalls(rows: IsdinCall[], filters: CallsFilters) {
   return rows.filter(call => {
     const status = cleanCallStatus(call.call_status);
     const callDate = dateOnly(call.call_datetime);
-    const hay = [call.vin, call.pharmacy_name, call.vinyl_campaign, call.province, call.city, call.call_status, call.installer_name, call.worker_name, call.contact_person, call.phone_number, call.backoffice_user, call.call_comment].join(" ").toLowerCase();
-    const quickOk = !filters.quick
-      || (filters.quick === "pendientes" && status === "Pendiente de llamar")
-      || (filters.quick === "no-contesta" && status === "No contesta")
-      || (filters.quick === "confirmadas" && status === "Confirmado")
-      || (filters.quick === "alertas" && callNeedsOperationsAlert(call));
-
-    return (!filters.week || call.desired_installation_week === filters.week)
-      && (!filters.province || call.province === filters.province)
-      && (!filters.city || call.city === filters.city)
-      && (!filters.status || status === filters.status)
-      && (!filters.installer || call.installer_name === filters.installer || call.worker_name === filters.installer)
-      && (!filters.backoffice || call.backoffice_user === filters.backoffice)
-      && (!filters.q || hay.includes(filters.q.toLowerCase()))
-      && quickOk
-      && (!filters.from || callDate >= filters.from)
-      && (!filters.to || callDate <= filters.to);
+    const hay = [call.vin, call.pharmacy_name, call.phone_number, call.vinyl_campaign, call.province, call.city, call.call_status, call.installer_name, call.worker_name, call.contact_person, call.backoffice_user, call.call_comment].join(" ").toLowerCase();
+    const quickOk = !filters.quick || (filters.quick === "pendientes" && status === "Pendiente de llamar") || (filters.quick === "no-contesta" && status === "No contesta") || (filters.quick === "confirmadas" && status === "Confirmado") || (filters.quick === "alertas" && callNeedsOperationsAlert(call));
+    return (!filters.week || call.desired_installation_week === filters.week) && (!filters.province || call.province === filters.province) && (!filters.city || call.city === filters.city) && (!filters.status || status === filters.status) && (!filters.installer || call.installer_name === filters.installer || call.worker_name === filters.installer) && (!filters.backoffice || call.backoffice_user === filters.backoffice) && (!filters.q || hay.includes(filters.q.toLowerCase())) && quickOk && (!filters.from || callDate >= filters.from) && (!filters.to || callDate <= filters.to);
   });
 }
 
 export function buildCallSummary(call: IsdinCall) {
-  return [
-    `ISDIN Backoffice · ${call.vin}`,
-    `Farmacia: ${call.pharmacy_name}`,
-    `Estado llamada: ${call.call_status}`,
-    `Semana instalación: ${call.desired_installation_week || "Sin semana"}`,
-    call.next_visit_date ? `Nueva fecha propuesta: ${dateOnly(call.next_visit_date)} (${call.next_visit_week || isdinWeekLabel(call.next_visit_date)})` : "",
-    call.contact_person ? `Contacto: ${call.contact_person}` : "",
-    call.call_comment ? `Comentario: ${call.call_comment}` : "",
-    call.requires_operations_review ? "Requiere revisión de operaciones" : ""
-  ].filter(Boolean).join("\n");
+  return [`ISDIN Backoffice · ${call.vin}`, `Farmacia: ${call.pharmacy_name}`, call.phone_number ? `Teléfono: ${call.phone_number}` : "", `Estado llamada: ${call.call_status}`, `Semana instalación: ${call.desired_installation_week || "Sin semana"}`, call.next_visit_date ? `Nueva fecha propuesta: ${dateOnly(call.next_visit_date)} (${call.next_visit_week || isdinWeekLabel(call.next_visit_date)})` : "", call.contact_person ? `Contacto: ${call.contact_person}` : "", call.call_comment ? `Comentario: ${call.call_comment}` : "", call.requires_operations_review ? "Requiere revisión de operaciones" : ""].filter(Boolean).join("\n");
 }
 
 export function loadLocalCalls(): IsdinCall[] {
-  try {
-    return JSON.parse(localStorage.getItem(isdinCallsLocalKey) || "[]");
-  } catch {
-    return [];
-  }
+  try { return JSON.parse(localStorage.getItem(isdinCallsLocalKey) || "[]"); } catch { return []; }
 }
 
 export function saveLocalCalls(calls: IsdinCall[]) {
