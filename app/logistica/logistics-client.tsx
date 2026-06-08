@@ -2,16 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, CheckCircle2, Plus, RefreshCw, Search, Send } from "lucide-react";
-import { LogisticsState, StockMovement, available, closePicking, confirmInstallerDelivery, createIncident, createMovement, createPicking, generateShipping, loadLogistics, logisticsAlerts, logisticsKpis, materialName, preparePickingLine, receiveEntry, saveLogistics, seedLogistics, today, uid } from "@/lib/logistics";
+import { LogisticsState, StockMovement, available, closePicking, confirmInstallerDelivery, createIncident, createMovement, createPicking, generateShipping, logisticsAlerts, logisticsKpis, logisticsStatusLabel, materialName, preparePickingLine, receiveEntry, seedLogistics, today, uid } from "@/lib/logistics";
+import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
+import { acceptRequestAndReserve, createServiceLogisticsRequest, detectLogisticsSyncIssues, materialDisplay, sourceHref, syncIsdinVinylToLogistics } from "@/lib/logistics-sync";
 
 const modules = [
   ["panel", "Panel logístico"],
+  ["solicitudes", "Solicitudes"],
   ["entradas", "Entradas de almacén"],
   ["stock", "Stock"],
   ["picking", "Picking"],
   ["envios", "Salidas y envíos"],
   ["incidencias", "Incidencias logísticas"],
-  ["pendientes", "Pendientes de llegada"]
+  ["pendientes", "Pendientes de llegada"],
+  ["sincronizacion", "Sincronización"]
 ] as const;
 type Section = typeof modules[number][0];
 
@@ -21,30 +25,47 @@ export function LogisticsClient({ section, detailId }: { section: string; detail
   const [q, setQ] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [remote, setRemote] = useState(false);
   const kpis = useMemo(() => logisticsKpis(state), [state]);
   const alerts = useMemo(() => logisticsAlerts(state), [state]);
 
-  useEffect(() => setState(loadLogistics()), []);
   useEffect(() => {
-    const timer = setInterval(() => setState(loadLogistics()), 30000);
+    refresh();
+    const timer = setInterval(refresh, 30000);
     return () => clearInterval(timer);
   }, []);
 
-  function commit(mutator: (draft: LogisticsState) => void, message = "Guardado") {
+  async function refresh() {
+    setLoading(true);
+    const loaded = await loadLogisticsState();
+    setState(loaded.state);
+    setRemote(loaded.remote);
+    if (loaded.error) setError(`Modo local: ${loaded.error}`);
+    else setError("");
+    setLoading(false);
+  }
+
+  async function commit(mutator: (draft: LogisticsState) => void, message = "Guardado") {
     try {
+      setSaving(true);
       const draft = structuredClone(state) as LogisticsState;
       mutator(draft);
-      saveLogistics(draft);
+      await saveLogisticsState(draft, remote);
       setState(draft);
       setError("");
       setNotice(message);
       setTimeout(() => setNotice(""), 1400);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo completar la operación");
+    } finally {
+      setSaving(false);
     }
   }
 
-  const counts = { panel: alerts.length, entradas: kpis.pendingEntries, stock: kpis.lowStock, picking: kpis.pendingPickings, envios: kpis.unconfirmedShipments, incidencias: kpis.openIncidents, pendientes: state.pendings.filter(x => !["cerrado", "recibido"].includes(x.estado)).length };
+  const syncIssues = useMemo(() => detectLogisticsSyncIssues(state), [state]);
+  const counts = { panel: alerts.length, solicitudes: kpis.openRequests, entradas: kpis.pendingEntries, stock: kpis.lowStock, picking: kpis.pendingPickings, envios: kpis.unconfirmedShipments, incidencias: kpis.openIncidents, pendientes: state.pendings.filter(x => !["cerrado", "recibido"].includes(x.estado)).length, sincronizacion: syncIssues.length };
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
@@ -58,19 +79,22 @@ export function LogisticsClient({ section, detailId }: { section: string; detail
           <header className="rounded-2xl border bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div><p className="text-sm text-slate-500">Logística / {modules.find(([key]) => key === active)?.[1]}</p><h2 className="text-3xl font-bold">{modules.find(([key]) => key === active)?.[1]}</h2></div>
-              <div className="flex flex-wrap gap-2"><button onClick={() => commit(d => Object.assign(d, seedLogistics()), "Datos demo recargados")} className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold"><RefreshCw className="mr-1 inline h-4 w-4" />Demo</button><a href="/grandes-campanas" className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold">Campañas</a></div>
+              <div className="flex flex-wrap gap-2"><span className={remote ? "rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800" : "rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800"}>{remote ? "Supabase activo" : "Modo local"}</span><button disabled={saving} onClick={() => refresh()} className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold disabled:opacity-50"><RefreshCw className="mr-1 inline h-4 w-4" />Actualizar</button><button disabled={saving} onClick={() => commit(d => Object.assign(d, seedLogistics()), "Datos demo recargados")} className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold disabled:opacity-50">Demo</button><a href="/grandes-campanas" className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold">Campañas</a></div>
             </div>
             <label className="mt-3 flex items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2"><Search className="h-4 w-4 text-slate-400" /><input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar material, VIN, campaña, albarán, tracking..." className="w-full bg-transparent text-sm outline-none" /></label>
           </header>
           {notice && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
           {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+          {loading && <div className="rounded-2xl border bg-white p-4 text-sm text-slate-500">Cargando logística...</div>}
           {active === "panel" && <Panel state={state} />}
+          {active === "solicitudes" && <Solicitudes state={state} q={q} detailId={detailId} commit={commit} />}
           {active === "entradas" && <Entradas state={state} q={q} detailId={detailId} commit={commit} />}
           {active === "stock" && <Stock state={state} q={q} detailId={detailId} commit={commit} />}
           {active === "picking" && <Picking state={state} q={q} detailId={detailId} commit={commit} />}
           {active === "envios" && <Envios state={state} q={q} detailId={detailId} commit={commit} />}
           {active === "incidencias" && <Incidencias state={state} q={q} detailId={detailId} commit={commit} />}
           {active === "pendientes" && <Pendientes state={state} q={q} detailId={detailId} />}
+          {active === "sincronizacion" && <Sincronizacion state={state} q={q} commit={commit} />}
         </section>
       </div>
     </main>
@@ -79,9 +103,15 @@ export function LogisticsClient({ section, detailId }: { section: string; detail
 
 function Panel({ state }: { state: LogisticsState }) {
   const k = logisticsKpis(state);
-  const rows = [["Pendientes de recibir", k.pendingEntries, "/logistica/entradas"], ["Entradas hoy", k.entriesToday, "/logistica/entradas"], ["Pickings pendientes", k.pendingPickings, "/logistica/picking"], ["Incidencias abiertas", k.openIncidents, "/logistica/incidencias"], ["Envíos sin confirmar", k.unconfirmedShipments, "/logistica/envios"], ["Referencias bajo mínimo", k.lowStock, "/logistica/stock"], ["Instalaciones bloqueadas", k.blockedInstalls, "/logistica/incidencias"], ["Pickings preparados", k.preparedPickings, "/logistica/picking"]];
+  const rows = [["Solicitudes abiertas", k.openRequests, "/logistica/solicitudes"], ["Necesidades activas", k.openRequirements, "/logistica/solicitudes"], ["Pendientes de recibir", k.pendingEntries, "/logistica/entradas"], ["Entradas hoy", k.entriesToday, "/logistica/entradas"], ["Pickings pendientes", k.pendingPickings, "/logistica/picking"], ["Incidencias abiertas", k.openIncidents, "/logistica/incidencias"], ["Envíos sin confirmar", k.unconfirmedShipments, "/logistica/envios"], ["Referencias bajo mínimo", k.lowStock, "/logistica/stock"], ["Instalaciones bloqueadas", k.blockedInstalls, "/logistica/incidencias"], ["Pickings preparados", k.preparedPickings, "/logistica/picking"], ["Avisos sync", k.syncErrors, "/logistica/sincronizacion"]];
   const alerts = logisticsAlerts(state);
-  return <div className="space-y-4"><div className="grid gap-3 md:grid-cols-4">{rows.map(([label, value, href]) => <a key={label} href={String(href)} className="rounded-2xl border bg-white p-4 shadow-sm hover:border-slate-400"><p className="text-sm text-slate-500">{label}</p><p className="text-3xl font-bold">{value}</p></a>)}</div><Card title="Alertas logísticas">{alerts.length ? alerts.map(a => <a key={`${a.href}-${a.text}`} href={a.href} className="flex items-center justify-between border-t py-3 text-sm"><span><Badge tone={a.level} /> {a.text}</span><ArrowRight className="h-4 w-4" /></a>) : <Empty text="Sin alertas activas." />}</Card></div>;
+  return <div className="space-y-4"><div className="grid gap-3 md:grid-cols-4">{rows.map(([label, value, href]) => <a key={label} href={String(href)} className="rounded-2xl border bg-white p-4 shadow-sm hover:border-slate-400"><p className="text-sm text-slate-500">{label}</p><p className="text-3xl font-bold">{value}</p></a>)}</div><Card title="Alertas logísticas">{alerts.length ? alerts.map(a => <a key={`${a.href}-${a.text}`} href={a.href} className="flex items-center justify-between border-t py-3 text-sm"><span><Badge tone={a.level} /> {a.text}</span><ArrowRight className="h-4 w-4" /></a>) : <Empty text="Sin alertas activas." />}</Card><Card title="Últimas solicitudes">{state.requests.slice(0, 5).map(r => <a key={r.id} href={`/logistica/solicitudes?id=${r.id}`} className="block border-t py-3 text-sm"><b>{r.code}</b> · {r.source_type}<p className="text-slate-500">{r.status} · {r.installer_name || "Sin instalador"} · {r.delivery_address || "Sin dirección"}</p></a>)}{!state.requests.length && <Empty text="Aún no hay solicitudes logísticas." />}</Card></div>;
+}
+
+function Solicitudes({ state, q, detailId, commit }: ViewProps) {
+  const rows = state.requests.filter(x => hay([x.code, x.status, x.source_type, x.installer_name, x.delivery_address], q));
+  const selected = rows.find(x => x.id === detailId);
+  return <Layout list={<Card title="Solicitudes logísticas" action={<div className="flex gap-2"><button onClick={() => commit(d => createServiceLogisticsRequest(d, { id: `svc-${Date.now()}`, client: "Cliente demo", campaign: "Servicio puntual", deadline: today(), province: "Madrid", worker_name: "Instalador demo", address: "Dirección demo", material_name: "Kit instalación", material_quantity: 1, material_type: "herramienta", requires_material: true }), "Solicitud demo creada")} className="rounded-xl border px-3 py-2 text-sm"><Plus className="mr-1 inline h-4 w-4" />Servicio</button><button onClick={() => commit(d => syncIsdinVinylToLogistics(d, { id: `vin-${Date.now()}`, vinyl: `VIN-${Date.now().toString().slice(-4)}`, pharmacy_name: "Farmacia demo", vinyl_record_type: "Vinilo a medida", height: 140, width: 170, desired_installation_date: today(), desired_installation_week: "Semana demo", province: "Valencia", city: "Valencia", street: "Calle demo", installer_name: "Instalador demo" }), "VIN sincronizado")} className="rounded-xl bg-slate-900 px-3 py-2 text-sm text-white">Sincronizar VIN</button></div>}><Table headers={["Código", "Origen", "Estado", "Prioridad", "Destino"]}>{rows.map(x => <Row key={x.id} section="solicitudes" id={x.id}><td className="p-3 font-semibold">{x.code}</td><td className="p-3">{x.source_type}</td><td className="p-3"><Status text={x.status} /></td><td className="p-3"><Badge tone={x.priority === "critica" ? "critica" : x.priority === "alta" ? "alta" : "info"} /></td><td className="p-3">{x.installer_name || x.delivery_address || "Pendiente"}</td></Row>)}</Table></Card>} detail={<Detail title="Detalle solicitud" selected={selected}>{selected && <div className="space-y-3"><Read label="Origen" value={<a href={sourceHref(state.requirements.find(x => x.request_id === selected.id) || { source_type: selected.source_type, source_id: selected.source_id } as any)}>Abrir origen →</a>} /><Read label="Estado visible en origen" value={logisticsStatusLabel(state.requirements.find(x => x.request_id === selected.id)?.status)} /><Read label="Instalador / dirección" value={`${selected.installer_name || "Sin instalador"} · ${selected.delivery_address || "Sin dirección"}`} />{selected.lines.map(line => { const req = state.requirements.find(x => x.id === line.material_requirement_id); return <Mini key={line.id} title={req ? materialDisplay(req, state) : "Línea"} text={`Solicitado ${line.requested_quantity} · Aceptado ${line.accepted_quantity} · Falta ${line.missing_quantity} · ${line.line_status}`} />; })}<button onClick={() => commit(d => acceptRequestAndReserve(d, selected.id), "Solicitud aceptada y reserva registrada")} className="w-full rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Aceptar y reservar stock</button>{selected.picking_id && <a className="block rounded-xl border p-3 text-sm font-semibold" href={`/logistica/picking?id=${selected.picking_id}`}>Ver picking →</a>}{selected.shipment_id && <a className="block rounded-xl border p-3 text-sm font-semibold" href={`/logistica/envios?id=${selected.shipment_id}`}>Ver envío →</a>}</div>}</Detail>} />;
 }
 
 function Entradas({ state, q, detailId, commit }: ViewProps) {
@@ -120,7 +150,12 @@ function Pendientes({ state, q, detailId }: Omit<ViewProps, "commit">) {
   return <Layout list={<Card title="Pendientes de llegada"><Table headers={["Motivo", "Estado", "Prevista", "VIN"]}>{rows.map(x => <Row key={x.id} section="pendientes" id={x.id}><td className="p-3 font-semibold">{x.motivo}</td><td className="p-3"><Status text={x.estado} /></td><td className="p-3">{x.fecha_prevista || "Sin fecha"}</td><td className="p-3">{x.vin_id || ""}</td></Row>)}</Table></Card>} detail={<Detail title="Detalle pendiente" selected={selected}>{selected && <div className="space-y-3"><Read label="Incidencia" value={<a href={`/logistica/incidencias?id=${selected.incidencia_id}`}>Ver incidencia</a>} /><Read label="Riesgo" value={selected.en_riesgo ? "En riesgo" : "Sin riesgo"} /><Trace state={state} vin={selected.vin_id} /></div>}</Detail>} />;
 }
 
-type ViewProps = { state: LogisticsState; q: string; detailId?: string; commit: (mutator: (draft: LogisticsState) => void, message?: string) => void };
+function Sincronizacion({ state, q, commit }: ViewProps) {
+  const issues = detectLogisticsSyncIssues(state).filter(x => hay([x.text, x.fix, x.severity], q));
+  return <div className="space-y-4"><Card title="Estado de sincronización logística" action={<button onClick={() => commit(d => { d.events.filter(x => x.status === "error").forEach(x => { x.status = "pendiente"; x.last_error = null; }); }, "Eventos marcados para reintento")} className="rounded-xl border px-3 py-2 text-sm"><RefreshCw className="mr-1 inline h-4 w-4" />Reintentar errores</button>}><div className="grid gap-3 md:grid-cols-4"><Mini title="Eventos" text={String(state.events.length)} /><Mini title="Completados" text={String(state.events.filter(x => x.status === "completado").length)} /><Mini title="Errores" text={String(state.events.filter(x => x.status === "error").length)} /><Mini title="Avisos" text={String(issues.length)} /></div></Card><Card title="Diagnóstico">{issues.length ? issues.map(i => <div key={i.id} className="border-t py-3 text-sm"><Badge tone={i.severity === "critica" ? "critica" : i.severity === "alta" ? "alta" : "info"} /> <b>{i.text}</b><p className="mt-1 text-slate-500">{i.fix || "Revisión manual recomendada."}</p><div className="mt-2 flex gap-2">{i.sourceHref && <a className="rounded-xl border px-3 py-1" href={i.sourceHref}>Abrir origen</a>}{i.logisticsHref && <a className="rounded-xl border px-3 py-1" href={i.logisticsHref}>Abrir logística</a>}</div></div>) : <Empty text="No se detectan errores de sincronización." />}</Card><Card title="Eventos recientes">{state.events.slice(0, 20).map(e => <div key={e.id} className="border-t py-2 text-xs"><b>{e.event_type}</b> · {e.source_type}:{e.source_id} · {e.status}<p className="text-slate-500">{e.idempotency_key}{e.last_error ? ` · ${e.last_error}` : ""}</p></div>)}</Card></div>;
+}
+
+type ViewProps = { state: LogisticsState; q: string; detailId?: string; commit: (mutator: (draft: LogisticsState) => void, message?: string) => Promise<void> };
 function Layout({ list, detail }: { list: React.ReactNode; detail: React.ReactNode }) { return <div className="grid gap-4 xl:grid-cols-[1fr_420px]">{list}{detail}</div>; }
 function Card({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) { return <section className="rounded-2xl border bg-white p-4 shadow-sm"><div className="mb-3 flex items-center justify-between gap-3"><h3 className="text-lg font-bold">{title}</h3>{action}</div>{children}</section>; }
 function Detail({ title, selected, children }: { title: string; selected: unknown; children: React.ReactNode }) { return <Card title={title}>{selected ? children : <Empty text="Selecciona una fila para ver el detalle." />}</Card>; }
