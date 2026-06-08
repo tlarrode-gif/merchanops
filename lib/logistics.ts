@@ -33,7 +33,8 @@ export type LogisticsNotification = { id: string; type: string; priority: Logist
 export type LogisticsState = { materials: Material[]; entries: Entry[]; stock: Stock[]; movements: StockMovement[]; pickings: Picking[]; shipments: Shipping[]; incidents: Incident[]; pendings: PendingArrival[]; requirements: MaterialRequirement[]; requests: LogisticsRequest[]; events: IntegrationEvent[]; audit: LogisticsAuditEntry[]; notifications: LogisticsNotification[] };
 
 export function uid(prefix = "id") {
-  return `${prefix}_${typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)}`;
+  void prefix;
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "00000000-0000-4000-8000-" + String(Date.now()).slice(-12).padStart(12, "0");
 }
 
 export function today() {
@@ -45,9 +46,9 @@ export function available(stock?: Stock | null) {
 }
 
 export function seedLogistics(): LogisticsState {
-  const m1: Material = { id: "mat_vin_120", sku: "VIN-STD-120", nombre: "Vinilo estándar 120x150", tipo: "vinilo_estandar", medidas: "120x150", unidad_control: "uds", stock_minimo: 8, stock_objetivo: 25, proveedor_id: "prov_isdin", coste: 15, activo: true };
-  const m2: Material = { id: "mat_kit", sku: "KIT-INST", nombre: "Kit instalación vinilo", tipo: "herramienta", unidad_control: "cajas", stock_minimo: 3, stock_objetivo: 10, proveedor_id: "prov_tools", coste: 22, activo: true };
-  return { materials: [m1, m2], entries: [], stock: [{ id: "stock_1", material_id: m1.id, cantidad_fisica: 14, cantidad_reservada: 2, cantidad_picking: 0, cantidad_bloqueada: 0 }, { id: "stock_2", material_id: m2.id, cantidad_fisica: 2, cantidad_reservada: 0, cantidad_picking: 0, cantidad_bloqueada: 0 }], movements: [], pickings: [], shipments: [], incidents: [], pendings: [], requirements: [], requests: [], events: [], audit: [], notifications: [] };
+  const m1: Material = { id: "11111111-1111-4111-8111-111111111111", sku: "VIN-STD-120", nombre: "Vinilo estándar 120x150", tipo: "vinilo_estandar", medidas: "120x150", unidad_control: "uds", stock_minimo: 8, stock_objetivo: 25, proveedor_id: "prov_isdin", coste: 15, activo: true };
+  const m2: Material = { id: "22222222-2222-4222-8222-222222222222", sku: "KIT-INST", nombre: "Kit instalación vinilo", tipo: "herramienta", unidad_control: "cajas", stock_minimo: 3, stock_objetivo: 10, proveedor_id: "prov_tools", coste: 22, activo: true };
+  return { materials: [m1, m2], entries: [], stock: [{ id: "33333333-3333-4333-8333-333333333333", material_id: m1.id, cantidad_fisica: 14, cantidad_reservada: 2, cantidad_picking: 0, cantidad_bloqueada: 0 }, { id: "44444444-4444-4444-8444-444444444444", material_id: m2.id, cantidad_fisica: 2, cantidad_reservada: 0, cantidad_picking: 0, cantidad_bloqueada: 0 }], movements: [], pickings: [], shipments: [], incidents: [], pendings: [], requirements: [], requests: [], events: [], audit: [], notifications: [] };
 }
 
 export function loadLogistics(): LogisticsState {
