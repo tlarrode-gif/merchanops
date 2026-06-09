@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, CheckCircle2, Plus, RefreshCw, Search, Send } from "lucide-react";
+import { ArrowRight, CheckCircle2, FileDown, Plus, RefreshCw, Search, Send } from "lucide-react";
 import { CrearIncidenciaModal } from "@/components/logistics/crear-incidencia-modal";
 import { EstadoLogistico } from "@/components/logistics/estado-logistico";
 import { createDomainEvent, publishDomainEvent } from "@/lib/domain-events";
-import { LogisticsState, StockMovement, available, closePicking, confirmInstallerDelivery, createIncident, createMovement, createPicking, createPickingFromRequest, generateShipping, logisticsAlerts, logisticsKpis, logisticsStatusLabel, materialName, preparePickingLine, receiveEntry, rejectLogisticsRequest, seedLogistics, today, uid, upsertMaterialCatalog } from "@/lib/logistics";
+import { LogisticsState, StockMovement, available, closePicking, confirmInstallerDelivery, createIncident, createMovement, createPickingFromRequest, generateShipping, logisticsAlerts, logisticsKpis, logisticsStatusLabel, materialName, preparePickingLine, receiveEntry, rejectLogisticsRequest, seedLogistics, today, uid, upsertMaterialCatalog } from "@/lib/logistics";
 import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
 import { acceptRequestAndReserve, detectLogisticsSyncIssues, materialDisplay, sourceHref } from "@/lib/logistics-sync";
 
@@ -114,7 +114,56 @@ function Panel({ state }: { state: LogisticsState }) {
 function Solicitudes({ state, q, detailId, commit }: ViewProps) {
   const rows = state.requests.filter(x => hay([x.code, x.status, x.source_type, x.installer_name, x.delivery_address, x.rejection_reason], q));
   const selected = rows.find(x => x.id === detailId);
-  return <Layout list={<Card title="Peticiones de material" action={<a href="/?tab=servicios" className="rounded-xl border px-3 py-2 text-sm font-semibold">Crear desde Servicios</a>}><Table headers={["Código", "Origen", "Estado", "Urgencia", "Necesidad", "Destino"]}>{rows.map(x => <Row key={x.id} section="solicitudes" id={x.id}><td className="p-3 font-semibold">{x.code}</td><td className="p-3">{x.source_type}</td><td className="p-3"><Status text={x.status} /></td><td className="p-3"><Badge tone={x.priority === "critica" ? "critica" : x.priority === "alta" ? "alta" : "info"} /></td><td className="p-3">{x.required_date || "Sin fecha"}</td><td className="p-3">{x.installer_name || x.delivery_address || "Pendiente"}</td></Row>)}</Table></Card>} detail={<Detail title="Detalle petición" selected={selected}>{selected && <div className="space-y-3"><Read label="Origen" value={<a href={sourceHref(state.requirements.find(x => x.request_id === selected.id) || { source_type: selected.source_type, source_id: selected.source_id } as any)}>Abrir origen →</a>} /><Read label="Estado visible en origen" value={logisticsStatusLabel(state.requirements.find(x => x.request_id === selected.id)?.status)} /><Read label="Instalador / dirección" value={`${selected.installer_name || "Sin instalador"} · ${selected.delivery_address || "Sin dirección"}`} />{selected.rejection_reason && <Read label="Motivo rechazo" value={selected.rejection_reason} />}{selected.lines.map(line => { const req = state.requirements.find(x => x.id === line.material_requirement_id); const stock = req?.material_id ? state.stock.find(s => s.material_id === req.material_id) : null; const free = available(stock); return <Mini key={line.id} title={req ? materialDisplay(req, state) : "Línea"} text={`Solicitado ${line.requested_quantity} · Aprobado ${line.accepted_quantity} · Disponible ${free} · ${line.line_status}`} />; })}<div className="grid gap-2"><button onClick={() => commit(d => acceptRequestAndReserve(d, selected.id), "Petición aprobada y stock reservado")} className="w-full rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Aprobar y reservar stock</button><button onClick={() => commit(d => createPickingFromRequest(d, selected.id), "Picking creado desde petición")} className="w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">Convertir en picking</button><button onClick={() => { const reason = prompt("Motivo del rechazo"); if (reason) commit(d => rejectLogisticsRequest(d, selected.id, reason), "Petición rechazada"); }} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold text-red-700">Rechazar petición</button></div>{selected.picking_id && <a className="block rounded-xl border p-3 text-sm font-semibold" href={`/logistica/picking?id=${selected.picking_id}`}>Ver picking →</a>}{selected.shipment_id && <a className="block rounded-xl border p-3 text-sm font-semibold" href={`/logistica/envios?id=${selected.shipment_id}`}>Ver envío →</a>}<EstadoLogistico state={state} sourceType={selected.source_type} sourceId={selected.source_id} /></div>}</Detail>} />;
+  return (
+    <Layout
+      list={
+        <Card title="Peticiones de material" action={<a href="/?tab=servicios" className="rounded-xl border px-3 py-2 text-sm font-semibold">Crear desde Servicios</a>}>
+          <Table headers={["Código", "Origen", "Estado", "Urgencia", "Necesidad", "Destino"]}>
+            {rows.map(x => (
+              <Row key={x.id} section="solicitudes" id={x.id}>
+                <td className="p-3 font-semibold">{x.code}</td>
+                <td className="p-3">{x.source_type}</td>
+                <td className="p-3"><Status text={x.status} /></td>
+                <td className="p-3"><Badge tone={x.priority === "critica" ? "critica" : x.priority === "alta" ? "alta" : "info"} /></td>
+                <td className="p-3">{x.required_date || "Sin fecha"}</td>
+                <td className="p-3">{x.installer_name || x.delivery_address || "Pendiente"}</td>
+              </Row>
+            ))}
+          </Table>
+        </Card>
+      }
+      detail={
+        <Detail title="Detalle petición" selected={selected}>
+          {selected && (
+            <div className="space-y-3">
+              <Read label="Origen" value={<a href={sourceHref(state.requirements.find(x => x.request_id === selected.id) || { source_type: selected.source_type, source_id: selected.source_id } as any)}>Abrir origen -&gt;</a>} />
+              <Read label="Estado visible en origen" value={logisticsStatusLabel(state.requirements.find(x => x.request_id === selected.id)?.status)} />
+              <Read label="Instalador / dirección" value={`${selected.installer_name || "Sin instalador"} · ${selected.delivery_address || "Sin dirección"}`} />
+              {selected.rejection_reason && <Read label="Motivo rechazo" value={selected.rejection_reason} />}
+              {selected.lines.map(line => {
+                const req = state.requirements.find(x => x.id === line.material_requirement_id);
+                const stock = req?.material_id ? state.stock.find(s => s.material_id === req.material_id) : null;
+                const free = available(stock);
+                return <Mini key={line.id} title={req ? materialDisplay(req, state) : "Línea"} text={`Solicitado ${line.requested_quantity} · Aprobado ${line.accepted_quantity} · Disponible ${free} · ${line.line_status}`} />;
+              })}
+              <div className="grid gap-2">
+                <button onClick={() => exportPickingSheet(state, { request: selected })} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold">
+                  <FileDown className="mr-1 inline h-4 w-4" />
+                  Exportar hoja de picking
+                </button>
+                <button onClick={() => commit(d => acceptRequestAndReserve(d, selected.id), "Petición aprobada y stock reservado")} className="w-full rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Aprobar y reservar stock</button>
+                <button onClick={() => commit(d => createPickingFromRequest(d, selected.id), "Picking creado desde petición")} className="w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">Convertir en picking</button>
+                <button onClick={() => { const reason = prompt("Motivo del rechazo"); if (reason) commit(d => rejectLogisticsRequest(d, selected.id, reason), "Petición rechazada"); }} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold text-red-700">Rechazar petición</button>
+              </div>
+              {selected.picking_id && <a className="block rounded-xl border p-3 text-sm font-semibold" href={`/logistica/picking?id=${selected.picking_id}`}>Ver picking -&gt;</a>}
+              {selected.shipment_id && <a className="block rounded-xl border p-3 text-sm font-semibold" href={`/logistica/envios?id=${selected.shipment_id}`}>Ver envío -&gt;</a>}
+              <EstadoLogistico state={state} sourceType={selected.source_type} sourceId={selected.source_id} />
+            </div>
+          )}
+        </Detail>
+      }
+    />
+  );
 }
 
 function Entradas({ state, q, detailId, commit }: ViewProps) {
@@ -172,7 +221,7 @@ function Stock({ state, q, detailId, commit }: ViewProps) {
 function Picking({ state, q, detailId, commit }: ViewProps) {
   const rows = state.pickings.filter(x => hay([x.codigo, x.estado, x.zona, x.campana_id], q));
   const selected = rows.find(x => x.id === detailId);
-  return <Layout list={<Card title="Picking" action={<button onClick={() => commit(d => createPicking(d, { campana_id: "camp_demo", instalador_id: "inst_demo", zona: "Madrid", fecha_salida_prevista: today(), num_puntos: 1, lineas: [{ material_id: d.materials[0].id, vin_id: "VIN-DEMO", cantidad_esperada: 1 }] }), "Picking creado y material reservado")} className="rounded-xl bg-slate-900 px-3 py-2 text-sm text-white"><Plus className="mr-1 inline h-4 w-4" />Crear picking</button>}><Table headers={["Código", "Estado", "Campaña", "Puntos"]}>{rows.map(x => <Row key={x.id} section="picking" id={x.id}><td className="p-3 font-semibold">{x.codigo}</td><td className="p-3"><Status text={x.estado} /></td><td className="p-3">{x.campana_id || "Sin campaña"}</td><td className="p-3">{x.num_puntos}</td></Row>)}</Table></Card>} detail={<Detail title="Detalle picking" selected={selected}>{selected && <div className="space-y-3"><Read label="Código" value={selected.codigo} /><Read label="Envío" value={selected.envio_id ? <a href={`/logistica/envios?id=${selected.envio_id}`}>Ver envío</a> : "Sin envío"} />{selected.lineas.map(l => <Mini key={l.id} title={materialName(state, l.material_id)} text={`${l.cantidad_preparada}/${l.cantidad_esperada} · ${l.estado}`} action={<button onClick={() => commit(d => preparePickingLine(d, selected.id, l.id, l.cantidad_esperada), "Línea preparada")} className="mt-2 rounded-lg border px-2 py-1 text-xs">Marcar listo</button>} />)}<button onClick={() => commit(d => generateShipping(d, selected.id), "Envío generado")} disabled={selected.estado !== "preparado"} className="w-full rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"><Send className="mr-1 inline h-4 w-4" />Generar envío</button><button onClick={() => commit(d => closePicking(d, selected.id), "Picking cerrado")} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold">Cerrar picking</button><Trace state={state} vin={selected.lineas.find(l => l.vin_id)?.vin_id} /></div>}</Detail>} />;
+  return <Layout list={<Card title="Picking" action={<a href="/logistica/solicitudes" className="rounded-xl border px-3 py-2 text-sm font-semibold">Crear desde petición</a>}><Table headers={["Código", "Estado", "Campaña", "Puntos"]}>{rows.map(x => <Row key={x.id} section="picking" id={x.id}><td className="p-3 font-semibold">{x.codigo}</td><td className="p-3"><Status text={x.estado} /></td><td className="p-3">{x.campana_id || "Sin campaña"}</td><td className="p-3">{x.num_puntos}</td></Row>)}</Table></Card>} detail={<Detail title="Detalle picking" selected={selected}>{selected && <div className="space-y-3"><Read label="Código" value={selected.codigo} /><Read label="Envío" value={selected.envio_id ? <a href={`/logistica/envios?id=${selected.envio_id}`}>Ver envío</a> : "Sin envío"} />{selected.lineas.map(l => <Mini key={l.id} title={materialName(state, l.material_id)} text={`${l.cantidad_preparada}/${l.cantidad_esperada} · ${l.estado}`} action={<button onClick={() => commit(d => preparePickingLine(d, selected.id, l.id, l.cantidad_esperada), "Línea preparada")} className="mt-2 rounded-lg border px-2 py-1 text-xs">Marcar listo</button>} />)}<button onClick={() => exportPickingSheet(state, { picking: selected })} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold"><FileDown className="mr-1 inline h-4 w-4" />Exportar hoja de picking</button><button onClick={() => commit(d => generateShipping(d, selected.id), "Envío generado")} disabled={selected.estado !== "preparado"} className="w-full rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"><Send className="mr-1 inline h-4 w-4" />Generar envío</button><button onClick={() => commit(d => closePicking(d, selected.id), "Picking cerrado")} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold">Cerrar picking</button><Trace state={state} vin={selected.lineas.find(l => l.vin_id)?.vin_id} /></div>}</Detail>} />;
 }
 
 function Envios({ state, q, detailId, commit }: ViewProps) {
@@ -215,6 +264,47 @@ function Movements({ state, rows }: { state: LogisticsState; rows: StockMovement
 function Trace({ state, vin }: { state: LogisticsState; vin?: string | null }) { if (!vin) return null; const picking = state.pickings.find(p => p.lineas.some(l => l.vin_id === vin)); const envio = picking?.envio_id ? state.shipments.find(x => x.id === picking.envio_id) : null; const incident = state.incidents.find(x => x.vin_id === vin && !["resuelta", "cancelada"].includes(x.estado)); const pending = state.pendings.find(x => x.vin_id === vin && !["cerrado", "recibido"].includes(x.estado)); return <Card title="Trazabilidad VIN"><Read label="VIN" value={vin} /><Read label="Campaña" value={picking?.campana_id || incident?.campana_id || "Sin campaña"} /><Read label="Picking" value={picking ? <a href={`/logistica/picking?id=${picking.id}`}>{picking.codigo}</a> : "Sin picking"} /><Read label="Envío" value={envio ? <a href={`/logistica/envios?id=${envio.id}`}>{envio.tracking || envio.estado}</a> : "Sin envío"} /><Read label="Incidencia activa" value={incident ? <a href={`/logistica/incidencias?id=${incident.id}`}>{incident.codigo}</a> : "Sin incidencia"} /><Read label="Pendiente llegada" value={pending ? <a href={`/logistica/pendientes?id=${pending.id}`}>Ver pendiente</a> : "Sin pendiente"} /><Movements state={state} rows={state.movements.filter(x => x.vin_id === vin)} /></Card>; }
 function InputSmall({ label, value, onChange, type = "text" }: { label: string; value: any; onChange: (value: string) => void; type?: string }) { return <label className="block"><span className="text-sm font-medium">{label}</span><input type={type} value={value ?? ""} onChange={event => onChange(event.target.value)} className="w-full rounded-2xl border px-3 py-2" /></label>; }
 function SelectSmall({ label, value, onChange, options, labels = {} }: { label: string; value: string; onChange: (value: string) => void; options: string[]; labels?: Record<string, string> }) { return <label className="block"><span className="text-sm font-medium">{label}</span><select value={value ?? ""} onChange={event => onChange(event.target.value)} className="w-full rounded-2xl border bg-white px-3 py-2">{options.map(option => <option key={option} value={option}>{labels[option] || option}</option>)}</select></label>; }
+function exportPickingSheet(state: LogisticsState, input: { request?: LogisticsState["requests"][number]; picking?: LogisticsState["pickings"][number] }) {
+  const rows = [["Código", "Campaña", "Instalador", "Material", "SKU", "VIN", "Cantidad", "Destino", "Estado"]];
+  if (input.request) {
+    input.request.lines.forEach(line => {
+      const req = state.requirements.find(x => x.id === line.material_requirement_id);
+      const material = req?.material_id ? state.materials.find(x => x.id === req.material_id) : null;
+      rows.push([
+        input.request!.code,
+        input.request!.campaign_id || req?.campaign_id || "",
+        input.request!.installer_name || req?.installer_name || "",
+        material?.nombre || req?.requested_material_name || "Material pendiente",
+        material?.sku || req?.requested_sku || "",
+        req?.vin || "",
+        String(line.accepted_quantity || line.requested_quantity || req?.requested_quantity || 0),
+        input.request!.delivery_address || req?.delivery_address || "",
+        line.line_status || req?.status || input.request!.status
+      ]);
+    });
+  }
+  if (input.picking) {
+    input.picking.lineas.forEach(line => rows.push([
+      input.picking!.codigo,
+      input.picking!.campana_id || "",
+      input.picking!.instalador_id || "",
+      materialName(state, line.material_id),
+      state.materials.find(x => x.id === line.material_id)?.sku || "",
+      line.vin_id || "",
+      String(line.cantidad_esperada),
+      input.picking!.zona || "",
+      line.estado
+    ]));
+  }
+  const csv = rows.map(row => row.map(value => `"${String(value ?? "").replace(/"/g, '""')}"`).join(";")).join("\n");
+  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${input.picking?.codigo || input.request?.code || "hoja-picking"}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 function clientHistory(state: LogisticsState) {
   const clients = new Map<string, { client: string; recibido: number; consumido: number; incidencias: number; peticiones: number; materiales: string[] }>();
   state.materials.forEach(material => {
