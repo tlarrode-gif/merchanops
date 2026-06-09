@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Clipboard, ExternalLink, MoreHorizontal, Save, X } from "lucide-react";
+import { EstadoLogistico } from "@/components/logistics/estado-logistico";
+import { LogisticsState, seedLogistics } from "@/lib/logistics";
+import { loadLogisticsState } from "@/lib/logistics-store";
 import {
   IsdinCall,
   IsdinCallStatus,
@@ -226,10 +229,15 @@ export function CallDrawer({
   onCopySummary: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState(call);
+  const [logisticsState, setLogisticsState] = useState<LogisticsState>(() => seedLogistics());
 
   useEffect(() => {
     setDraft(call);
   }, [call]);
+
+  useEffect(() => {
+    loadLogisticsState().then(loaded => setLogisticsState(loaded.state)).catch(() => null);
+  }, [call.vin]);
 
   function patch(next: Partial<IsdinCall>) {
     setDraft({ ...draft, ...next });
@@ -319,6 +327,8 @@ export function CallDrawer({
             <Textarea label="Comentario para Logística" value={draft.logistics_comment || ""} onChange={value => patch({ logistics_comment: value })} />
             <p className="mt-2 text-xs text-slate-500">Las incidencias de llamada son preventivas: esta actuación logística no genera pagos, revisitas ni visitas fallidas.</p>
           </Section>
+
+          <EstadoLogistico state={logisticsState} sourceType="isdin_vinyl" sourceId={call.isdin_vinyl_id || call.vin} vin={call.vin} />
         </div>
 
         <div className="flex flex-col gap-2 border-t p-4 md:flex-row md:items-center md:justify-between">

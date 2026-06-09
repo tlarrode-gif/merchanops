@@ -7,6 +7,7 @@ import {
   LogisticsRequest,
   LogisticsRequestLine,
   LogisticsState,
+  LogisticsVin,
   Material,
   MaterialRequirement,
   PendingArrival,
@@ -85,6 +86,10 @@ function notificationForDb(row: LogisticsNotification) {
   return stripUndefined(row as unknown as Db);
 }
 
+function vinForDb(row: LogisticsVin) {
+  return stripUndefined(row as unknown as Db);
+}
+
 async function upsertMany(table: string, rows: Db[]) {
   if (!supabase || rows.length === 0) return;
   const { error } = await supabase.from(table).upsert(rows);
@@ -132,7 +137,9 @@ export async function loadLogisticsState(): Promise<{ state: LogisticsState; rem
     requestLines,
     events,
     audit,
-    notifications
+    notifications,
+    vins,
+    syncLogs
   ] = await Promise.all([
     supabase.from("logistics_materials").select("*").order("nombre"),
     supabase.from("logistics_entries").select("*").order("created_at", { ascending: false }),
@@ -149,10 +156,12 @@ export async function loadLogisticsState(): Promise<{ state: LogisticsState; rem
     supabase.from("logistics_request_lines").select("*"),
     supabase.from("integration_events").select("*").order("created_at", { ascending: false }),
     supabase.from("logistics_audit_log").select("*").order("created_at", { ascending: false }),
-    supabase.from("logistics_notifications").select("*").order("created_at", { ascending: false })
+    supabase.from("logistics_notifications").select("*").order("created_at", { ascending: false }),
+    supabase.from("logistics_vins").select("*").order("updated_at", { ascending: false }),
+    supabase.from("sync_logs").select("*").order("created_at", { ascending: false })
   ]);
 
-  const failed = [materials, entries, entryLines, stock, movements, pickings, pickingLines, shipments, incidents, pendings, requirements, requests, requestLines, events, audit, notifications].find(result => result.error);
+  const failed = [materials, entries, entryLines, stock, movements, pickings, pickingLines, shipments, incidents, pendings, requirements, requests, requestLines, events, audit, notifications, vins, syncLogs].find(result => result.error);
   if (failed?.error) return { state: loadLogistics(), remote: false, error: failed.error.message };
 
   const seed = seedLogistics();
@@ -201,7 +210,9 @@ export async function loadLogisticsState(): Promise<{ state: LogisticsState; rem
         sync_event_id: row.sync_event_id as string | null,
         created_at: String(row.created_at)
       })),
-      notifications: (notifications.data || []) as LogisticsNotification[]
+      notifications: (notifications.data || []) as LogisticsNotification[],
+      vins: (vins.data || []) as LogisticsVin[],
+      syncLogs: (syncLogs.data || []) as LogisticsState["syncLogs"]
     })
   };
 }
@@ -229,4 +240,6 @@ export async function saveLogisticsState(state: LogisticsState, remote: boolean)
   await upsertMany("integration_events", normalized.events.map(eventForDb));
   await upsertMany("logistics_audit_log", normalized.audit.map(auditForDb));
   await upsertMany("logistics_notifications", normalized.notifications.map(notificationForDb));
+  await upsertMany("logistics_vins", normalized.vins.map(vinForDb));
+  await upsertMany("sync_logs", normalized.syncLogs.map(row => stripUndefined(row as unknown as Db)));
 }

@@ -3,9 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileDown } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { createIncident } from "@/lib/logistics";
+import { createDomainEvent, publishDomainEvent } from "@/lib/domain-events";
 import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
-import { syncIsdinVinylToLogistics } from "@/lib/logistics-sync";
 import {
   IsdinCall,
   IsdinCallStatus,
@@ -89,11 +88,16 @@ async function syncCallLogisticsImpact(call: IsdinCall) {
   if (!call.requires_logistics_action) return;
   const loaded = await loadLogisticsState();
   const logistics = loaded.state;
-  const { requirement } = syncIsdinVinylToLogistics(logistics, {
+  const payload = {
     id: call.isdin_vinyl_id || call.vin,
+    source_type: "isdin_vinyl",
+    vinyl_id: call.isdin_vinyl_id || call.vin,
     vinyl: call.vin,
+    vin: call.vin,
+    vin_id: call.vin,
     pharmacy_name: call.pharmacy_name,
     vinyl_campaign: call.vinyl_campaign,
+    campana_id: call.vinyl_campaign,
     height: call.height,
     width: call.width,
     desired_installation_date: call.logistics_required_date || call.next_visit_date || call.desired_installation_date,
@@ -108,20 +112,17 @@ async function syncCallLogisticsImpact(call: IsdinCall) {
     comments: [call.call_comment, call.logistics_comment].filter(Boolean).join("\n"),
     material_name: call.logistics_need_type || "Actuación logística desde llamada",
     material_type: "vinilo_medida"
-  }, `call-${call.updated_at || call.call_datetime || call.vin}`);
-  if (!requirement.incident_id && cleanCallStatus(call.call_status) === "Incidencia en llamada") {
-    const incident = createIncident(logistics, {
-      tipo: call.logistics_need_type === "cambio_medidas" ? "medidas" : "falta",
-      material_id: requirement.material_id,
-      vin_id: call.vin,
-      campana_id: call.vinyl_campaign,
+  };
+  publishDomainEvent(logistics, createDomainEvent("servicio.material_asignado", "isdin", payload, call.vin));
+  if (cleanCallStatus(call.call_status) === "Incidencia en llamada") {
+    // Incidencia en llamada es preventiva y no genera pago de visita fallida.
+    publishDomainEvent(logistics, createDomainEvent("servicio.incidencia_creada", "isdin", {
+      ...payload,
+      tipo: call.logistics_need_type === "cambio_medidas" ? "medidas_incorrectas" : "material_no_recibido",
       descripcion: call.logistics_comment || call.call_comment || "Incidencia de llamada con impacto logístico.",
       impacto: "Backoffice solicita actuación logística preventiva.",
       fecha_limite: dateOnly(call.logistics_required_date || call.next_visit_date || call.desired_installation_date)
-    });
-    requirement.incident_id = incident.id;
-    requirement.pending_arrival_id = incident.pendiente_llegada_id || null;
-    requirement.status = "con_incidencia";
+    }, call.vin));
   }
   await saveLogisticsState(logistics, loaded.remote);
 }
