@@ -39,7 +39,9 @@ function entryForDb(row: Entry) {
 }
 
 function entryLineForDb(row: Entry["lineas"][number], entryId: string) {
-  return stripUndefined({ ...row, entrada_id: entryId });
+  const { diferencia, ...line } = row;
+  void diferencia;
+  return stripUndefined({ ...line, entrada_id: entryId });
 }
 
 function pickingForDb(row: Picking) {
@@ -88,6 +90,12 @@ function notificationForDb(row: LogisticsNotification) {
 
 function vinForDb(row: LogisticsVin) {
   return stripUndefined(row as unknown as Db);
+}
+
+function stockForDb(row: Stock) {
+  const { disponible, ...stock } = row as Stock & { disponible?: number };
+  void disponible;
+  return stripUndefined(stock as unknown as Db);
 }
 
 async function upsertMany(table: string, rows: Db[]) {
@@ -225,7 +233,7 @@ export async function saveLogisticsState(state: LogisticsState, remote: boolean)
   }
 
   await upsertMany("logistics_materials", normalized.materials.map(materialForDb));
-  await upsertMany("logistics_stock", normalized.stock.map(row => stripUndefined(row as unknown as Db)));
+  await upsertMany("logistics_stock", normalized.stock.map(stockForDb));
   await insertNewMovements(normalized.movements.map(row => stripUndefined(row as unknown as Db)));
   await upsertMany("logistics_entries", normalized.entries.map(entryForDb));
   await replaceChildren("logistics_entry_lines", "entrada_id", normalized.entries.map(x => x.id), normalized.entries.flatMap(entry => entry.lineas.map(line => entryLineForDb(line, entry.id))));
