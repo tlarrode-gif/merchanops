@@ -5,7 +5,7 @@ import { ArrowRight, CheckCircle2, FileDown, Plus, RefreshCw, Search, Send } fro
 import { CrearIncidenciaModal } from "@/components/logistics/crear-incidencia-modal";
 import { EstadoLogistico } from "@/components/logistics/estado-logistico";
 import { createDomainEvent, publishDomainEvent } from "@/lib/domain-events";
-import { LogisticsState, StockMovement, available, closePicking, confirmInstallerDelivery, createIncident, createMovement, createPickingFromRequest, generateShipping, logisticsAlerts, logisticsKpis, logisticsStatusLabel, materialName, preparePickingLine, receiveEntry, rejectLogisticsRequest, seedLogistics, today, uid, upsertMaterialCatalog } from "@/lib/logistics";
+import { LogisticsState, StockMovement, available, closePicking, confirmInstallerDelivery, createIncident, createMovement, createPickingFromRequest, generateShipping, logisticsAlerts, logisticsKpis, logisticsStatusLabel, materialName, preparePickingLine, receiveEntry, rejectLogisticsRequest, seedLogistics, today, uid, upsertLogisticsVin, upsertMaterialCatalog } from "@/lib/logistics";
 import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
 import { acceptRequestAndReserve, detectLogisticsSyncIssues, materialDisplay, sourceHref } from "@/lib/logistics-sync";
 
@@ -168,14 +168,180 @@ function Solicitudes({ state, q, detailId, commit }: ViewProps) {
 
 function Entradas({ state, q, detailId, commit }: ViewProps) {
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [entryMode, setEntryMode] = useState<"selector" | "vin_bulk" | "references" | "manual">("selector");
   const [step, setStep] = useState(1);
   const [header, setHeader] = useState<any>({ proveedor_id: "", albaran: "", fecha_recepcion: today(), transportista: "MRW", tracking: "", bultos: 1, observaciones: "" });
   const [lines, setLines] = useState<any[]>([{ material_id: state.materials[0]?.id || "", sku: "", nombre: "", cantidad_esperada: 0, cantidad_recibida: 1, cantidad_correcta: 1, cantidad_danada: 0, estado_material: "correcto", vins: "" }]);
+  const [bulkVinMeta, setBulkVinMeta] = useState({ cliente_id: "isdin", campana_id: "ISDIN", semana: "", sku: "", nombre: "", medidas: "", cantidad_esperada: 0 });
+  const [bulkVinText, setBulkVinText] = useState("");
+  const [referenceText, setReferenceText] = useState("");
+  const [referenceLines, setReferenceLines] = useState<any[]>([{ sku: "", nombre: "", cliente_id: "", tipo: "consumible", medidas: "", cantidad: 1, observaciones: "" }]);
   const rows = state.entries.filter(x => hay([x.albaran, x.estado, x.transportista], q));
   const selected = state.entries.find(x => x.id === detailId);
+  const bulkVins = useMemo(() => parseBulkVins(bulkVinText), [bulkVinText]);
+  const bulkVinUnits = bulkVins.reduce((total, row) => total + row.quantity, 0);
+  const existingBulkVins = bulkVins.filter(row => state.vins.some(vin => vin.vin_id === row.vin)).length;
+
+  function openEntry(mode: typeof entryMode = "selector") {
+    setEntryMode(mode);
+    setStep(1);
+    setWizardOpen(true);
+  }
+
   function addLine() {
     setLines(prev => [...prev, { material_id: state.materials[0]?.id || "", sku: "", nombre: "", cantidad_esperada: 0, cantidad_recibida: 1, cantidad_correcta: 1, cantidad_danada: 0, estado_material: "correcto", vins: "" }]);
   }
+
+  function addReferenceLine() {
+    setReferenceLines(prev => [...prev, { sku: "", nombre: "", cliente_id: "", tipo: "consumible", medidas: "", cantidad: 1, observaciones: "" }]);
+  }
+
+  function loadReferencePaste() {
+    const parsed = parseReferencePaste(referenceText);
+    if (parsed.length) setReferenceLines(parsed);
+  }
+
+  async function confirmBulkVins() {
+    if (!bulkVins.length) {
+      alert("No se han detectado VINs en el texto pegado.");
+      return;
+    }
+    await commit(d => {
+      const entryId = uid("ent");
+      const entryCode = header.albaran || `ALB-${Date.now().toString().slice(-5)}`;
+      const materialResult = upsertMaterialCatalog(d, {
+        sku: bulkVinMeta.sku || buildSku("VIN", bulkVinMeta.campana_id, bulkVinMeta.semana || header.fecha_recepcion),
+        nombre: bulkVinMeta.nombre || `Vinilos ${bulkVinMeta.campana_id || "campaña"} ${bulkVinMeta.semana || ""}`.trim(),
+        cliente_id: bulkVinMeta.cliente_id || null,
+        tipo: "vinilo_medida",
+        medidas: bulkVinMeta.medidas || null,
+        unidad_control: "uds",
+        proveedor_id: header.proveedor_id || null
+      });
+      const expected = Number(bulkVinMeta.cantidad_esperada || bulkVinUnits);
+      const entry: any = {
+        id: entryId,
+        albaran: entryCode,
+        fecha_prevista: header.fecha_recepcion || today(),
+        fecha_recepcion: header.fecha_recepcion || today(),
+        proveedor_id: header.proveedor_id || null,
+        transportista: header.transportista,
+        tracking_number: header.tracking || null,
+        num_bultos_esperado: Number(header.bultos || 1),
+        num_bultos_recibido: Number(header.bultos || 1),
+        estado: expected === bulkVinUnits ? "recibido_completo" : "con_incidencia",
+        observaciones: [header.observaciones, bulkVinMeta.semana ? `Semana ${bulkVinMeta.semana}` : "", expected !== bulkVinUnits ? `Recuento esperado ${expected}, detectado ${bulkVinUnits}` : ""].filter(Boolean).join(" · "),
+        lineas: []
+      };
+      const entryLine: any = {
+        id: uid("eline"),
+        entrada_id: entryId,
+        material_id: materialResult.material.id,
+        cantidad_esperada: expected,
+        cantidad_recibida: bulkVinUnits,
+        cantidad_correcta: bulkVinUnits,
+        cantidad_danada: 0,
+        diferencia: bulkVinUnits - expected,
+        estado_material: expected === bulkVinUnits ? "correcto" : "a_revisar",
+        vin_ids: bulkVins.map(row => row.vin),
+        observations: bulkVins.map(row => row.quantity > 1 ? `${row.vin} (${row.quantity} ud)` : row.vin).join(", ")
+      };
+      if (expected !== bulkVinUnits) {
+        const inc = createIncident(d, {
+          tipo: "falta",
+          material_id: materialResult.material.id,
+          entrada_id: entryId,
+          descripcion: `Entrada ${entryCode} con recuento distinto. Esperado ${expected}, detectado ${bulkVinUnits}.`,
+          impacto: "Revisar albarán antes de preparar picking."
+        });
+        entryLine.incidencia_id = inc.id;
+      } else {
+        createMovement(d, { material_id: materialResult.material.id, tipo: "entrada", cantidad: bulkVinUnits, origen: entryCode, destino: "almacen", motivo: `Entrada masiva VIN ${entryCode}` });
+      }
+      bulkVins.forEach(row => {
+        upsertLogisticsVin(d, {
+          vin_id: row.vin,
+          material_id: materialResult.material.id,
+          campana_id: bulkVinMeta.campana_id || null,
+          medidas: bulkVinMeta.medidas || null,
+          estado: "en_almacen"
+        });
+      });
+      entry.lineas.push(entryLine);
+      d.entries.unshift(entry);
+      publishDomainEvent(d, createDomainEvent("material.base_datos_importada", "logistica", {
+        cliente_id: bulkVinMeta.cliente_id || null,
+        albaran: entryCode,
+        referencias_nuevas: materialResult.created ? 1 : 0,
+        referencias_actualizadas: materialResult.created ? 0 : 1,
+        materiales: [{ material_id: materialResult.material.id, sku: materialResult.material.sku, cantidad: bulkVinUnits, vins: bulkVins.map(row => row.vin) }]
+      }, entry.id));
+    }, "Entrada masiva de VINs registrada");
+    setWizardOpen(false);
+  }
+
+  async function confirmReferenceEntry() {
+    const validLines = referenceLines.filter(line => String(line.nombre || line.sku || "").trim() && Number(line.cantidad || 0) > 0);
+    if (!validLines.length) {
+      alert("Añade al menos una línea de material con cantidad.");
+      return;
+    }
+    await commit(d => {
+      const entryId = uid("ent");
+      const entryCode = header.albaran || `ALB-${Date.now().toString().slice(-5)}`;
+      const entry: any = {
+        id: entryId,
+        albaran: entryCode,
+        fecha_prevista: header.fecha_recepcion || today(),
+        fecha_recepcion: header.fecha_recepcion || today(),
+        proveedor_id: header.proveedor_id || null,
+        transportista: header.transportista,
+        tracking_number: header.tracking || null,
+        num_bultos_esperado: Number(header.bultos || 1),
+        num_bultos_recibido: Number(header.bultos || 1),
+        estado: "recibido_completo",
+        observaciones: header.observaciones || "",
+        lineas: []
+      };
+      const imported = validLines.map(line => {
+        const materialResult = upsertMaterialCatalog(d, {
+          sku: line.sku || buildSku("REF", line.nombre, line.medidas),
+          nombre: line.nombre || line.sku || "Referencia logística",
+          cliente_id: line.cliente_id || null,
+          tipo: line.tipo || "consumible",
+          medidas: line.medidas || null,
+          unidad_control: "uds",
+          proveedor_id: header.proveedor_id || null
+        });
+        const quantity = Number(line.cantidad || 0);
+        createMovement(d, { material_id: materialResult.material.id, tipo: "entrada", cantidad: quantity, origen: entryCode, destino: "almacen", motivo: `Entrada rápida ${entryCode}` });
+        entry.lineas.push({
+          id: uid("eline"),
+          entrada_id: entryId,
+          material_id: materialResult.material.id,
+          cantidad_esperada: quantity,
+          cantidad_recibida: quantity,
+          cantidad_correcta: quantity,
+          cantidad_danada: 0,
+          diferencia: 0,
+          estado_material: "correcto",
+          vin_ids: [],
+          observations: line.observaciones || ""
+        });
+        return { material_id: materialResult.material.id, sku: materialResult.material.sku, cantidad: quantity, created: materialResult.created };
+      });
+      d.entries.unshift(entry);
+      publishDomainEvent(d, createDomainEvent("material.base_datos_importada", "logistica", {
+        cliente_id: validLines[0]?.cliente_id || null,
+        albaran: entryCode,
+        referencias_nuevas: imported.filter(line => line.created).length,
+        referencias_actualizadas: imported.filter(line => !line.created).length,
+        materiales: imported
+      }, entry.id));
+    }, "Entrada rápida registrada");
+    setWizardOpen(false);
+  }
+
   async function confirmEntry() {
     await commit(d => {
       const entryId = uid("ent");
@@ -195,10 +361,7 @@ function Entradas({ state, q, detailId, commit }: ViewProps) {
         } else if (entryLine.cantidad_correcta > 0) {
           createMovement(d, { material_id: materialId, tipo: "entrada", cantidad: entryLine.cantidad_correcta, origen: entry.albaran, destino: "almacen", motivo: `Entrada manual ${entry.albaran}` });
         }
-        entryLine.vin_ids.forEach((vin: string) => {
-          const existing = d.vins.find(x => x.vin_id === vin);
-          d.vins.unshift({ id: existing?.id || uid("vin"), vin_id: vin, material_id: materialId, estado: "en_almacen", created_at: existing?.created_at || new Date().toISOString(), updated_at: new Date().toISOString() } as any);
-        });
+        entryLine.vin_ids.forEach((vin: string) => upsertLogisticsVin(d, { vin_id: vin, material_id: materialId, estado: "en_almacen" }));
         entry.lineas.push(entryLine);
       });
       d.entries.unshift(entry);
@@ -207,8 +370,97 @@ function Entradas({ state, q, detailId, commit }: ViewProps) {
     setWizardOpen(false);
     setStep(1);
   }
-  const wizard = wizardOpen && <Card title={`Nueva entrada · Paso ${step} de 3`} action={<button onClick={() => setWizardOpen(false)} className="rounded-xl border px-3 py-2 text-sm">Cancelar</button>}>{step === 1 && <div className="grid gap-3 md:grid-cols-2"><InputSmall label="Proveedor" value={header.proveedor_id} onChange={v => setHeader({ ...header, proveedor_id: v })} /><InputSmall label="Número de albarán" value={header.albaran} onChange={v => setHeader({ ...header, albaran: v })} /><InputSmall label="Fecha recepción" type="date" value={header.fecha_recepcion} onChange={v => setHeader({ ...header, fecha_recepcion: v })} /><SelectSmall label="Transportista" value={header.transportista} onChange={v => setHeader({ ...header, transportista: v })} options={["MRW", "SEUR", "DHL", "GLS", "Correos", "Propio", "Otro"]} /><InputSmall label="Tracking" value={header.tracking} onChange={v => setHeader({ ...header, tracking: v })} /><InputSmall label="Bultos recibidos" type="number" value={header.bultos} onChange={v => setHeader({ ...header, bultos: Number(v) })} /><div className="md:col-span-2"><InputSmall label="Observaciones" value={header.observaciones} onChange={v => setHeader({ ...header, observaciones: v })} /></div><button onClick={() => setStep(2)} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">Continuar</button></div>}{step === 2 && <div className="space-y-3">{lines.map((line, index) => <div key={index} className="rounded-2xl border p-3"><div className="grid gap-2 md:grid-cols-4"><SelectSmall label="Material" value={line.material_id} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, material_id: v } : x))} options={[...state.materials.map(m => m.id), "__new"]} labels={{ ...Object.fromEntries(state.materials.map(m => [m.id, `${m.sku} · ${m.nombre}`])), "__new": "Crear referencia nueva" }} /><InputSmall label="SKU nueva" value={line.sku} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, sku: v } : x))} /><InputSmall label="Nombre nueva" value={line.nombre} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, nombre: v } : x))} /><SelectSmall label="Estado" value={line.estado_material} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, estado_material: v } : x))} options={["correcto", "dañado", "incorrecto", "a_revisar"]} /><InputSmall label="Esperada" type="number" value={line.cantidad_esperada} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, cantidad_esperada: Number(v) } : x))} /><InputSmall label="Recibida" type="number" value={line.cantidad_recibida} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, cantidad_recibida: Number(v), cantidad_correcta: Math.max(0, Number(v) - Number(x.cantidad_danada || 0)) } : x))} /><InputSmall label="Dañada" type="number" value={line.cantidad_danada} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, cantidad_danada: Number(v), cantidad_correcta: Math.max(0, Number(x.cantidad_recibida || 0) - Number(v)) } : x))} /><InputSmall label="VINs" value={line.vins} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, vins: v } : x))} /></div>{Number(line.cantidad_recibida) < Number(line.cantidad_esperada) && <p className="mt-2 rounded-xl bg-red-50 p-2 text-xs font-semibold text-red-800">Diferencia detectada: se propondrá incidencia automática.</p>}</div>)}<div className="flex gap-2"><button onClick={addLine} className="rounded-xl border px-3 py-2 text-sm">Añadir línea</button><button onClick={() => setStep(3)} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">Revisar</button></div></div>}{step === 3 && <div className="space-y-3"><Mini title="Resumen" text={`${lines.length} líneas · ${lines.reduce((a, l) => a + Number(l.cantidad_recibida || 0), 0)} unidades recibidas · ${lines.filter(l => Number(l.cantidad_danada || 0) > 0 || Number(l.cantidad_recibida || 0) < Number(l.cantidad_esperada || 0) || l.estado_material !== "correcto").length} incidencias automáticas`} />{lines.map((line, index) => <Mini key={index} title={line.material_id === "__new" ? line.nombre || "Referencia nueva" : materialName(state, line.material_id)} text={`Stock +${line.estado_material === "correcto" && Number(line.cantidad_danada || 0) === 0 && Number(line.cantidad_recibida || 0) >= Number(line.cantidad_esperada || 0) ? Number(line.cantidad_correcta || 0) : 0} · VINs ${String(line.vins || "").split(/[\s,;]+/).filter(Boolean).length}`} />)}<button onClick={confirmEntry} className="w-full rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Confirmar entrada</button></div>}</Card>;
-  return <div className="space-y-4">{wizard}<Layout list={<Card title="Entradas de almacén" action={<button onClick={() => setWizardOpen(true)} className="rounded-xl bg-slate-900 px-3 py-2 text-sm text-white"><Plus className="mr-1 inline h-4 w-4" />Nueva entrada</button>}><Table headers={["Albarán", "Estado", "Prevista", "Bultos"]}>{rows.map(x => <Row key={x.id} section="entradas" id={x.id}><td className="p-3 font-semibold">{x.albaran}</td><td className="p-3"><Status text={x.estado} /></td><td className="p-3">{x.fecha_prevista}</td><td className="p-3">{x.num_bultos_recibido}/{x.num_bultos_esperado}</td></Row>)}</Table></Card>} detail={<Detail title="Detalle entrada" selected={selected}>{selected && <div className="space-y-3"><Read label="Albarán" value={selected.albaran} /><Read label="Observaciones" value={selected.observaciones || "Sin observaciones"} />{selected.lineas.map(l => <Mini key={l.id} title={materialName(state, l.material_id)} text={`Esperado ${l.cantidad_esperada} · Recibido ${l.cantidad_recibida} · Dañado ${l.cantidad_danada}`} />)}<button onClick={() => commit(d => receiveEntry(d, selected.id, "recibido_completo"), "Entrada recibida y stock actualizado")} className="w-full rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Marcar recibido completo</button>{selected.lineas.flatMap(l => l.incidencia_id ? [<a key={l.incidencia_id} href={`/logistica/incidencias?id=${l.incidencia_id}`} className="block rounded-xl border p-3 text-sm font-semibold">Ver incidencia →</a>] : [])}</div>}</Detail>} /></div>;
+  const commonHeader = (
+    <div className="grid gap-3 md:grid-cols-3">
+      <InputSmall label="Proveedor" value={header.proveedor_id} onChange={v => setHeader({ ...header, proveedor_id: v })} />
+      <InputSmall label="Número de albarán" value={header.albaran} onChange={v => setHeader({ ...header, albaran: v })} />
+      <InputSmall label="Fecha recepción" type="date" value={header.fecha_recepcion} onChange={v => setHeader({ ...header, fecha_recepcion: v })} />
+      <SelectSmall label="Transportista" value={header.transportista} onChange={v => setHeader({ ...header, transportista: v })} options={["MRW", "SEUR", "DHL", "GLS", "Correos", "Propio", "Otro"]} />
+      <InputSmall label="Tracking" value={header.tracking} onChange={v => setHeader({ ...header, tracking: v })} />
+      <InputSmall label="Bultos recibidos" type="number" value={header.bultos} onChange={v => setHeader({ ...header, bultos: Number(v) })} />
+      <div className="md:col-span-3"><InputSmall label="Observaciones" value={header.observaciones} onChange={v => setHeader({ ...header, observaciones: v })} /></div>
+    </div>
+  );
+  const wizard = wizardOpen && (
+    <Card title="Nueva entrada" action={<button onClick={() => setWizardOpen(false)} className="rounded-xl border px-3 py-2 text-sm">Cancelar</button>}>
+      {entryMode === "selector" && (
+        <div className="grid gap-3 md:grid-cols-3">
+          <button onClick={() => setEntryMode("vin_bulk")} className="rounded-2xl border p-4 text-left hover:border-slate-400">
+            <b>VINs en bloque</b>
+            <p className="mt-1 text-sm text-slate-500">ISDIN, Sabadell y albaranes con muchos VINs.</p>
+          </button>
+          <button onClick={() => setEntryMode("references")} className="rounded-2xl border p-4 text-left hover:border-slate-400">
+            <b>Material rápido</b>
+            <p className="mt-1 text-sm text-slate-500">Foam, polyjet, vinilo genérico y referencias sin VIN.</p>
+          </button>
+          <button onClick={() => setEntryMode("manual")} className="rounded-2xl border p-4 text-left hover:border-slate-400">
+            <b>Entrada completa</b>
+            <p className="mt-1 text-sm text-slate-500">Dañados, diferencias, fotos o revisión detallada.</p>
+          </button>
+        </div>
+      )}
+      {entryMode === "vin_bulk" && (
+        <div className="space-y-4">
+          {commonHeader}
+          <div className="grid gap-3 md:grid-cols-3">
+            <InputSmall label="Cliente" value={bulkVinMeta.cliente_id} onChange={v => setBulkVinMeta({ ...bulkVinMeta, cliente_id: v })} />
+            <InputSmall label="Campaña" value={bulkVinMeta.campana_id} onChange={v => setBulkVinMeta({ ...bulkVinMeta, campana_id: v })} />
+            <InputSmall label="Semana instalación" value={bulkVinMeta.semana} onChange={v => setBulkVinMeta({ ...bulkVinMeta, semana: v })} />
+            <InputSmall label="SKU material" value={bulkVinMeta.sku} onChange={v => setBulkVinMeta({ ...bulkVinMeta, sku: v })} />
+            <InputSmall label="Nombre material" value={bulkVinMeta.nombre} onChange={v => setBulkVinMeta({ ...bulkVinMeta, nombre: v })} />
+            <InputSmall label="Medidas" value={bulkVinMeta.medidas} onChange={v => setBulkVinMeta({ ...bulkVinMeta, medidas: v })} />
+            <InputSmall label="Cantidad esperada" type="number" value={bulkVinMeta.cantidad_esperada} onChange={v => setBulkVinMeta({ ...bulkVinMeta, cantidad_esperada: Number(v) })} />
+          </div>
+          <TextAreaSmall label="VINs / texto del albarán" value={bulkVinText} onChange={setBulkVinText} rows={9} />
+          <div className="grid gap-3 md:grid-cols-4">
+            <Mini title="VINs detectados" text={String(bulkVins.length)} />
+            <Mini title="Unidades" text={String(bulkVinUnits)} />
+            <Mini title="Ya existen" text={String(existingBulkVins)} />
+            <Mini title="Diferencia" text={String(bulkVinUnits - Number(bulkVinMeta.cantidad_esperada || bulkVinUnits))} />
+          </div>
+          {bulkVins.length > 0 && <div className="max-h-44 overflow-auto rounded-xl border p-3 text-xs">{bulkVins.map(row => <span key={row.vin} className="mr-2 inline-block rounded-full bg-slate-100 px-2 py-1">{row.vin}{row.quantity > 1 ? ` · ${row.quantity} ud` : ""}</span>)}</div>}
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setEntryMode("selector")} className="rounded-xl border px-3 py-2 text-sm font-semibold">Cambiar tipo</button>
+            <button onClick={confirmBulkVins} className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Confirmar VINs en almacén</button>
+          </div>
+        </div>
+      )}
+      {entryMode === "references" && (
+        <div className="space-y-4">
+          {commonHeader}
+          <TextAreaSmall label="Pegar líneas" value={referenceText} onChange={setReferenceText} rows={5} />
+          <button onClick={loadReferencePaste} className="rounded-xl border px-3 py-2 text-sm font-semibold">Cargar líneas pegadas</button>
+          <div className="space-y-3">
+            {referenceLines.map((line, index) => (
+              <div key={index} className="grid gap-2 rounded-2xl border p-3 md:grid-cols-6">
+                <InputSmall label="SKU" value={line.sku} onChange={v => setReferenceLines(prev => prev.map((x, i) => i === index ? { ...x, sku: v } : x))} />
+                <div className="md:col-span-2"><InputSmall label="Material" value={line.nombre} onChange={v => setReferenceLines(prev => prev.map((x, i) => i === index ? { ...x, nombre: v } : x))} /></div>
+                <InputSmall label="Medidas" value={line.medidas} onChange={v => setReferenceLines(prev => prev.map((x, i) => i === index ? { ...x, medidas: v } : x))} />
+                <InputSmall label="Cantidad" type="number" value={line.cantidad} onChange={v => setReferenceLines(prev => prev.map((x, i) => i === index ? { ...x, cantidad: Number(v) } : x))} />
+                <SelectSmall label="Tipo" value={line.tipo} onChange={v => setReferenceLines(prev => prev.map((x, i) => i === index ? { ...x, tipo: v } : x))} options={["consumible", "vinilo_estandar", "vinilo_medida", "herramienta"]} />
+                <div className="md:col-span-2"><InputSmall label="Cliente" value={line.cliente_id} onChange={v => setReferenceLines(prev => prev.map((x, i) => i === index ? { ...x, cliente_id: v } : x))} /></div>
+                <div className="md:col-span-4"><InputSmall label="Observaciones" value={line.observaciones} onChange={v => setReferenceLines(prev => prev.map((x, i) => i === index ? { ...x, observaciones: v } : x))} /></div>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={addReferenceLine} className="rounded-xl border px-3 py-2 text-sm font-semibold">Añadir línea</button>
+            <button onClick={() => setEntryMode("selector")} className="rounded-xl border px-3 py-2 text-sm font-semibold">Cambiar tipo</button>
+            <button onClick={confirmReferenceEntry} className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Confirmar material</button>
+          </div>
+        </div>
+      )}
+      {entryMode === "manual" && (
+        <div className="space-y-4">
+          <p className="text-sm font-semibold text-slate-500">Paso {step} de 3</p>
+          {step === 1 && <div className="space-y-3">{commonHeader}<div className="flex gap-2"><button onClick={() => setEntryMode("selector")} className="rounded-xl border px-3 py-2 text-sm font-semibold">Cambiar tipo</button><button onClick={() => setStep(2)} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">Continuar</button></div></div>}
+          {step === 2 && <div className="space-y-3">{lines.map((line, index) => <div key={index} className="rounded-2xl border p-3"><div className="grid gap-2 md:grid-cols-4"><SelectSmall label="Material" value={line.material_id} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, material_id: v } : x))} options={[...state.materials.map(m => m.id), "__new"]} labels={{ ...Object.fromEntries(state.materials.map(m => [m.id, `${m.sku} · ${m.nombre}`])), "__new": "Crear referencia nueva" }} /><InputSmall label="SKU nueva" value={line.sku} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, sku: v } : x))} /><InputSmall label="Nombre nueva" value={line.nombre} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, nombre: v } : x))} /><SelectSmall label="Estado" value={line.estado_material} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, estado_material: v } : x))} options={["correcto", "dañado", "incorrecto", "a_revisar"]} /><InputSmall label="Esperada" type="number" value={line.cantidad_esperada} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, cantidad_esperada: Number(v) } : x))} /><InputSmall label="Recibida" type="number" value={line.cantidad_recibida} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, cantidad_recibida: Number(v), cantidad_correcta: Math.max(0, Number(v) - Number(x.cantidad_danada || 0)) } : x))} /><InputSmall label="Dañada" type="number" value={line.cantidad_danada} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, cantidad_danada: Number(v), cantidad_correcta: Math.max(0, Number(x.cantidad_recibida || 0) - Number(v)) } : x))} /><InputSmall label="VINs" value={line.vins} onChange={v => setLines(prev => prev.map((x, i) => i === index ? { ...x, vins: v } : x))} /></div>{Number(line.cantidad_recibida) < Number(line.cantidad_esperada) && <p className="mt-2 rounded-xl bg-red-50 p-2 text-xs font-semibold text-red-800">Diferencia detectada: se propondrá incidencia automática.</p>}</div>)}<div className="flex gap-2"><button onClick={addLine} className="rounded-xl border px-3 py-2 text-sm">Añadir línea</button><button onClick={() => setStep(3)} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">Revisar</button></div></div>}
+          {step === 3 && <div className="space-y-3"><Mini title="Resumen" text={`${lines.length} líneas · ${lines.reduce((a, l) => a + Number(l.cantidad_recibida || 0), 0)} unidades recibidas · ${lines.filter(l => Number(l.cantidad_danada || 0) > 0 || Number(l.cantidad_recibida || 0) < Number(l.cantidad_esperada || 0) || l.estado_material !== "correcto").length} incidencias automáticas`} />{lines.map((line, index) => <Mini key={index} title={line.material_id === "__new" ? line.nombre || "Referencia nueva" : materialName(state, line.material_id)} text={`Stock +${line.estado_material === "correcto" && Number(line.cantidad_danada || 0) === 0 && Number(line.cantidad_recibida || 0) >= Number(line.cantidad_esperada || 0) ? Number(line.cantidad_correcta || 0) : 0} · VINs ${String(line.vins || "").split(/[\s,;]+/).filter(Boolean).length}`} />)}<button onClick={confirmEntry} className="w-full rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Confirmar entrada</button></div>}
+        </div>
+      )}
+    </Card>
+  );
+  return <div className="space-y-4">{wizard}<Layout list={<Card title="Entradas de almacén" action={<button onClick={() => openEntry()} className="rounded-xl bg-slate-900 px-3 py-2 text-sm text-white"><Plus className="mr-1 inline h-4 w-4" />Nueva entrada</button>}><Table headers={["Albarán", "Estado", "Prevista", "Bultos"]}>{rows.map(x => <Row key={x.id} section="entradas" id={x.id}><td className="p-3 font-semibold">{x.albaran}</td><td className="p-3"><Status text={x.estado} /></td><td className="p-3">{x.fecha_prevista}</td><td className="p-3">{x.num_bultos_recibido}/{x.num_bultos_esperado}</td></Row>)}</Table></Card>} detail={<Detail title="Detalle entrada" selected={selected}>{selected && <div className="space-y-3"><Read label="Albarán" value={selected.albaran} /><Read label="Observaciones" value={selected.observaciones || "Sin observaciones"} />{selected.lineas.map(l => <Mini key={l.id} title={materialName(state, l.material_id)} text={`Esperado ${l.cantidad_esperada} · Recibido ${l.cantidad_recibida} · Dañado ${l.cantidad_danada}`} />)}<button onClick={() => commit(d => receiveEntry(d, selected.id, "recibido_completo"), "Entrada recibida y stock actualizado")} className="w-full rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Marcar recibido completo</button>{selected.lineas.flatMap(l => l.incidencia_id ? [<a key={l.incidencia_id} href={`/logistica/incidencias?id=${l.incidencia_id}`} className="block rounded-xl border p-3 text-sm font-semibold">Ver incidencia →</a>] : [])}</div>}</Detail>} /></div>;
 }
 
 function Stock({ state, q, detailId, commit }: ViewProps) {
@@ -264,6 +516,46 @@ function Movements({ state, rows }: { state: LogisticsState; rows: StockMovement
 function Trace({ state, vin }: { state: LogisticsState; vin?: string | null }) { if (!vin) return null; const picking = state.pickings.find(p => p.lineas.some(l => l.vin_id === vin)); const envio = picking?.envio_id ? state.shipments.find(x => x.id === picking.envio_id) : null; const incident = state.incidents.find(x => x.vin_id === vin && !["resuelta", "cancelada"].includes(x.estado)); const pending = state.pendings.find(x => x.vin_id === vin && !["cerrado", "recibido"].includes(x.estado)); return <Card title="Trazabilidad VIN"><Read label="VIN" value={vin} /><Read label="Campaña" value={picking?.campana_id || incident?.campana_id || "Sin campaña"} /><Read label="Picking" value={picking ? <a href={`/logistica/picking?id=${picking.id}`}>{picking.codigo}</a> : "Sin picking"} /><Read label="Envío" value={envio ? <a href={`/logistica/envios?id=${envio.id}`}>{envio.tracking || envio.estado}</a> : "Sin envío"} /><Read label="Incidencia activa" value={incident ? <a href={`/logistica/incidencias?id=${incident.id}`}>{incident.codigo}</a> : "Sin incidencia"} /><Read label="Pendiente llegada" value={pending ? <a href={`/logistica/pendientes?id=${pending.id}`}>Ver pendiente</a> : "Sin pendiente"} /><Movements state={state} rows={state.movements.filter(x => x.vin_id === vin)} /></Card>; }
 function InputSmall({ label, value, onChange, type = "text" }: { label: string; value: any; onChange: (value: string) => void; type?: string }) { return <label className="block"><span className="text-sm font-medium">{label}</span><input type={type} value={value ?? ""} onChange={event => onChange(event.target.value)} className="w-full rounded-2xl border px-3 py-2" /></label>; }
 function SelectSmall({ label, value, onChange, options, labels = {} }: { label: string; value: string; onChange: (value: string) => void; options: string[]; labels?: Record<string, string> }) { return <label className="block"><span className="text-sm font-medium">{label}</span><select value={value ?? ""} onChange={event => onChange(event.target.value)} className="w-full rounded-2xl border bg-white px-3 py-2">{options.map(option => <option key={option} value={option}>{labels[option] || option}</option>)}</select></label>; }
+function TextAreaSmall({ label, value, onChange, rows = 4 }: { label: string; value: string; onChange: (value: string) => void; rows?: number }) { return <label className="block"><span className="text-sm font-medium">{label}</span><textarea value={value} rows={rows} onChange={event => onChange(event.target.value)} className="w-full resize-y rounded-2xl border px-3 py-2 font-mono text-sm" /></label>; }
+function parseBulkVins(text: string) {
+  const byVin = new Map<string, { vin: string; quantity: number }>();
+  const pattern = /\bVIN[-\s]?(\d+)\b(?:\s*\((\d+)\s*(?:ud|uds|unidades?)\))?/gi;
+  let match = pattern.exec(text);
+  while (match) {
+    const vin = `VIN-${match[1]}`;
+    const quantity = Math.max(1, Number(match[2] || 1));
+    const current = byVin.get(vin);
+    byVin.set(vin, { vin, quantity: (current?.quantity || 0) + quantity });
+    match = pattern.exec(text);
+  }
+  return Array.from(byVin.values()).sort((a, b) => a.vin.localeCompare(b.vin, "es", { numeric: true }));
+}
+function buildSku(prefix: string, ...parts: unknown[]) {
+  const raw = [prefix, ...parts].filter(Boolean).join("-");
+  const slug = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toUpperCase();
+  return slug.slice(0, 48) || `${prefix}-${Date.now().toString().slice(-5)}`;
+}
+function parseReferencePaste(text: string) {
+  return text
+    .split(/\n+/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const columns = line.split(/\t|;/).map(value => value.trim()).filter(Boolean);
+      if (columns.length >= 2) {
+        const startsWithQty = /^\d+([,.]\d+)?$/.test(columns[0]);
+        const quantity = startsWithQty ? Number(columns[0].replace(",", ".")) : Number(columns[columns.length - 1].replace(",", "."));
+        const nombre = startsWithQty ? columns[1] : columns[0];
+        const medidas = columns.find(value => /\d+\s*x\s*\d+/i.test(value)) || "";
+        return { sku: "", nombre, cliente_id: "", tipo: /vinilo/i.test(nombre) ? "vinilo_medida" : "consumible", medidas, cantidad: Number.isFinite(quantity) ? quantity : 1, observaciones: columns.slice(startsWithQty ? 2 : 1).join(" · ") };
+      }
+      const qtyMatch = line.match(/^\s*(\d+(?:[,.]\d+)?)\s+(.+)$/);
+      const quantity = qtyMatch ? Number(qtyMatch[1].replace(",", ".")) : 1;
+      const nombre = qtyMatch ? qtyMatch[2] : line;
+      const medidas = nombre.match(/\d+\s*x\s*\d+\s*(?:cm|mm|m)?/i)?.[0] || "";
+      return { sku: "", nombre, cliente_id: "", tipo: /vinilo/i.test(nombre) ? "vinilo_medida" : "consumible", medidas, cantidad: quantity, observaciones: "" };
+    });
+}
 function exportPickingSheet(state: LogisticsState, input: { request?: LogisticsState["requests"][number]; picking?: LogisticsState["pickings"][number] }) {
   const rows = [["Código", "Campaña", "Instalador", "Material", "SKU", "VIN", "Cantidad", "Destino", "Estado"]];
   if (input.request) {
