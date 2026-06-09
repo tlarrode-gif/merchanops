@@ -16,7 +16,7 @@
   }
 
   /* External global campaign nav becomes a compact top utility bar */
-  body > .sticky.top-0.z-40 {
+  body:has(main.app-shell) > .sticky.top-0.z-40 {
     left: 220px;
     z-index: 45;
     margin-left: 220px;
@@ -25,12 +25,12 @@
     backdrop-filter: blur(12px);
   }
 
-  body > .sticky.top-0.z-40 nav {
+  body:has(main.app-shell) > .sticky.top-0.z-40 nav {
     max-width: none !important;
     padding: 0.55rem 1.25rem !important;
   }
 
-  body > .sticky.top-0.z-40 nav a {
+  body:has(main.app-shell) > .sticky.top-0.z-40 nav a {
     border-radius: 999px !important;
     padding: 0.42rem 0.8rem !important;
     font-size: 0.78rem !important;
@@ -38,14 +38,14 @@
   }
 
   /* Main app container */
-  main.min-h-screen.bg-slate-100 {
+  main.app-shell {
     min-height: 100vh;
     background: #f8fafc !important;
     padding-left: 220px;
   }
 
   /* App topbar */
-  main.min-h-screen.bg-slate-100 > header {
+  main.app-shell > header {
     position: sticky !important;
     top: 49px !important;
     z-index: 35 !important;
@@ -55,36 +55,36 @@
     backdrop-filter: blur(12px);
   }
 
-  main.min-h-screen.bg-slate-100 > header .mx-auto {
+  main.app-shell > header .mx-auto {
     max-width: none !important;
     padding: 0.8rem 1.25rem !important;
   }
 
-  main.min-h-screen.bg-slate-100 > header h1 {
+  main.app-shell > header h1 {
     font-size: 1rem !important;
     font-weight: 650 !important;
     letter-spacing: -0.03em;
   }
 
-  main.min-h-screen.bg-slate-100 > header p {
+  main.app-shell > header p {
     margin-top: 0.1rem;
     font-size: 0.72rem !important;
   }
 
-  main.min-h-screen.bg-slate-100 > header .flex.flex-wrap.gap-2 button {
+  main.app-shell > header .flex.flex-wrap.gap-2 button {
     border-radius: 0.8rem !important;
     padding: 0.5rem 0.8rem !important;
     font-size: 0.8rem !important;
   }
 
   /* Content workspace */
-  main.min-h-screen.bg-slate-100 > section.mx-auto {
+  main.app-shell > section.mx-auto {
     max-width: none !important;
     padding: 1.25rem !important;
   }
 
   /* Internal tabs become fixed sidebar */
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 {
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 {
     position: fixed;
     left: 0;
     top: 0;
@@ -100,7 +100,7 @@
     box-shadow: 18px 0 45px rgba(15,23,42,0.16);
   }
 
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2::before {
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2::before {
     content: "M  MerchanOps\A Trade marketing";
     white-space: pre;
     display: block;
@@ -113,7 +113,7 @@
     position: relative;
   }
 
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2::after {
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2::after {
     content: "M";
     position: fixed;
     left: 1.1rem;
@@ -129,7 +129,7 @@
     font-weight: 800;
   }
 
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 button {
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 button {
     width: 100%;
     justify-content: flex-start;
     border: 0 !important;
@@ -144,27 +144,27 @@
     transform: none !important;
   }
 
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 button:hover {
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 button:hover {
     background: rgba(255,255,255,0.07) !important;
     color: #fff !important;
   }
 
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 button.bg-slate-900,
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 button[class*="bg-slate-900"] {
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 button.bg-slate-900,
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 button[class*="bg-slate-900"] {
     background: rgba(233,69,96,0.18) !important;
     color: #fff !important;
     box-shadow: inset 3px 0 0 #e94560 !important;
   }
 
   /* Add simple text icons through first-letter feel */
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 button:nth-child(1)::before { content: "▣"; }
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 button:nth-child(2)::before { content: "◈"; }
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 button:nth-child(3)::before { content: "◇"; }
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 button:nth-child(4)::before { content: "○"; }
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 button:nth-child(5)::before { content: "◉"; }
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 button:nth-child(6)::before { content: "€"; }
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 button:nth-child(1)::before { content: "▣"; }
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 button:nth-child(2)::before { content: "◈"; }
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 button:nth-child(3)::before { content: "◇"; }
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 button:nth-child(4)::before { content: "○"; }
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 button:nth-child(5)::before { content: "◉"; }
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 button:nth-child(6)::before { content: "€"; }
 
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 button::before {
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 button::before {
     width: 1.5rem;
     margin-right: 0.45rem;
     color: #e94560;
@@ -172,20 +172,20 @@
   }
 
   /* Cards and tables in final shell */
-  main.min-h-screen.bg-slate-100 .rounded-3xl.border.bg-white,
-  main.min-h-screen.bg-slate-100 .rounded-2xl.border.bg-white {
+  main.app-shell .rounded-3xl.border.bg-white,
+  main.app-shell .rounded-2xl.border.bg-white {
     border-radius: 1.15rem !important;
     border-color: rgba(226,232,240,0.8) !important;
     background: #fff !important;
     box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 12px 32px rgba(15,23,42,0.04) !important;
   }
 
-  main.min-h-screen.bg-slate-100 table {
+  main.app-shell table {
     width: 100%;
     border-collapse: collapse;
   }
 
-  main.min-h-screen.bg-slate-100 th {
+  main.app-shell th {
     background: #f8fafc;
     color: #64748b !important;
     font-size: 0.68rem !important;
@@ -193,23 +193,23 @@
     text-transform: uppercase;
   }
 
-  main.min-h-screen.bg-slate-100 td {
+  main.app-shell td {
     color: #334155;
   }
 
   /* Notice adapts to new topbar */
-  main.min-h-screen.bg-slate-100 .fixed.right-4.top-24 {
+  main.app-shell .fixed.right-4.top-24 {
     top: 4.25rem !important;
   }
 }
 
 @media (max-width: 1023px) {
-  body > .sticky.top-0.z-40 nav {
+  body:has(main.app-shell) > .sticky.top-0.z-40 nav {
     flex-wrap: nowrap !important;
     overflow-x: auto;
   }
 
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 {
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 {
     position: sticky;
     top: 0;
     z-index: 25;
@@ -222,7 +222,7 @@
     backdrop-filter: blur(10px);
   }
 
-  main.min-h-screen.bg-slate-100 > section.mx-auto > nav.flex.flex-wrap.gap-2 button {
+  main.app-shell > section.mx-auto > nav.flex.flex-wrap.gap-2 button {
     white-space: nowrap;
   }
 }
