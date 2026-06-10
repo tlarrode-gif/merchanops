@@ -71,6 +71,42 @@ export function publishDomainEvent(state: LogisticsState, event: DomainEvent) {
   }
 }
 
+export function retryFailedIntegrationEvents(state: LogisticsState) {
+  const failed = state.events.filter(event => event.status === "error");
+  failed.forEach(integration => {
+    integration.status = "procesando";
+    integration.attempts += 1;
+    integration.last_error = null;
+    try {
+      if (isDomainEventName(integration.event_type)) {
+        applyDomainEventToLogistics(state, {
+          id: integration.id,
+          name: integration.event_type,
+          originModule: originModule(integration.source_type),
+          entityId: integration.source_id,
+          payload: integration.payload || {},
+          createdAt: integration.created_at
+        });
+      } else if (integration.event_type === "isdin_vinyl.updated") {
+        syncIsdinVinylToLogistics(state, { ...(integration.payload as Record<string, unknown>), id: integration.source_id } as any, eventVersion(integration));
+      } else if (integration.event_type === "service.material_requested") {
+        createServiceLogisticsRequest(state, { ...(integration.payload as Record<string, unknown>), id: integration.source_id } as any, [], eventVersion(integration));
+      } else {
+        throw new Error(`Tipo de evento no reintentable: ${integration.event_type}`);
+      }
+      integration.status = "completado";
+      integration.processed_at = new Date().toISOString();
+      integration.last_error = null;
+      addSyncLog(state, { evento: integration.event_type, origen_modulo: integration.source_type, destino_modulo: "logistica", entidad_id: integration.source_id, payload: integration.payload, resultado: "ok" });
+    } catch (error) {
+      integration.status = "error";
+      integration.last_error = error instanceof Error ? error.message : String(error);
+      addSyncLog(state, { evento: integration.event_type, origen_modulo: integration.source_type, destino_modulo: "logistica", entidad_id: integration.source_id, payload: integration.payload, resultado: "error", error_message: integration.last_error });
+    }
+  });
+  return failed.length;
+}
+
 export function applyDomainEventToLogistics(state: LogisticsState, event: DomainEvent) {
   switch (event.name) {
     case "material.base_datos_importada":
@@ -211,10 +247,38 @@ function text(value: unknown) {
 }
 
 function sourceId(event: DomainEvent) {
+  if (sourceType(event.payload.source_type) === "service_point") return text(event.payload.service_point_id || event.payload.point_id || event.payload.id || event.entityId || event.id);
   return text(event.payload.servicio_id || event.payload.service_id || event.payload.vinyl_id || event.payload.vin_id || event.payload.id || event.entityId || event.id);
 }
 
 function sourceType(value: unknown): RequirementSourceType {
   const allowed = ["service", "service_point", "isdin_vinyl", "campaign", "incident", "replacement", "manual_request"];
   return allowed.includes(text(value)) ? text(value) as RequirementSourceType : "service";
+}
+
+function isDomainEventName(value: string): value is DomainEventName {
+  return [
+    "material.base_datos_importada",
+    "servicio.material_asignado",
+    "servicio.instalador_cambiado",
+    "servicio.incidencia_creada",
+    "servicio.peticion_material_creada",
+    "servicio.material_recibido_campo",
+    "logistica.picking_creado",
+    "logistica.envio_realizado",
+    "logistica.material_entregado",
+    "logistica.incidencia_resuelta",
+    "logistica.stock_bajo_minimo",
+    "logistica.peticion_aprobada",
+    "logistica.peticion_rechazada"
+  ].includes(value);
+}
+
+function originModule(value: string): DomainEvent["originModule"] {
+  return value === "servicios" || value === "isdin" || value === "logistica" || value === "sistema" ? value : "sistema";
+}
+
+function eventVersion(event: { event_type: string; source_type: string; source_id: string; idempotency_key: string; id: string }) {
+  const prefix = `${event.event_type}:${event.source_type}:${event.source_id}:`;
+  return event.idempotency_key.startsWith(prefix) ? event.idempotency_key.slice(prefix.length) || event.id : event.id;
 }

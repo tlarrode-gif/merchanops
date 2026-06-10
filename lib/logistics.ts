@@ -22,7 +22,7 @@ export type StockMovement = { id: string; material_id: string; tipo: StockMoveTy
 export type PickingLine = { id: string; picking_id: string; material_id: string; vin_id?: string | null; cantidad_esperada: number; cantidad_preparada: number; estado: "pendiente" | "listo" | "faltante"; justificacion_faltante?: string | null };
 export type Picking = { id: string; codigo: string; instalador_id?: string | null; campana_id?: string | null; zona?: string | null; fecha_salida_prevista?: string | null; estado: PickingStatus; num_puntos: number; lineas: PickingLine[]; envio_id?: string | null };
 export type Shipping = { id: string; picking_id: string; fecha_salida?: string | null; transportista?: string | null; tracking?: string | null; destinatario_id?: string | null; instalador_id?: string | null; num_bultos: number; fecha_estimada_entrega?: string | null; fecha_real_entrega?: string | null; confirmado_por_instalador: boolean; estado: ShippingStatus };
-export type Incident = { id: string; codigo: string; tipo: IncidentType; material_id?: string | null; vin_id?: string | null; campana_id?: string | null; farmacia_id?: string | null; picking_id?: string | null; envio_id?: string | null; entrada_id?: string | null; responsable_id?: string | null; fecha_deteccion: string; descripcion: string; impacto?: string | null; fecha_limite?: string | null; estado: IncidentStatus; pendiente_llegada_id?: string | null };
+export type Incident = { id: string; codigo: string; tipo: IncidentType; material_id?: string | null; vin_id?: string | null; campana_id?: string | null; farmacia_id?: string | null; picking_id?: string | null; envio_id?: string | null; entrada_id?: string | null; responsable_id?: string | null; fecha_deteccion: string; descripcion: string; impacto?: string | null; fecha_limite?: string | null; estado: IncidentStatus; pendiente_llegada_id?: string | null; resolution?: string | null; resolved_at?: string | null };
 export type PendingArrival = { id: string; incidencia_id: string; vin_id?: string | null; material_id?: string | null; motivo: string; fecha_solicitud: string; fecha_prevista?: string | null; fecha_instalacion?: string | null; proveedor_id?: string | null; estado: PendingStatus; en_riesgo?: boolean };
 export type MaterialRequirement = { id: string; source_type: RequirementSourceType; source_id: string; source_line_id?: string | null; client_id?: string | null; campaign_id?: string | null; service_id?: string | null; service_point_id?: string | null; isdin_vinyl_id?: string | null; vin?: string | null; pharmacy_id?: string | null; pharmacy_name?: string | null; material_id?: string | null; requested_material_name: string; requested_sku?: string | null; material_type: MaterialType; requested_quantity: number; unit: "uds" | "rollos" | "m2" | "cajas"; width?: number | null; height?: number | null; custom_specifications?: string | null; required_date?: string | null; installation_date?: string | null; installation_week?: string | null; province?: string | null; city?: string | null; delivery_address?: string | null; installer_id?: string | null; installer_name?: string | null; priority: LogisticsPriority; status: RequirementStatus; logistics_notes?: string | null; operations_notes?: string | null; created_at: string; updated_at: string; created_by?: string | null; request_id?: string | null; picking_id?: string | null; shipment_id?: string | null; incident_id?: string | null; pending_arrival_id?: string | null; received_quantity?: number; reserved_quantity?: number; prepared_quantity?: number; delivered_quantity?: number; source_system?: string | null; sync_event_id?: string | null };
 export type LogisticsRequestLine = { id: string; request_id: string; material_requirement_id: string; material_id?: string | null; requested_quantity: number; accepted_quantity: number; prepared_quantity: number; delivered_quantity: number; missing_quantity: number; substitution_material_id?: string | null; substitution_status?: "propuesta" | "aceptada" | "rechazada" | null; line_status: RequirementStatus; comment?: string | null };
@@ -122,6 +122,12 @@ export function createIncident(state: LogisticsState, data: Omit<Incident, "id" 
     state.pendings.unshift(pending);
     inc.pendiente_llegada_id = pending.id;
   }
+  state.requirements.filter(req => (inc.vin_id && req.vin === inc.vin_id) || (inc.material_id && req.material_id === inc.material_id && req.status !== "entregada")).forEach(req => {
+    req.incident_id = inc.id;
+    req.pending_arrival_id = inc.pendiente_llegada_id || req.pending_arrival_id || null;
+    req.status = "con_incidencia";
+    req.updated_at = new Date().toISOString();
+  });
   return inc;
 }
 
@@ -260,6 +266,7 @@ export function rejectLogisticsRequest(state: LogisticsState, requestId: string,
 export function receiveEntry(state: LogisticsState, entryId: string, status: EntryStatus) {
   const entry = state.entries.find(x => x.id === entryId);
   if (!entry) return;
+  if (entry.estado !== "pendiente") return;
   entry.estado = status;
   entry.fecha_recepcion = today();
   if (!["recibido_completo", "recibido_parcial"].includes(status)) return;
@@ -290,11 +297,21 @@ export function preparePickingLine(state: LogisticsState, pickingId: string, lin
   const picking = state.pickings.find(x => x.id === pickingId);
   const line = picking?.lineas.find(x => x.id === lineId);
   if (!picking || !line) return;
+  if (line.estado === "listo" && line.cantidad_preparada >= line.cantidad_esperada) return;
+  const previousQty = Number(line.cantidad_preparada || 0);
+  const nextQty = Number(qty || 0);
+  if (nextQty < previousQty) throw new Error("No se puede reducir una línea ya preparada desde esta acción. Crea un ajuste o rehace el picking.");
   line.cantidad_preparada = qty;
   line.estado = qty >= line.cantidad_esperada ? "listo" : "faltante";
   line.justificacion_faltante = line.estado === "faltante" ? missingReason : "";
-  if (qty > 0) createMovement(state, { material_id: line.material_id, tipo: "picking", cantidad: qty, campana_id: picking.campana_id, vin_id: line.vin_id, motivo: `Preparación ${picking.codigo}` });
+  const movementQty = nextQty - previousQty;
+  if (movementQty > 0) createMovement(state, { material_id: line.material_id, tipo: "picking", cantidad: movementQty, campana_id: picking.campana_id, vin_id: line.vin_id, motivo: `Preparación ${picking.codigo}` });
   picking.estado = picking.lineas.every(x => x.estado === "listo") ? "preparado" : "en_preparacion";
+  state.requirements.filter(req => req.picking_id === picking.id && (!line.vin_id || req.vin === line.vin_id)).forEach(req => {
+    req.prepared_quantity = Math.max(Number(req.prepared_quantity || 0), nextQty);
+    req.status = line.estado === "listo" ? "preparada" : "en_picking";
+    req.updated_at = new Date().toISOString();
+  });
 }
 
 export function closePicking(state: LogisticsState, pickingId: string) {
@@ -308,10 +325,29 @@ export function closePicking(state: LogisticsState, pickingId: string) {
 export function generateShipping(state: LogisticsState, pickingId: string) {
   const picking = state.pickings.find(x => x.id === pickingId);
   if (!picking || !["preparado", "revisado"].includes(picking.estado)) throw new Error("El picking debe estar preparado para generar envío.");
+  if (picking.envio_id) return state.shipments.find(x => x.id === picking.envio_id) || null;
   const envio: Shipping = { id: uid("env"), picking_id: picking.id, transportista: "Pendiente", tracking: "", instalador_id: picking.instalador_id, num_bultos: 1, confirmado_por_instalador: false, estado: "pendiente" };
   state.shipments.unshift(envio);
   picking.envio_id = envio.id;
   picking.estado = "enviado";
+  const now = new Date().toISOString();
+  state.requests.filter(req => req.picking_id === picking.id).forEach(req => {
+    req.shipment_id = envio.id;
+    req.status = "enviada_transporte";
+    req.updated_at = now;
+  });
+  state.requirements.filter(req => req.picking_id === picking.id).forEach(req => {
+    req.shipment_id = envio.id;
+    req.status = "enviada";
+    req.updated_at = now;
+    const incident = req.incident_id ? state.incidents.find(x => x.id === req.incident_id) : req.pending_arrival_id ? state.incidents.find(x => x.pendiente_llegada_id === req.pending_arrival_id) : null;
+    if (incident && !["resuelta", "cancelada"].includes(incident.estado)) {
+      incident.envio_id = envio.id;
+      incident.picking_id = picking.id;
+      incident.estado = "mat_enviado";
+    }
+    if (req.vin) upsertLogisticsVin(state, { vin_id: req.vin, estado: "enviado", picking_id: picking.id, shipment_id: envio.id });
+  });
   return envio;
 }
 
@@ -319,11 +355,186 @@ export function confirmInstallerDelivery(state: LogisticsState, shippingId: stri
   const envio = state.shipments.find(x => x.id === shippingId);
   const picking = envio ? state.pickings.find(x => x.id === envio.picking_id) : null;
   if (!envio || !picking) return;
+  if (envio.confirmado_por_instalador || envio.estado === "entregado") return;
   envio.confirmado_por_instalador = true;
   envio.estado = "entregado";
   envio.fecha_real_entrega = today();
   picking.estado = "recibido";
   picking.lineas.forEach(line => line.cantidad_preparada > 0 && createMovement(state, { material_id: line.material_id, tipo: "entrega", cantidad: line.cantidad_preparada, campana_id: picking.campana_id, vin_id: line.vin_id, motivo: `Entrega ${picking.codigo}` }));
+  const now = new Date().toISOString();
+  state.requests.filter(req => req.picking_id === picking.id || req.shipment_id === envio.id).forEach(req => {
+    req.status = "entregada";
+    req.shipment_id = envio.id;
+    req.updated_at = now;
+  });
+  state.requirements.filter(req => req.picking_id === picking.id || req.shipment_id === envio.id).forEach(req => {
+    const line = picking.lineas.find(item => item.vin_id ? item.vin_id === req.vin : item.material_id === req.material_id);
+    req.shipment_id = envio.id;
+    req.status = "entregada";
+    req.delivered_quantity = Math.max(Number(req.delivered_quantity || 0), Number(line?.cantidad_preparada || req.prepared_quantity || req.requested_quantity || 0));
+    req.updated_at = now;
+    const incident = req.incident_id ? state.incidents.find(x => x.id === req.incident_id) : req.pending_arrival_id ? state.incidents.find(x => x.pendiente_llegada_id === req.pending_arrival_id) : null;
+    if (incident && !["resuelta", "cancelada"].includes(incident.estado)) resolveLogisticsIncident(state, incident.id, `Material entregado al instalador desde ${picking.codigo}.`, "Logística");
+    if (req.vin) upsertLogisticsVin(state, { vin_id: req.vin, estado: "entregado", picking_id: picking.id, shipment_id: envio.id });
+  });
+}
+
+export function setLogisticsIncidentStatus(state: LogisticsState, incidentId: string, status: IncidentStatus, actor = "Logística") {
+  const incident = state.incidents.find(x => x.id === incidentId);
+  if (!incident) throw new Error("Incidencia no encontrada");
+  if (incident.estado === "resuelta" || incident.estado === "cancelada") return;
+  incident.estado = status;
+  if (incident.pendiente_llegada_id) {
+    const pending = state.pendings.find(x => x.id === incident.pendiente_llegada_id);
+    if (pending) {
+      if (status === "pend_produccion") pending.estado = "en_produccion";
+      if (status === "pend_transporte" || status === "mat_enviado") pending.estado = "en_transito";
+      if (status === "pend_proveedor") pending.estado = "pend_proveedor";
+    }
+  }
+  addSyncLog(state, { evento: "logistica.incidencia_estado", origen_modulo: "logistica", destino_modulo: "servicios_isdin", entidad_id: incident.id, usuario_id: actor, payload: { incident_id: incident.id, status }, resultado: "ok" });
+}
+
+export function resolveLogisticsIncident(state: LogisticsState, incidentId: string, resolution = "Incidencia resuelta por Logística.", actor = "Logística") {
+  const incident = state.incidents.find(x => x.id === incidentId);
+  if (!incident) throw new Error("Incidencia no encontrada");
+  if (incident.estado === "resuelta") return;
+  incident.estado = "resuelta";
+  incident.resolution = resolution;
+  incident.resolved_at = new Date().toISOString();
+  if (incident.pendiente_llegada_id) {
+    const pending = state.pendings.find(x => x.id === incident.pendiente_llegada_id);
+    if (pending) pending.estado = "cerrado";
+  }
+  state.requirements.filter(req => req.incident_id === incident.id || req.pending_arrival_id === incident.pendiente_llegada_id).forEach(req => {
+    req.incident_id = null;
+    if (req.status === "con_incidencia" || req.status === "bloqueada") req.status = req.delivered_quantity ? "entregada" : req.prepared_quantity ? "preparada" : req.reserved_quantity ? "reservada" : req.received_quantity ? "disponible" : "pendiente_revision";
+    req.updated_at = new Date().toISOString();
+  });
+  if (incident.vin_id) {
+    const req = state.requirements.find(x => x.vin === incident.vin_id);
+    upsertLogisticsVin(state, { vin_id: incident.vin_id, estado: req?.status === "entregada" ? "entregado" : req?.status === "enviada" ? "enviado" : req?.status === "en_picking" || req?.status === "preparada" ? "en_picking" : "pendiente_picking", incident_id: null });
+  }
+  addSyncLog(state, { evento: "logistica.incidencia_resuelta", origen_modulo: "logistica", destino_modulo: "servicios_isdin", entidad_id: incident.id, usuario_id: actor, payload: { incident_id: incident.id, resolution }, resultado: "ok" });
+}
+
+export function cancelLogisticsIncident(state: LogisticsState, incidentId: string, reason = "Incidencia cancelada por Logística.", actor = "Logística") {
+  const incident = state.incidents.find(x => x.id === incidentId);
+  if (!incident) throw new Error("Incidencia no encontrada");
+  if (incident.estado === "cancelada") return;
+  incident.estado = "cancelada";
+  incident.resolution = reason;
+  incident.resolved_at = new Date().toISOString();
+  if (incident.pendiente_llegada_id) {
+    const pending = state.pendings.find(x => x.id === incident.pendiente_llegada_id);
+    if (pending) pending.estado = "cerrado";
+  }
+  state.requirements.filter(req => req.incident_id === incident.id).forEach(req => {
+    req.incident_id = null;
+    if (req.status === "con_incidencia" || req.status === "bloqueada") req.status = "pendiente_revision";
+    req.updated_at = new Date().toISOString();
+  });
+  addSyncLog(state, { evento: "logistica.incidencia_cancelada", origen_modulo: "logistica", destino_modulo: "servicios_isdin", entidad_id: incident.id, usuario_id: actor, payload: { incident_id: incident.id, reason }, resultado: "ok" });
+}
+
+function requirementForPending(state: LogisticsState, pending: PendingArrival) {
+  return state.requirements.find(req => req.pending_arrival_id === pending.id)
+    || state.requirements.find(req => pending.vin_id && req.vin === pending.vin_id && ["pendiente_recepcion", "pendiente_produccion", "pendiente_stock", "con_incidencia", "bloqueada"].includes(req.status))
+    || null;
+}
+
+export function receivePendingArrival(state: LogisticsState, pendingId: string, actor = "Logística") {
+  const pending = state.pendings.find(x => x.id === pendingId);
+  if (!pending) throw new Error("Pendiente de llegada no encontrado");
+  if (["recibido", "asignado_picking", "cerrado"].includes(pending.estado)) return;
+  const req = requirementForPending(state, pending);
+  const materialId = pending.material_id || req?.material_id;
+  if (!materialId) throw new Error("El pendiente no tiene material asociado para registrar stock.");
+  const qty = Math.max(1, Number(req?.requested_quantity || 1));
+  const entryId = uid("ent");
+  const albaran = `REP-${new Date().getFullYear()}-${String(state.entries.length + 1).padStart(4, "0")}`;
+  state.entries.unshift({
+    id: entryId,
+    albaran,
+    fecha_prevista: pending.fecha_prevista || today(),
+    fecha_recepcion: today(),
+    proveedor_id: pending.proveedor_id || null,
+    transportista: "Reposición",
+    num_bultos_esperado: 1,
+    num_bultos_recibido: 1,
+    estado: "recibido_completo",
+    observaciones: `Recepción de pendiente ${pending.id}. ${pending.motivo}`,
+    creado_por: actor,
+    lineas: [{
+      id: uid("eline"),
+      entrada_id: entryId,
+      material_id: materialId,
+      cantidad_esperada: qty,
+      cantidad_recibida: qty,
+      cantidad_correcta: qty,
+      cantidad_danada: 0,
+      diferencia: 0,
+      incidencia_id: pending.incidencia_id || null
+    }]
+  });
+  createMovement(state, { material_id: materialId, tipo: "entrada", cantidad: qty, origen: albaran, destino: "almacen", vin_id: pending.vin_id, motivo: `Recepción pendiente ${pending.id}` });
+  pending.estado = "recibido";
+  pending.en_riesgo = false;
+  const incident = state.incidents.find(x => x.id === pending.incidencia_id);
+  if (incident && incident.estado !== "resuelta") incident.estado = "en_revision";
+  if (req) {
+    req.material_id = materialId;
+    req.pending_arrival_id = pending.id;
+    req.received_quantity = Math.max(Number(req.received_quantity || 0), qty);
+    req.status = "disponible";
+    req.updated_at = new Date().toISOString();
+  }
+  if (pending.vin_id) upsertLogisticsVin(state, { vin_id: pending.vin_id, material_id: materialId, estado: "en_almacen", pending_arrival_id: pending.id });
+  addSyncLog(state, { evento: "logistica.pendiente_recibido", origen_modulo: "logistica", destino_modulo: "servicios_isdin", entidad_id: pending.id, usuario_id: actor, payload: { pending_id: pending.id, vin_id: pending.vin_id, material_id: materialId, quantity: qty }, resultado: "ok" });
+}
+
+export function createPickingFromPendingArrival(state: LogisticsState, pendingId: string, actor = "Logística") {
+  const pending = state.pendings.find(x => x.id === pendingId);
+  if (!pending) throw new Error("Pendiente de llegada no encontrado");
+  const req = requirementForPending(state, pending);
+  if (req?.picking_id) return state.pickings.find(x => x.id === req.picking_id) || null;
+  if (!["recibido", "asignado_picking"].includes(pending.estado)) throw new Error("Primero registra la recepción del material pendiente.");
+  const materialId = pending.material_id || req?.material_id;
+  if (!materialId) throw new Error("El pendiente no tiene material asociado para preparar picking.");
+  const qty = Math.max(1, Number(req?.requested_quantity || req?.received_quantity || 1));
+  const picking = createPicking(state, {
+    instalador_id: req?.installer_id || null,
+    campana_id: req?.campaign_id || null,
+    zona: req?.province || req?.city || "",
+    fecha_salida_prevista: req?.required_date || pending.fecha_instalacion || today(),
+    num_puntos: 1,
+    lineas: [{ material_id: materialId, vin_id: pending.vin_id || req?.vin || null, cantidad_esperada: qty }]
+  });
+  pending.estado = "asignado_picking";
+  const incident = state.incidents.find(x => x.id === pending.incidencia_id);
+  if (incident && incident.estado !== "resuelta") incident.estado = "pend_transporte";
+  if (req) {
+    req.picking_id = picking.id;
+    req.status = "en_picking";
+    req.reserved_quantity = Math.max(Number(req.reserved_quantity || 0), qty);
+    req.updated_at = new Date().toISOString();
+    if (req.request_id) {
+      const request = state.requests.find(x => x.id === req.request_id);
+      if (request) {
+        request.picking_id = picking.id;
+        request.status = "en_preparacion";
+        request.updated_at = req.updated_at;
+        request.lines.filter(line => line.material_requirement_id === req.id).forEach(line => {
+          line.accepted_quantity = Math.max(Number(line.accepted_quantity || 0), qty);
+          line.line_status = "en_picking";
+          line.missing_quantity = 0;
+        });
+      }
+    }
+  }
+  if (pending.vin_id) upsertLogisticsVin(state, { vin_id: pending.vin_id, material_id: materialId, estado: "en_picking", picking_id: picking.id, pending_arrival_id: pending.id });
+  addSyncLog(state, { evento: "logistica.pendiente_asignado_picking", origen_modulo: "logistica", destino_modulo: "servicios_isdin", entidad_id: pending.id, usuario_id: actor, payload: { pending_id: pending.id, picking_id: picking.id, vin_id: pending.vin_id }, resultado: "ok" });
+  return picking;
 }
 
 export function addDays(date: string, days: number) {

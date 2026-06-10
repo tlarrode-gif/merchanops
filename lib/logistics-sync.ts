@@ -313,17 +313,26 @@ export function acceptRequestAndReserve(state: LogisticsState, requestId: string
   request.lines.forEach(line => {
     const req = state.requirements.find(x => x.id === line.material_requirement_id);
     if (!req?.material_id) return;
-    const qty = Math.min(req.requested_quantity, available(state.stock.find(x => x.material_id === req.material_id)));
+    const alreadyReserved = Math.max(Number(req.reserved_quantity || 0), Number(line.accepted_quantity || 0));
+    const pendingQuantity = Math.max(0, Number(req.requested_quantity || 0) - alreadyReserved);
+    if (pendingQuantity <= 0) {
+      req.status = alreadyReserved >= req.requested_quantity ? "reservada" : req.status;
+      line.accepted_quantity = alreadyReserved;
+      line.missing_quantity = Math.max(0, req.requested_quantity - alreadyReserved);
+      line.line_status = req.status;
+      return;
+    }
+    const qty = Math.min(pendingQuantity, available(state.stock.find(x => x.material_id === req.material_id)));
     if (qty <= 0) {
       req.status = "pendiente_stock";
       line.line_status = "pendiente_stock";
       return;
     }
     createMovement(state, { material_id: req.material_id, tipo: "reserva", cantidad: qty, campana_id: req.campaign_id, vin_id: req.vin, motivo: `Reserva solicitud ${request.code}` });
-    req.reserved_quantity = (req.reserved_quantity || 0) + qty;
-    req.status = qty >= req.requested_quantity ? "reservada" : "parcialmente_disponible";
-    line.accepted_quantity = qty;
-    line.missing_quantity = Math.max(0, req.requested_quantity - qty);
+    req.reserved_quantity = alreadyReserved + qty;
+    req.status = req.reserved_quantity >= req.requested_quantity ? "reservada" : "parcialmente_disponible";
+    line.accepted_quantity = req.reserved_quantity;
+    line.missing_quantity = Math.max(0, req.requested_quantity - req.reserved_quantity);
     line.line_status = req.status;
   });
   request.status = request.lines.every(x => x.line_status === "reservada") ? "aceptada" : "parcialmente_aceptada";
@@ -406,7 +415,7 @@ export function detectLogisticsSyncIssues(state: LogisticsState): SyncIssue[] {
 
 export function sourceHref(req: MaterialRequirement) {
   if (req.source_type === "isdin_vinyl") return `/grandes-campanas/isdin?vin=${encodeURIComponent(req.vin || req.source_id)}`;
-  if (req.source_type === "service" || req.source_type === "service_point") return `/?service=${encodeURIComponent(req.service_id || req.source_id)}`;
+  if (req.source_type === "service" || req.source_type === "service_point") return `/?tab=servicios&service=${encodeURIComponent(req.service_id || req.source_id)}`;
   return "/logistica";
 }
 

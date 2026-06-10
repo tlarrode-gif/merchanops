@@ -195,14 +195,15 @@ export function mergeCallBase(existing: IsdinCall, vinyl: IsdinVinylBase): Isdin
 
 export function newCallFromVinyl(vinyl: IsdinVinylBase): IsdinCall {
   const now = new Date().toISOString();
+  const base = callBaseFromVinyl(vinyl);
   return {
     id: uid(),
-    ...callBaseFromVinyl(vinyl),
+    ...base,
     call_status: "Pendiente de llamar",
     call_datetime: null,
     call_time_slot: null,
     contact_person: null,
-    phone_number: null,
+    phone_number: base.phone_number,
     call_comment: null,
     backoffice_user: null,
     next_visit_date: null,

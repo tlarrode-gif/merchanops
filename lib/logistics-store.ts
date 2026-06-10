@@ -16,7 +16,9 @@ import {
   Shipping,
   Stock,
   StockMovement,
+  addSyncLog,
   loadLogistics,
+  logisticsStatusLabel,
   normalizeLogisticsState,
   saveLogistics,
   seedLogistics
@@ -124,6 +126,93 @@ async function insertNewMovements(rows: Db[]) {
     const { error: insertError } = await supabase.from("logistics_stock_movements").insert(missing);
     if (insertError) throw insertError;
   }
+}
+
+function shipmentForRequirement(state: LogisticsState, req: MaterialRequirement) {
+  const shipmentId = req.shipment_id || (req.request_id ? state.requests.find(request => request.id === req.request_id)?.shipment_id : null);
+  return shipmentId ? state.shipments.find(shipment => shipment.id === shipmentId) : null;
+}
+
+function requestForRequirement(state: LogisticsState, req: MaterialRequirement) {
+  return req.request_id ? state.requests.find(request => request.id === req.request_id) : null;
+}
+
+async function syncLogisticsBackToSources(state: LogisticsState) {
+  if (!supabase) return;
+  const now = new Date().toISOString();
+  const serviceUpdates = new Map<string, Db>();
+  const pointUpdates = new Map<string, Db>();
+  const isdinUpdates = new Map<string, Db>();
+
+  state.requirements.forEach(req => {
+    const request = requestForRequirement(state, req);
+    const shipment = shipmentForRequirement(state, req);
+    const status = request?.status || req.status;
+    const update: Db = {
+      logistics_status: status,
+      logistics_request_id: req.request_id || request?.id || null,
+      logistics_last_sync_at: now,
+      logistics_sync_event_id: req.sync_event_id || request?.sync_event_id || null
+    };
+
+    if (req.service_id) {
+      serviceUpdates.set(req.service_id, {
+        ...serviceUpdates.get(req.service_id),
+        ...update,
+        material_status: logisticsStatusLabel(req.status),
+        tracking: shipment?.tracking || (serviceUpdates.get(req.service_id)?.tracking as string | undefined) || null
+      });
+    }
+
+    if (req.service_point_id) {
+      pointUpdates.set(req.service_point_id, {
+        ...pointUpdates.get(req.service_point_id),
+        logistics_status: req.status,
+        logistics_request_id: req.request_id || null,
+        logistics_incident_id: req.incident_id || null,
+        has_logistics_impact: ["bloqueada", "con_incidencia", "pendiente_stock", "pendiente_produccion", "pendiente_recepcion"].includes(req.status),
+        affected_material_id: req.material_id || null,
+        affected_quantity: req.requested_quantity || null
+      });
+    }
+
+    if (req.isdin_vinyl_id) {
+      isdinUpdates.set(req.isdin_vinyl_id, {
+        ...isdinUpdates.get(req.isdin_vinyl_id),
+        logistics_status: req.status,
+        logistics_request_id: req.request_id || null,
+        logistics_material_requirement_id: req.id,
+        logistics_picking_id: req.picking_id || null,
+        logistics_shipment_id: req.shipment_id || request?.shipment_id || null,
+        logistics_incident_id: req.incident_id || null,
+        logistics_pending_arrival_id: req.pending_arrival_id || null,
+        logistics_blocked: ["bloqueada", "con_incidencia", "pendiente_stock", "pendiente_produccion", "pendiente_recepcion"].includes(req.status),
+        logistics_last_sync_at: now,
+        logistics_sync_event_id: req.sync_event_id || null
+      });
+    }
+  });
+
+  await Promise.all([
+    ...Array.from(serviceUpdates, ([id, patch]) => updateSourceMirror(state, "services", id, patch)),
+    ...Array.from(pointUpdates, ([id, patch]) => updateSourceMirror(state, "points", id, patch)),
+    ...Array.from(isdinUpdates, ([id, patch]) => updateSourceMirror(state, "isdin_vinyls", id, patch))
+  ]);
+}
+
+async function updateSourceMirror(state: LogisticsState, table: string, id: string, patch: Db) {
+  if (!supabase) return;
+  const { error } = await supabase.from(table).update(patch).eq("id", id);
+  if (!error) return;
+  addSyncLog(state, {
+    evento: "logistica.reverse_sync",
+    origen_modulo: "logistica",
+    destino_modulo: table,
+    entidad_id: id,
+    payload: patch,
+    resultado: "error",
+    error_message: error.message
+  });
 }
 
 export async function loadLogisticsState(): Promise<{ state: LogisticsState; remote: boolean; error?: string }> {
@@ -249,5 +338,6 @@ export async function saveLogisticsState(state: LogisticsState, remote: boolean)
   await upsertMany("logistics_audit_log", normalized.audit.map(auditForDb));
   await upsertMany("logistics_notifications", normalized.notifications.map(notificationForDb));
   await upsertMany("logistics_vins", normalized.vins.map(vinForDb));
+  await syncLogisticsBackToSources(normalized);
   await upsertMany("sync_logs", normalized.syncLogs.map(row => stripUndefined(row as unknown as Db)));
 }
