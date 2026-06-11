@@ -127,6 +127,12 @@ async function syncCallLogisticsImpact(call: IsdinCall) {
   await saveLogisticsState(logistics, loaded.remote);
 }
 
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error) return error;
+  return fallback;
+}
+
 export default function IsdinCallsPage() {
   const [calls, setCalls] = useState<IsdinCall[]>([]);
   const [loading, setLoading] = useState(true);
@@ -202,28 +208,42 @@ export default function IsdinCallsPage() {
   };
 
   async function persistCall(call: IsdinCall, next: IsdinCall, message = "Llamada guardada") {
+    const previousCalls = calls;
+    const nextCalls = calls.map(row => row.id === call.id ? next : row);
     setSaving(true);
     setError("");
-
-    const nextCalls = calls.map(row => row.id === call.id ? next : row);
     setCalls(nextCalls);
 
-    if (isSupabaseConfigured && supabase) {
-      const { error: saveError } = await supabase.from("isdin_calls").upsert(callForDb(next), { onConflict: "vin" });
-      if (saveError) {
-        setError(saveError.message);
-        setCalls(calls);
-        setSaving(false);
-        return false;
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const { error: saveError } = await supabase.from("isdin_calls").upsert(callForDb(next), { onConflict: "vin" });
+        if (saveError) {
+          setCalls(previousCalls);
+          setError(`No se pudo guardar la llamada: ${saveError.message}`);
+          return false;
+        }
+      } else {
+        saveLocalCalls(nextCalls);
       }
-    } else {
-      saveLocalCalls(nextCalls);
-    }
-    await syncCallLogisticsImpact(next);
 
-    flash(message);
-    setSaving(false);
-    return true;
+      try {
+        await syncCallLogisticsImpact(next);
+      } catch (logisticsError) {
+        console.error("Error sincronizando llamada con Logística", logisticsError);
+        flash(`Llamada guardada. Revisa Logística: ${errorMessage(logisticsError, "sincronización pendiente")}`);
+        return true;
+      }
+
+      setError("");
+      flash(message);
+      return true;
+    } catch (unknownError) {
+      setCalls(previousCalls);
+      setError(`No se pudo completar el guardado: ${errorMessage(unknownError, "error inesperado")}`);
+      return false;
+    } finally {
+      setSaving(false);
+    }
   }
 
   function validatePatch(call: IsdinCall, patch: Partial<IsdinCall>) {
@@ -232,7 +252,7 @@ export default function IsdinCallsPage() {
     const nextDate = dateOnly(patch.next_visit_date !== undefined ? patch.next_visit_date : call.next_visit_date);
 
     if ((nextStatus === "Incidencia en llamada" || nextStatus === "Cancelado en llamada") && !comment) {
-      return "Este estado requiere comentario.";
+      return "Este estado requiere comentario antes de guardar.";
     }
     if (nextStatus === "Pospuesto en llamada" && !nextDate && !comment) {
       return "Pospuesto requiere nueva fecha o comentario justificativo.";
