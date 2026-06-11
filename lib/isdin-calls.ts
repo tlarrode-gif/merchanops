@@ -226,14 +226,44 @@ export function mergeCallsWithVinyls(calls: IsdinCall[], vinyls: IsdinVinylBase[
 }
 
 export function callForDb(call: IsdinCall) {
+  // height/width are vinyl-only fields read from isdin_vinyls for display. They are intentionally
+  // not written to isdin_calls because existing production schemas may not include them.
   return {
-    ...call,
+    id: call.id,
+    vinyl_id: call.vinyl_id || null,
+    isdin_vinyl_id: call.isdin_vinyl_id || call.vinyl_id || null,
+    vin: call.vin,
+    pharmacy_name: call.pharmacy_name,
+    vinyl_campaign: call.vinyl_campaign || null,
+    desired_installation_week: call.desired_installation_week || null,
+    desired_installation_date: dateOnly(call.desired_installation_date) || null,
+    street: call.street || null,
+    street_number: call.street_number || null,
+    postal_code: call.postal_code || null,
+    province: call.province || null,
+    city: call.city || null,
+    worker_name: call.worker_name || null,
+    installer_name: call.installer_name || null,
+    client_observations: call.client_observations || null,
+    scaffold_required: Boolean(call.scaffold_required),
     call_status: cleanCallStatus(call.call_status),
     call_datetime: call.call_datetime || null,
-    desired_installation_date: dateOnly(call.desired_installation_date) || null,
+    call_time_slot: call.call_time_slot || null,
+    contact_person: call.contact_person || null,
+    phone_number: call.phone_number || null,
+    call_comment: call.call_comment || null,
+    backoffice_user: call.backoffice_user || null,
     next_visit_date: dateOnly(call.next_visit_date) || null,
+    next_visit_week: call.next_visit_week || null,
+    requires_operations_review: Boolean(call.requires_operations_review),
+    requires_logistics_action: Boolean(call.requires_logistics_action),
+    logistics_need_type: call.logistics_need_type || null,
+    logistics_comment: call.logistics_comment || null,
     logistics_required_date: dateOnly(call.logistics_required_date) || null,
-    requires_operations_review: Boolean(call.requires_operations_review)
+    logistics_incident_id: call.logistics_incident_id || null,
+    logistics_material_requirement_id: call.logistics_material_requirement_id || null,
+    created_at: call.created_at || null,
+    updated_at: call.updated_at || new Date().toISOString()
   };
 }
 
