@@ -262,7 +262,7 @@ export function callForDb(call: IsdinCall) {
     logistics_required_date: dateOnly(call.logistics_required_date) || null,
     logistics_incident_id: call.logistics_incident_id || null,
     logistics_material_requirement_id: call.logistics_material_requirement_id || null,
-    created_at: call.created_at || null,
+    created_at: call.created_at || new Date().toISOString(),
     updated_at: call.updated_at || new Date().toISOString()
   };
 }
