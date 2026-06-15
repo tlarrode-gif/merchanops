@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CheckCircle2, FileDown, RefreshCw, Search, Send, XCircle } from "lucide-react";
 import { EstadoLogistico } from "@/components/logistics/estado-logistico";
-import { LogisticsState, RequestStatus, available, createPickingFromRequest, logisticsKpis, logisticsStatusLabel, materialName, rejectLogisticsRequest, seedLogistics } from "@/lib/logistics";
+import { LogisticsState, RequestStatus, available, cancelLogisticsRequest, createPickingFromRequest, logisticsKpis, logisticsStatusLabel, materialName, rejectLogisticsRequest, seedLogistics, updateLogisticsRequest } from "@/lib/logistics";
 import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
 import { acceptRequestAndReserve, materialDisplay, sourceHref } from "@/lib/logistics-sync";
 
@@ -30,6 +30,7 @@ export function SolicitudesLogisticaClient({ detailId }: { detailId?: string }) 
   const [remote, setRemote] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState(false);
   const kpis = useMemo(() => logisticsKpis(state), [state]);
 
   useEffect(() => {
@@ -150,17 +151,21 @@ export function SolicitudesLogisticaClient({ detailId }: { detailId?: string }) 
                     <Read label="Origen" value={<a className="font-semibold underline-offset-2 hover:underline" href={sourceHref(selectedRequirements[0] || { source_type: selected.source_type, source_id: selected.source_id } as Requirement)}>Abrir origen -&gt;</a>} />
                     <Read label="Estado visible en origen" value={logisticsStatusLabel(selectedRequirements[0]?.status)} />
                     <Read label="Instalador / dirección" value={`${selected.installer_name || selectedRequirements[0]?.installer_name || "Sin instalador"} · ${selected.delivery_address || selectedRequirements[0]?.delivery_address || "Sin dirección"}`} />
+                    <Read label="Comentario logística" value={selected.logistics_comment || "Sin comentario"} />
                     {selected.rejection_reason && <Read label="Motivo rechazo" value={selected.rejection_reason} />}
                     {selected.lines.map(line => {
                       const req = state.requirements.find(x => x.id === line.material_requirement_id);
                       const stock = req?.material_id ? state.stock.find(s => s.material_id === req.material_id) : null;
                       return <Mini key={line.id} title={req ? materialDisplay(req, state) : "Línea"} text={`Solicitado ${line.requested_quantity} · Aprobado ${line.accepted_quantity} · Disponible ${available(stock)} · ${line.line_status}`} />;
                     })}
+                    {editing && <RequestEditForm request={selected} onCancel={() => setEditing(false)} onSave={patch => commit(draft => updateLogisticsRequest(draft, selected.id, patch), "Petición actualizada").then(() => setEditing(false))} />}
                     <div className="grid gap-2">
+                      <button onClick={() => setEditing(value => !value)} disabled={saving || ["entregada", "cerrada", "cancelada", "rechazada"].includes(selected.status)} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold disabled:opacity-40">{editing ? "Cerrar edición" : "Editar petición"}</button>
                       <button onClick={() => exportPickingSheet(state, selected)} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold"><FileDown className="mr-1 inline h-4 w-4" />Exportar hoja de picking</button>
                       <button onClick={() => commit(draft => acceptRequestAndReserve(draft, selected.id), "Petición aprobada y stock reservado")} disabled={saving || lockedForReserve(selected.status)} className="w-full rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"><CheckCircle2 className="mr-1 inline h-4 w-4" />Aprobar y reservar stock</button>
                       <button onClick={() => commit(draft => createPickingFromRequest(draft, selected.id), "Picking creado desde petición")} disabled={saving || !!selected.picking_id || ["rechazada", "cancelada", "bloqueada", "entregada", "cerrada"].includes(selected.status)} className="w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"><Send className="mr-1 inline h-4 w-4" />{selected.picking_id ? "Picking ya creado" : "Convertir en picking"}</button>
                       <button onClick={() => rejectSelected(selected)} disabled={saving || !["borrador", "enviada", "pendiente_revision", "pendiente_material"].includes(selected.status)} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-40"><XCircle className="mr-1 inline h-4 w-4" />Rechazar petición</button>
+                      <button onClick={() => cancelSelected(selected)} disabled={saving || !!selected.picking_id || ["entregada", "cerrada", "cancelada", "rechazada"].includes(selected.status)} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-40">Archivar / cancelar</button>
                     </div>
                     {selected.picking_id && <a className="block rounded-xl border p-3 text-sm font-semibold" href={`/logistica/picking?id=${selected.picking_id}`}>Ver picking -&gt;</a>}
                     {selected.shipment_id && <a className="block rounded-xl border p-3 text-sm font-semibold" href={`/logistica/envios?id=${selected.shipment_id}`}>Ver envío -&gt;</a>}
@@ -179,8 +184,48 @@ export function SolicitudesLogisticaClient({ detailId }: { detailId?: string }) 
     const reason = prompt("Motivo del rechazo");
     if (reason) commit(draft => rejectLogisticsRequest(draft, request.id, reason), "Petición rechazada");
   }
+  function cancelSelected(request: Request) {
+    const reason = prompt("Motivo para archivar o cancelar la petición");
+    if (reason) commit(draft => cancelLogisticsRequest(draft, request.id, reason), "Petición cancelada");
+  }
 }
 
+function RequestEditForm({ request, onSave, onCancel }: { request: Request; onSave: (patch: Partial<Request>) => void; onCancel: () => void }) {
+  const [form, setForm] = useState({
+    priority: request.priority || "media",
+    required_date: request.required_date || "",
+    installation_date: request.installation_date || "",
+    destination_type: request.destination_type || "instalador",
+    installer_name: request.installer_name || "",
+    delivery_address: request.delivery_address || "",
+    province: request.province || "",
+    city: request.city || "",
+    logistics_comment: request.logistics_comment || "",
+    operations_comment: request.operations_comment || ""
+  });
+  const update = (key: keyof typeof form, value: string) => setForm(prev => ({ ...prev, [key]: value }));
+  return (
+    <div className="rounded-2xl border bg-slate-50 p-3">
+      <p className="mb-3 text-sm font-bold">Editar datos operativos</p>
+      <div className="grid gap-2">
+        <SelectEdit label="Prioridad" value={form.priority} onChange={value => update("priority", value)} options={["critica", "alta", "media", "baja"]} />
+        <InputEdit label="Fecha necesaria" type="date" value={form.required_date} onChange={value => update("required_date", value)} />
+        <InputEdit label="Fecha instalación" type="date" value={form.installation_date} onChange={value => update("installation_date", value)} />
+        <SelectEdit label="Destino" value={form.destination_type} onChange={value => update("destination_type", value)} options={["instalador", "farmacia", "almacen", "otro"]} />
+        <InputEdit label="Instalador" value={form.installer_name} onChange={value => update("installer_name", value)} />
+        <InputEdit label="Dirección" value={form.delivery_address} onChange={value => update("delivery_address", value)} />
+        <InputEdit label="Provincia" value={form.province} onChange={value => update("province", value)} />
+        <InputEdit label="Ciudad" value={form.city} onChange={value => update("city", value)} />
+        <TextEdit label="Comentario logística" value={form.logistics_comment} onChange={value => update("logistics_comment", value)} />
+        <TextEdit label="Comentario operaciones" value={form.operations_comment} onChange={value => update("operations_comment", value)} />
+      </div>
+      <div className="mt-3 flex gap-2">
+        <button onClick={() => onSave(form as Partial<Request>)} className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">Guardar cambios</button>
+        <button onClick={onCancel} className="rounded-xl border px-3 py-2 text-sm font-semibold">Cancelar</button>
+      </div>
+    </div>
+  );
+}
 function RequestRow({ state, request }: { state: LogisticsState; request: Request }) {
   const requirements = requestRequirements(state, request);
   const primary = requirements[0];
@@ -204,6 +249,15 @@ function Read({ label, value }: { label: string; value: React.ReactNode }) {
 }
 function Mini({ title, text }: { title: string; text: string }) {
   return <div className="rounded-xl border p-3 text-sm"><b>{title}</b><p>{text}</p></div>;
+}
+function InputEdit({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
+  return <label className="block"><span className="text-xs font-semibold text-slate-500">{label}</span><input type={type} value={value} onChange={event => onChange(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2 text-sm" /></label>;
+}
+function SelectEdit({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
+  return <label className="block"><span className="text-xs font-semibold text-slate-500">{label}</span><select value={value} onChange={event => onChange(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2 text-sm">{options.map(option => <option key={option} value={option}>{option}</option>)}</select></label>;
+}
+function TextEdit({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return <label className="block"><span className="text-xs font-semibold text-slate-500">{label}</span><textarea value={value} onChange={event => onChange(event.target.value)} rows={3} className="w-full rounded-xl border bg-white px-3 py-2 text-sm" /></label>;
 }
 function Status({ text }: { text: string }) {
   const color = text.includes("resuelta") || text.includes("completo") || text.includes("entregado") || text.includes("preparado") ? "bg-emerald-50 text-emerald-800 ring-emerald-200" : text.includes("pend") || text.includes("transito") || text.includes("preparacion") ? "bg-amber-50 text-amber-800 ring-amber-200" : text.includes("fall") || text.includes("extravi") || text.includes("incid") ? "bg-red-50 text-red-800 ring-red-200" : "bg-slate-100 text-slate-700 ring-slate-200";
