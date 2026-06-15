@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CheckCircle2, FileDown, RefreshCw, Search, Send, XCircle } from "lucide-react";
 import { EstadoLogistico } from "@/components/logistics/estado-logistico";
-import { LogisticsState, RequestStatus, available, cancelLogisticsRequest, createPickingFromRequest, logisticsKpis, logisticsStatusLabel, materialName, rejectLogisticsRequest, seedLogistics, updateLogisticsRequest } from "@/lib/logistics";
+import { LogisticsState, RequestStatus, available, createPickingFromRequest, logisticsKpis, logisticsStatusLabel, materialName, rejectLogisticsRequest, seedLogistics } from "@/lib/logistics";
+import { cancelLogisticsRequest, updateLogisticsRequest } from "@/lib/logistics-actions";
 import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
 import { acceptRequestAndReserve, materialDisplay, sourceHref } from "@/lib/logistics-sync";
 
