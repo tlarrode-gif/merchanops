@@ -21,6 +21,7 @@ export type AppSession = Pick<AppUser, "id" | "username" | "display_name" | "rol
 
 const usersLocalKey = "merchanops_internal_users_v1";
 const sessionLocalKey = "merchanops_internal_session_v1";
+export const merchanopsSessionChangeEvent = "merchanops-session-change";
 
 export const defaultPermissions: Record<AppPermissionKey, boolean> = {
   servicios: true,
@@ -112,6 +113,10 @@ function saveLocalUsers(users: AppUser[]) {
   if (typeof localStorage !== "undefined") localStorage.setItem(usersLocalKey, JSON.stringify(users));
 }
 
+function notifySessionChange() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(merchanopsSessionChangeEvent));
+}
+
 export function userToSession(user: AppUser): AppSession {
   return {
     id: user.id,
@@ -147,6 +152,7 @@ export function saveCurrentAppSession(session: AppSession | null) {
   if (typeof localStorage === "undefined") return;
   if (session) localStorage.setItem(sessionLocalKey, JSON.stringify(session));
   else localStorage.removeItem(sessionLocalKey);
+  notifySessionChange();
 }
 
 export function logoutAppUser() {
@@ -171,7 +177,8 @@ export function userCanSeeProvince(session: AppSession | null | undefined, provi
 }
 
 export function filterBySessionProvince<T extends { province?: string | null; points?: Array<{ province?: string | null }> }>(rows: T[], session: AppSession | null | undefined) {
-  if (!session || isAdminSession(session)) return rows;
+  if (!session || !session.active) return [];
+  if (isAdminSession(session)) return rows;
   return rows.filter(row => userCanSeeProvince(session, row.province) || row.points?.some(point => userCanSeeProvince(session, point.province)));
 }
 

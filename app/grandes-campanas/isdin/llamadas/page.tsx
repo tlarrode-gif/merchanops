@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileDown } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { AppSession, filterBySessionProvince, getCurrentAppSession } from "@/lib/access-control";
+import { AppSession, canAccessModule, filterBySessionProvince, getCurrentAppSession } from "@/lib/access-control";
 import { createDomainEvent, publishDomainEvent } from "@/lib/domain-events";
 import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
 import {
@@ -195,7 +195,7 @@ export default function IsdinCallsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const visibleCalls = useMemo(() => filterBySessionProvince(calls, session), [calls, session]);
+  const visibleCalls = useMemo(() => canAccessModule(session, "isdin") ? filterBySessionProvince(calls, session) : [], [calls, session]);
   const filtered = useMemo(() => filterIsdinCalls(visibleCalls, filters), [visibleCalls, filters]);
   const stats = useMemo(() => getCallStats(filtered), [filtered]);
   const selectedCall = selectedCallId ? visibleCalls.find(call => call.id === selectedCallId) || null : null;

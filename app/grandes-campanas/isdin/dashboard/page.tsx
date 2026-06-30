@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Download, Eye, FileText } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { IsdinCall, loadLocalCalls } from "@/lib/isdin-calls";
-import { AppSession, filterBySessionProvince, getCurrentAppSession } from "@/lib/access-control";
+import { AppSession, canAccessModule, filterBySessionProvince, getCurrentAppSession } from "@/lib/access-control";
 
 type Worker = { id: string; name: string; province?: string | null };
 type IsdinVinyl = {
@@ -85,8 +85,8 @@ export default function IsdinDashboardPage() {
   useEffect(() => { setSession(getCurrentAppSession()); refresh(); }, []);
 
   const currentWeek = currentWeekInfo().label;
-  const visibleItems = useMemo(() => filterBySessionProvince(items, session), [items, session]);
-  const visibleCalls = useMemo(() => filterBySessionProvince(calls, session), [calls, session]);
+  const visibleItems = useMemo(() => canAccessModule(session, "isdin") ? filterBySessionProvince(items, session) : [], [items, session]);
+  const visibleCalls = useMemo(() => canAccessModule(session, "isdin") ? filterBySessionProvince(calls, session) : [], [calls, session]);
   const weeks = Array.from(new Set(visibleItems.map(x => itemWeek(x)).filter(Boolean))) as string[];
   const provinces = Array.from(new Set(visibleItems.map(x => x.province).filter(Boolean))) as string[];
   const scoped = visibleItems.filter(x => filters.week ? itemWeek(x) === filters.week : defaultScope(x));

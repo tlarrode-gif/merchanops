@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { AppSession, canAccessModule, getCurrentAppSession } from "@/lib/access-control";
+import { AppSession, canAccessModule, getCurrentAppSession, merchanopsSessionChangeEvent } from "@/lib/access-control";
 
 const links = [
   { href: "/", label: "Inicio", exact: true, module: "servicios" },
@@ -19,13 +19,22 @@ export function MainNav() {
   const [session, setSession] = useState<AppSession | null>(null);
 
   useEffect(() => {
-    setSession(getCurrentAppSession());
+    const syncSession = () => setSession(getCurrentAppSession());
+    syncSession();
+    window.addEventListener(merchanopsSessionChangeEvent, syncSession);
+    window.addEventListener("storage", syncSession);
+    return () => {
+      window.removeEventListener(merchanopsSessionChangeEvent, syncSession);
+      window.removeEventListener("storage", syncSession);
+    };
   }, [pathname]);
+
+  if (!session?.active) return null;
 
   return (
     <div className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
       <nav className="mx-auto flex max-w-[1480px] flex-wrap gap-2 px-4 py-3 text-sm">
-        {links.filter(link => !session || canAccessModule(session, link.module)).map(link => {
+        {links.filter(link => canAccessModule(session, link.module)).map(link => {
           const active = link.exact ? pathname === link.href : pathname === link.href || pathname.startsWith(`${link.href}/`);
           return (
             <a
