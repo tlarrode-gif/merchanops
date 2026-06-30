@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Download, Eye, FileText } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { IsdinCall, loadLocalCalls } from "@/lib/isdin-calls";
+import { AppSession, filterBySessionProvince, getCurrentAppSession } from "@/lib/access-control";
 
 type Worker = { id: string; name: string; province?: string | null };
 type IsdinVinyl = {
@@ -78,18 +79,21 @@ export default function IsdinDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Record<SectionKey, boolean>>(defaultSections);
   const [filters, setFilters] = useState({ week: "", province: "", installer: "" });
+  const [session, setSession] = useState<AppSession | null>(() => getCurrentAppSession());
 
   async function refresh() { setLoading(true); if (isSupabaseConfigured && supabase) { const [{ data: v }, { data: w }, { data: c }] = await Promise.all([supabase.from("isdin_vinyls").select("*").order("desired_installation_week", { ascending: true }), supabase.from("workers").select("*").order("name"), supabase.from("isdin_calls").select("*")]); setItems((v || []) as IsdinVinyl[]); setWorkers((w || []) as Worker[]); setCalls((c || []) as IsdinCall[]); } else { setItems(localLoad()); setWorkers([]); setCalls(loadLocalCalls()); } setLoading(false); }
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { setSession(getCurrentAppSession()); refresh(); }, []);
 
   const currentWeek = currentWeekInfo().label;
-  const weeks = Array.from(new Set(items.map(x => itemWeek(x)).filter(Boolean))) as string[];
-  const provinces = Array.from(new Set(items.map(x => x.province).filter(Boolean))) as string[];
-  const scoped = items.filter(x => filters.week ? itemWeek(x) === filters.week : defaultScope(x));
+  const visibleItems = useMemo(() => filterBySessionProvince(items, session), [items, session]);
+  const visibleCalls = useMemo(() => filterBySessionProvince(calls, session), [calls, session]);
+  const weeks = Array.from(new Set(visibleItems.map(x => itemWeek(x)).filter(Boolean))) as string[];
+  const provinces = Array.from(new Set(visibleItems.map(x => x.province).filter(Boolean))) as string[];
+  const scoped = visibleItems.filter(x => filters.week ? itemWeek(x) === filters.week : defaultScope(x));
   const filtered = scoped.filter(x => (!filters.province || x.province === filters.province) && (!filters.installer || x.installer_id === filters.installer));
 
   const stats = useMemo(() => { const total = filtered.length; const finalizados = filtered.filter(isFinal).length; const cancelados = filtered.filter(isCancel).length; const incidencias = filtered.filter(isIncident).length; const pendientesColocador = filtered.filter(isPendingInstaller).length; const nuevos = filtered.filter(isNew).length; const gestionados = filtered.filter(isManaged).length; const andamios = filtered.filter(x => x.scaffold_required).length; const revisitas = filtered.reduce((a, x) => a + Number(x.revisit_count || 0), 0); const avance = pct(finalizados + cancelados, total); const avanceGestion = pct(gestionados, total); const tasaInstalacionEfectiva = pct(finalizados, gestionados); const tasaIncidencia = pct(incidencias, total); const tasaPospuesto = pct(pendientesColocador, total); const backlog = nuevos + incidencias + pendientesColocador; return { total, finalizados, cancelados, incidencias, pendientesColocador, nuevos, gestionados, andamios, revisitas, avance, avanceGestion, tasaInstalacionEfectiva, tasaIncidencia, tasaPospuesto, backlog, riesgo: riskFor({ avance, tasaIncidencia, total, nuevos, pospuestos: pendientesColocador }) }; }, [filtered]);
-  const callStats = useMemo(() => { const total = calls.length; const pendientes = calls.filter(x => x.call_status === "Pendiente de llamar").length; const confirmados = calls.filter(x => x.call_status === "Confirmado").length; const incidencias = calls.filter(x => x.call_status === "Incidencia en llamada").length; const pospuestos = calls.filter(x => x.call_status === "Pospuesto en llamada").length; const revision = calls.filter(x => x.call_status === "Requiere revisión operaciones" || x.requires_operations_review).length; return { total, pendientes, confirmados, incidencias, pospuestos, revision }; }, [calls]);
+  const callStats = useMemo(() => { const total = visibleCalls.length; const pendientes = visibleCalls.filter(x => x.call_status === "Pendiente de llamar").length; const confirmados = visibleCalls.filter(x => x.call_status === "Confirmado").length; const incidencias = visibleCalls.filter(x => x.call_status === "Incidencia en llamada").length; const pospuestos = visibleCalls.filter(x => x.call_status === "Pospuesto en llamada").length; const revision = visibleCalls.filter(x => x.call_status === "Requiere revisión operaciones" || x.requires_operations_review).length; return { total, pendientes, confirmados, incidencias, pospuestos, revision }; }, [visibleCalls]);
   const weekly = groupBy(filtered, x => itemWeek(x));
   const byProvince = groupBy(filtered, x => x.province || "Sin provincia");
   const byType = groupBy(filtered, x => x.vinyl_record_type || "Sin tipo");
