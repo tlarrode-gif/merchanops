@@ -143,6 +143,7 @@ async function syncLogisticsBackToSources(state: LogisticsState) {
   const serviceUpdates = new Map<string, Db>();
   const pointUpdates = new Map<string, Db>();
   const isdinUpdates = new Map<string, Db>();
+  const isdinVinUpdates = new Map<string, Db>();
 
   state.requirements.forEach(req => {
     const request = requestForRequirement(state, req);
@@ -191,12 +192,42 @@ async function syncLogisticsBackToSources(state: LogisticsState) {
         logistics_sync_event_id: req.sync_event_id || null
       });
     }
+
+    if (req.vin) {
+      isdinVinUpdates.set(req.vin, {
+        ...isdinVinUpdates.get(req.vin),
+        logistics_status: req.status,
+        logistics_request_id: req.request_id || null,
+        logistics_material_requirement_id: req.id,
+        logistics_picking_id: req.picking_id || null,
+        logistics_shipment_id: req.shipment_id || request?.shipment_id || null,
+        logistics_incident_id: req.incident_id || null,
+        logistics_pending_arrival_id: req.pending_arrival_id || null,
+        logistics_blocked: ["bloqueada", "con_incidencia", "pendiente_stock", "pendiente_produccion", "pendiente_recepcion"].includes(req.status),
+        logistics_last_sync_at: now,
+        logistics_sync_event_id: req.sync_event_id || null
+      });
+    }
+  });
+
+  state.vins.forEach(vin => {
+    isdinVinUpdates.set(vin.vin_id, {
+      ...isdinVinUpdates.get(vin.vin_id),
+      logistics_status: vin.estado,
+      logistics_picking_id: vin.picking_id || null,
+      logistics_shipment_id: vin.shipment_id || null,
+      logistics_incident_id: vin.incident_id || null,
+      logistics_pending_arrival_id: vin.pending_arrival_id || null,
+      logistics_blocked: ["con_incidencia", "bloqueado", "pendiente_recepcion"].includes(vin.estado),
+      logistics_last_sync_at: now
+    });
   });
 
   await Promise.all([
     ...Array.from(serviceUpdates, ([id, patch]) => updateSourceMirror(state, "services", id, patch)),
     ...Array.from(pointUpdates, ([id, patch]) => updateSourceMirror(state, "points", id, patch)),
-    ...Array.from(isdinUpdates, ([id, patch]) => updateSourceMirror(state, "isdin_vinyls", id, patch))
+    ...Array.from(isdinUpdates, ([id, patch]) => updateSourceMirror(state, "isdin_vinyls", id, patch)),
+    ...Array.from(isdinVinUpdates, ([vin, patch]) => updateSourceMirrorByColumn(state, "isdin_vinyls", "vinyl", vin, patch))
   ]);
 }
 
@@ -210,6 +241,21 @@ async function updateSourceMirror(state: LogisticsState, table: string, id: stri
     destino_modulo: table,
     entidad_id: id,
     payload: patch,
+    resultado: "error",
+    error_message: error.message
+  });
+}
+
+async function updateSourceMirrorByColumn(state: LogisticsState, table: string, column: string, value: string, patch: Db) {
+  if (!supabase) return;
+  const { error } = await supabase.from(table).update(patch).eq(column, value);
+  if (!error) return;
+  addSyncLog(state, {
+    evento: "logistica.reverse_sync",
+    origen_modulo: "logistica",
+    destino_modulo: table,
+    entidad_id: value,
+    payload: { column, value, patch },
     resultado: "error",
     error_message: error.message
   });
