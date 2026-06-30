@@ -13,6 +13,7 @@ import {
   applyCallPatch,
   buildCallSummary,
   callForDb,
+  callNeedsOperationsAlert,
   cleanCallStatus,
   dateOnly,
   downloadCsv,
@@ -217,6 +218,7 @@ export default function IsdinCallsPage() {
     setSaving(true);
     setError("");
     setCalls(nextCalls);
+    let mirrorWarning = "";
 
     try {
       if (isSupabaseConfigured && supabase) {
@@ -225,6 +227,10 @@ export default function IsdinCallsPage() {
           setCalls(previousCalls);
           setError(`No se pudo guardar la llamada: ${saveError.message}`);
           return false;
+        }
+        const mirrorError = await syncCallToVinylMirror(next);
+        if (mirrorError) {
+          mirrorWarning = `Llamada guardada, pero Vinilos no se actualizó: ${mirrorError}`;
         }
       } else {
         saveLocalCalls(nextCalls);
@@ -238,7 +244,7 @@ export default function IsdinCallsPage() {
         return true;
       }
 
-      setError("");
+      setError(mirrorWarning);
       flash(message);
       return true;
     } catch (unknownError) {
@@ -248,6 +254,22 @@ export default function IsdinCallsPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function syncCallToVinylMirror(call: IsdinCall) {
+    if (!isSupabaseConfigured || !supabase || !call.vin) return "";
+    const mirror = {
+      call_status: cleanCallStatus(call.call_status),
+      call_last_datetime: call.call_datetime || null,
+      call_contact_person: call.contact_person || null,
+      call_alert: callNeedsOperationsAlert(call),
+      call_comment: call.call_comment || null,
+      call_next_visit_date: call.next_visit_date ? dateOnly(call.next_visit_date) : null,
+      call_next_visit_week: call.next_visit_week || null,
+      requires_operations_review: Boolean(call.requires_operations_review)
+    };
+    const { error } = await supabase.from("isdin_vinyls").update(mirror).eq("vinyl", call.vin);
+    return error?.message || "";
   }
 
   function validatePatch(call: IsdinCall, patch: Partial<IsdinCall>) {

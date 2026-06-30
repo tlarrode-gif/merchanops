@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, CheckCircle2, CreditCard, FileDown, Package, Plus, Trash2, Users } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { AppSession, canAccessModule, filterBySessionProvince, getCurrentAppSession, isAdminSession, sessionProvinceLabel, userCanSeeProvince } from "@/lib/access-control";
+import { provinceOptions } from "@/lib/provinces";
 
 type Client = { id: string; name: string; ceco?: string | null };
 type Worker = { id: string; name: string; phone?: string | null; province?: string | null };
@@ -55,7 +57,7 @@ type LocalData = { clients: Client[]; workers: Worker[]; campaigns: BigCampaign[
 
 const INCIDENT_FEE = 8.56;
 const localKey = "merchanops_big_campaigns_local_v2";
-const provinces = ["", "Asturias", "Huesca", "Teruel", "Zaragoza", "Alicante", "Castellón", "Valencia", "Lleida", "Sevilla", "Córdoba", "Jaén", "Almería"];
+const provinces = ["", ...provinceOptions];
 const campaignStatuses = ["Activa", "En ejecución", "Reportada", "Validada", "Cerrada", "Pausada"];
 const pointStatuses = ["Pendiente", "Revisado", "Reportado", "Incidencia", "Pospuesto", "Finalizado", "Pendiente recepción post-incidencia"];
 const payableFailedPointStatuses = ["Incidencia", "Pospuesto"];
@@ -83,6 +85,7 @@ export default function GrandesCampanasPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [campaigns, setCampaigns] = useState<BigCampaign[]>([]);
+  const [session] = useState<AppSession | null>(() => typeof window !== "undefined" ? getCurrentAppSession() : null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [showNew, setShowNew] = useState(false);
@@ -92,22 +95,35 @@ export default function GrandesCampanasPage() {
   async function refresh() {
     setLoading(true);
     if (isSupabaseConfigured && supabase) {
-      const [{ data: c }, { data: w }, { data: bc }, { data: bp }] = await Promise.all([
+      const scopedProvinces = !isAdminSession(session) ? (session?.provinces || []).filter(Boolean) : [];
+      let workerQuery = supabase.from("workers").select("*").order("name");
+      if (scopedProvinces.length) workerQuery = workerQuery.in("province", scopedProvinces);
+      let pointQuery = supabase.from("big_campaign_points").select("*");
+      if (scopedProvinces.length) pointQuery = pointQuery.in("province", scopedProvinces);
+      const [{ data: c }, { data: w }, { data: bp }] = await Promise.all([
         supabase.from("clients").select("*").order("name"),
-        supabase.from("workers").select("*").order("name"),
-        supabase.from("big_campaigns").select("*").order("deadline", { ascending: true }),
-        supabase.from("big_campaign_points").select("*")
+        workerQuery,
+        pointQuery
       ]);
-      const points = (bp || []) as BigPoint[];
+      const points = (bp || []) as BigPoint[], campaignIds = Array.from(new Set(points.map(p => p.big_campaign_id).filter(Boolean))) as string[];
+      let bc: BigCampaign[] = [];
+      if (isAdminSession(session)) {
+        const { data } = await supabase.from("big_campaigns").select("*").order("deadline", { ascending: true });
+        bc = (data || []) as BigCampaign[];
+      } else if (campaignIds.length) {
+        const { data } = await supabase.from("big_campaigns").select("*").in("id", campaignIds).order("deadline", { ascending: true });
+        bc = (data || []) as BigCampaign[];
+      }
       setClients((c || []) as Client[]);
       setWorkers((w || []) as Worker[]);
-      setCampaigns(((bc || []) as BigCampaign[]).map(camp => ({ ...camp, points: points.filter(p => p.big_campaign_id === camp.id) })));
+      setCampaigns(bc.map(camp => ({ ...camp, points: points.filter(p => p.big_campaign_id === camp.id) })));
     } else {
       const local = loadLocal(); setClients(local.clients); setWorkers(local.workers); setCampaigns(local.campaigns || []);
     }
     setLoading(false);
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { refresh(); }, []);
   useEffect(() => { if (!isSupabaseConfigured) localStorage.setItem(localKey, JSON.stringify({ clients, workers, campaigns })); }, [clients, workers, campaigns]);
 
@@ -115,18 +131,23 @@ export default function GrandesCampanasPage() {
     const clean = { ...form, client: String(form.client || "").trim(), name: String(form.name || "").trim(), status: form.status || "Activa", calendar_color: form.calendar_color || "blue" };
     if (!clean.client || !clean.name) { saved("Faltan cliente y nombre de campaña"); return; }
     if (!points.length) { saved("Añade al menos un punto"); return; }
+    const scopedPoints = points.map(p => ({ ...p, province: p.province || clean.province || "" }));
+    if (!isAdminSession(session)) {
+      const provincesToCheck = Array.from(new Set([clean.province, ...scopedPoints.map(p => p.province)].filter(Boolean)));
+      if (!provincesToCheck.length || provincesToCheck.some(province => !userCanSeeProvince(session, province))) { saved("No puedes crear grandes campañas fuera de tus provincias asignadas"); return; }
+    }
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from("big_campaigns").insert(clean).select().single();
+      const { data, error } = await supabase.from("big_campaigns").insert({ ...clean, created_by_user_id: session?.id || null, created_by_user_name: session?.display_name || null }).select().single();
       if (error) { saved(error.message); return; }
       const inserted = data as BigCampaign;
       let insertedPoints: BigPoint[] = [];
-      if (points.length) {
-        const { data: pointData, error: pointError } = await supabase.from("big_campaign_points").insert(points.map(p => ({ big_campaign_id: inserted.id, worker_id: p.worker_id || null, worker_name: p.worker_name || null, name: p.name, address: p.address, province: p.province, fee: p.fee, report_code: p.report_code, notes: p.notes, point_status: p.point_status, incident_fee: INCIDENT_FEE }))).select();
+      if (scopedPoints.length) {
+        const { data: pointData, error: pointError } = await supabase.from("big_campaign_points").insert(scopedPoints.map(p => ({ big_campaign_id: inserted.id, worker_id: p.worker_id || null, worker_name: p.worker_name || null, name: p.name, address: p.address, province: p.province, fee: p.fee, report_code: p.report_code, notes: p.notes, point_status: p.point_status, incident_fee: INCIDENT_FEE }))).select();
         if (pointError) { await supabase.from("big_campaigns").delete().eq("id", inserted.id); saved(pointError.message); return; }
         insertedPoints = (pointData || []) as BigPoint[];
       }
       setCampaigns(prev => [{ ...inserted, points: insertedPoints }, ...prev]);
-    } else setCampaigns(prev => [{ id: uid(), ...clean, points } as BigCampaign, ...prev]);
+    } else setCampaigns(prev => [{ id: uid(), ...clean, points: scopedPoints } as BigCampaign, ...prev]);
     setShowNew(false); saved("Gran campaña creada");
   }
 
@@ -145,12 +166,15 @@ export default function GrandesCampanasPage() {
     saved();
   }
   async function resolveIncident(point: BigPoint) { const finalFee = originalFee(point) + Number(point.incident_fee || INCIDENT_FEE); await updatePoint(point, { point_status: "Finalizado", incident_status: "Resuelta", incident_resolved_at: nowISO(), fee: finalFee, point_comment: point.point_comment || point.incident_comment || "Incidencia finalizada" }); saved("Incidencia finalizada y pago actualizado"); }
-  async function addPoint(campaign: BigCampaign, raw: Omit<BigPoint, "id">) { const point = { ...raw, name: String(raw.name || "").trim(), fee: Number.isFinite(Number(raw.fee)) ? Number(raw.fee) : 0, incident_fee: INCIDENT_FEE }; if (!point.name) { saved("Falta nombre del punto"); return; } if (isSupabaseConfigured && supabase) { const { data, error } = await supabase.from("big_campaign_points").insert({ ...point, big_campaign_id: campaign.id }).select().single(); if (error) { saved(error.message); return; } setCampaigns(prev => prev.map(c => c.id === campaign.id ? { ...c, points: [...(c.points || []), data as BigPoint] } : c)); } else setCampaigns(prev => prev.map(c => c.id === campaign.id ? { ...c, points: [...(c.points || []), { id: uid(), ...point }] } : c)); saved("Punto añadido"); }
+  async function addPoint(campaign: BigCampaign, raw: Omit<BigPoint, "id">) { const point = { ...raw, province: raw.province || campaign.province || "", name: String(raw.name || "").trim(), fee: Number.isFinite(Number(raw.fee)) ? Number(raw.fee) : 0, incident_fee: INCIDENT_FEE }; if (!point.name) { saved("Falta nombre del punto"); return; } if (!isAdminSession(session) && !userCanSeeProvince(session, point.province)) { saved("No puedes añadir puntos fuera de tus provincias asignadas"); return; } if (isSupabaseConfigured && supabase) { const { data, error } = await supabase.from("big_campaign_points").insert({ ...point, big_campaign_id: campaign.id }).select().single(); if (error) { saved(error.message); return; } setCampaigns(prev => prev.map(c => c.id === campaign.id ? { ...c, points: [...(c.points || []), data as BigPoint] } : c)); } else setCampaigns(prev => prev.map(c => c.id === campaign.id ? { ...c, points: [...(c.points || []), { id: uid(), ...point }] } : c)); saved("Punto añadido"); }
   async function deletePoint(point: BigPoint) { if (!confirm("¿Borrar punto?")) return; setCampaigns(prev => prev.map(c => ({ ...c, points: (c.points || []).filter(p => p.id !== point.id) }))); if (isSupabaseConfigured && supabase) await supabase.from("big_campaign_points").delete().eq("id", point.id); saved("Punto borrado"); }
 
-  const stats = useMemo(() => { const pts = campaigns.flatMap(c => c.points || []); return { campaigns: campaigns.length, points: pts.length, assigned: pts.filter(p => p.worker_id).length, incidents: pts.filter(isIncidentActive).length, total: pts.reduce((a, p) => a + payable(p), 0) }; }, [campaigns]);
+  const canUsePage = canAccessModule(session, "servicios");
+  const visibleCampaigns = useMemo(() => canUsePage ? filterBySessionProvince(campaigns, session) : [], [campaigns, session, canUsePage]);
+  const visibleWorkers = useMemo(() => isAdminSession(session) ? workers : workers.filter(worker => userCanSeeProvince(session, worker.province)), [workers, session]);
+  const stats = useMemo(() => { const pts = visibleCampaigns.flatMap(c => c.points || []); return { campaigns: visibleCampaigns.length, points: pts.length, assigned: pts.filter(p => p.worker_id).length, incidents: pts.filter(isIncidentActive).length, total: pts.reduce((a, p) => a + payable(p), 0) }; }, [visibleCampaigns]);
 
-  return <main className="min-h-screen bg-slate-100 text-slate-900"><header className="sticky top-0 z-10 border-b bg-white"><div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between"><div><a href="/" className="mb-2 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"><ArrowLeft className="h-4 w-4" /> Volver al panel principal</a><h1 className="text-3xl font-bold">Grandes Campañas</h1><p className="text-sm text-slate-500">Gestión masiva de puntos, instaladores, incidencias y pagos por trabajador.</p></div><button onClick={() => setShowNew(v => !v)} className="rounded-2xl bg-slate-900 px-4 py-2 text-white"><Plus className="mr-1 inline h-4 w-4" />Crear gran campaña</button></div></header><section className="mx-auto max-w-7xl space-y-5 p-4">{notice && <div className="fixed right-4 top-24 z-50 rounded-2xl border bg-emerald-50 px-4 py-2 text-sm shadow">{notice}</div>}{!isSupabaseConfigured && <div className="rounded-2xl border bg-amber-50 p-3 text-sm">Modo local sin conexión Supabase.</div>}<div className="grid gap-3 md:grid-cols-5"><Kpi label="Campañas" value={stats.campaigns} icon={Package} /><Kpi label="Puntos" value={stats.points} icon={CheckCircle2} /><Kpi label="Asignados" value={`${stats.assigned}/${stats.points}`} icon={Users} /><Kpi label="Incidencias" value={stats.incidents} icon={AlertTriangle} /><Kpi label="Total previsto" value={eur(stats.total)} icon={CreditCard} /></div>{showNew && <NewCampaignForm clients={clients} workers={workers} save={createCampaign} />}{loading ? <Card>Cargando grandes campañas...</Card> : <CampaignList campaigns={campaigns} workers={workers} updateCampaign={updateCampaign} updatePoint={updatePoint} resolveIncident={resolveIncident} addPoint={addPoint} deletePoint={deletePoint} deleteCampaign={deleteCampaign} />}</section></main>;
+  return <main className="min-h-screen bg-slate-100 text-slate-900"><header className="sticky top-0 z-10 border-b bg-white"><div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between"><div><a href="/" className="mb-2 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"><ArrowLeft className="h-4 w-4" /> Volver al panel principal</a><h1 className="text-3xl font-bold">Grandes Campañas</h1><p className="text-sm text-slate-500">Gestión masiva de puntos, instaladores, incidencias y pagos por trabajador.</p><p className="text-xs text-slate-400">Vista: {sessionProvinceLabel(session)}</p></div>{canUsePage&&<button onClick={() => setShowNew(v => !v)} className="rounded-2xl bg-slate-900 px-4 py-2 text-white"><Plus className="mr-1 inline h-4 w-4" />Crear gran campaña</button>}</div></header><section className="mx-auto max-w-7xl space-y-5 p-4">{notice && <div className="fixed right-4 top-24 z-50 rounded-2xl border bg-emerald-50 px-4 py-2 text-sm shadow">{notice}</div>}{!canUsePage?<Card>No tienes permiso para acceder a Grandes Campañas.</Card>:<>{!isSupabaseConfigured && <div className="rounded-2xl border bg-amber-50 p-3 text-sm">Modo local sin conexión Supabase.</div>}<div className="grid gap-3 md:grid-cols-5"><Kpi label="Campañas" value={stats.campaigns} icon={Package} /><Kpi label="Puntos" value={stats.points} icon={CheckCircle2} /><Kpi label="Asignados" value={`${stats.assigned}/${stats.points}`} icon={Users} /><Kpi label="Incidencias" value={stats.incidents} icon={AlertTriangle} /><Kpi label="Total previsto" value={eur(stats.total)} icon={CreditCard} /></div>{showNew && <NewCampaignForm clients={clients} workers={visibleWorkers} save={createCampaign} session={session} />}{loading ? <Card>Cargando grandes campañas...</Card> : <CampaignList campaigns={visibleCampaigns} workers={visibleWorkers} updateCampaign={updateCampaign} updatePoint={updatePoint} resolveIncident={resolveIncident} addPoint={addPoint} deletePoint={deletePoint} deleteCampaign={deleteCampaign} />}</>}</section></main>;
 }
 
 function Card({ children }: { children: any }) { return <div className="rounded-3xl border bg-white p-5 shadow-sm">{children}</div>; }
@@ -161,12 +185,13 @@ function Select({ label, value, onChange, options, labels = {} }: any) { return 
 function SelectMini({ value, onChange, options, labels = {} }: any) { return <select value={value ?? ""} onChange={e => onChange(e.target.value)} className="rounded-xl border bg-white px-2 py-1 text-sm">{options.map((o: string) => <option key={o} value={o}>{labels[o] || o || "Seleccionar"}</option>)}</select>; }
 function Mini({ label, value }: any) { return <div className="rounded-xl bg-slate-50 p-2"><p className="text-slate-500">{label}</p><b>{value}</b></div>; }
 
-function NewCampaignForm({ clients, workers, save }: any) {
-  const [form, setForm] = useState<any>({ client_id: "", client: "", ceco: "", name: "", province: "", start_date: "", deadline: "", reporting_channel: "WhatsApp", calendar_color: "blue", status: "Activa", payment_type: "Puntos", hourly_rate: 0, default_point_fee: 0, instructions: "", notes: "" });
+function NewCampaignForm({ clients, workers, save, session }: any) {
+  const provinceChoices = isAdminSession(session) ? provinces : ["", ...(session?.provinces || [])];
+  const [form, setForm] = useState<any>({ client_id: "", client: "", ceco: "", name: "", province: provinceChoices[1] || "", start_date: "", deadline: "", reporting_channel: "WhatsApp", calendar_color: "blue", status: "Activa", payment_type: "Puntos", hourly_rate: 0, default_point_fee: 0, instructions: "", notes: "" });
   const [text, setText] = useState("Punto 1;Dirección;17;COD001;Provincia;Nombre exacto instalador;Notas");
   const points = parseBigPoints(text, Number(form.default_point_fee || 0), workers);
   const assigned = points.filter(p => p.worker_id).length;
-  return <Card><div className="space-y-4"><h2 className="text-xl font-semibold">Nueva Gran Campaña</h2><div className="grid gap-3 md:grid-cols-3"><Select label="Cliente existente" value={form.client_id} onChange={(id: string) => { const c = clients.find((x: Client) => x.id === id); setForm({ ...form, client_id: id, client: c?.name || form.client, ceco: c?.ceco || form.ceco }); }} options={["", ...clients.map((c: Client) => c.id)]} labels={{ "": "Seleccionar", ...Object.fromEntries(clients.map((c: Client) => [c.id, c.name])) }} /><Input label="Cliente" value={form.client} onChange={(v: string) => setForm({ ...form, client: v })} /><Input label="CECO" value={form.ceco} onChange={(v: string) => setForm({ ...form, ceco: v })} /><Input label="Nombre campaña" value={form.name} onChange={(v: string) => setForm({ ...form, name: v })} /><Select label="Provincia" value={form.province} onChange={(v: string) => setForm({ ...form, province: v })} options={provinces} labels={{ "": "Varias" }} /><Select label="Estado" value={form.status} onChange={(v: string) => setForm({ ...form, status: v })} options={campaignStatuses} /><Input label="Inicio" type="date" value={form.start_date} onChange={(v: string) => setForm({ ...form, start_date: v })} /><Input label="Límite" type="date" value={form.deadline} onChange={(v: string) => setForm({ ...form, deadline: v })} /><Select label="Color calendario" value={form.calendar_color} onChange={(v: string) => setForm({ ...form, calendar_color: v })} options={Object.keys(colors)} labels={colorLabels} /><Input label="Importe por defecto" type="number" value={form.default_point_fee} onChange={(v: string) => setForm({ ...form, default_point_fee: Number(v) })} /></div><Textarea label="Instrucciones generales" value={form.instructions} onChange={(v: string) => setForm({ ...form, instructions: v })} /><Textarea rows={8} label="Puntos masivos: Nombre;Dirección;Importe;Código de reporte;Provincia;Instalador;Notas" value={text} onChange={setText} /><div className="rounded-2xl bg-slate-50 p-3 text-sm">Puntos cargados: <b>{points.length}</b> · Asignados automáticamente: <b>{assigned}/{points.length}</b> · Total previsto: <b>{eur(points.reduce((a, p) => a + Number(p.fee || 0), 0))}</b></div><button onClick={() => save(form, points)} className="rounded-2xl bg-slate-900 px-4 py-2 text-white">Crear gran campaña</button></div></Card>;
+  return <Card><div className="space-y-4"><h2 className="text-xl font-semibold">Nueva Gran Campaña</h2><div className="grid gap-3 md:grid-cols-3"><Select label="Cliente existente" value={form.client_id} onChange={(id: string) => { const c = clients.find((x: Client) => x.id === id); setForm({ ...form, client_id: id, client: c?.name || form.client, ceco: c?.ceco || form.ceco }); }} options={["", ...clients.map((c: Client) => c.id)]} labels={{ "": "Seleccionar", ...Object.fromEntries(clients.map((c: Client) => [c.id, c.name])) }} /><Input label="Cliente" value={form.client} onChange={(v: string) => setForm({ ...form, client: v })} /><Input label="CECO" value={form.ceco} onChange={(v: string) => setForm({ ...form, ceco: v })} /><Input label="Nombre campaña" value={form.name} onChange={(v: string) => setForm({ ...form, name: v })} /><Select label="Provincia" value={form.province} onChange={(v: string) => setForm({ ...form, province: v })} options={provinceChoices} labels={{ "": "Varias" }} /><Select label="Estado" value={form.status} onChange={(v: string) => setForm({ ...form, status: v })} options={campaignStatuses} /><Input label="Inicio" type="date" value={form.start_date} onChange={(v: string) => setForm({ ...form, start_date: v })} /><Input label="Límite" type="date" value={form.deadline} onChange={(v: string) => setForm({ ...form, deadline: v })} /><Select label="Color calendario" value={form.calendar_color} onChange={(v: string) => setForm({ ...form, calendar_color: v })} options={Object.keys(colors)} labels={colorLabels} /><Input label="Importe por defecto" type="number" value={form.default_point_fee} onChange={(v: string) => setForm({ ...form, default_point_fee: Number(v) })} /></div><Textarea label="Instrucciones generales" value={form.instructions} onChange={(v: string) => setForm({ ...form, instructions: v })} /><Textarea rows={8} label="Puntos masivos: Nombre;Dirección;Importe;Código de reporte;Provincia;Instalador;Notas" value={text} onChange={setText} /><div className="rounded-2xl bg-slate-50 p-3 text-sm">Puntos cargados: <b>{points.length}</b> · Asignados automáticamente: <b>{assigned}/{points.length}</b> · Total previsto: <b>{eur(points.reduce((a, p) => a + Number(p.fee || 0), 0))}</b></div><button onClick={() => save(form, points)} className="rounded-2xl bg-slate-900 px-4 py-2 text-white">Crear gran campaña</button></div></Card>;
 }
 
 function CampaignList({ campaigns, workers, updateCampaign, updatePoint, resolveIncident, addPoint, deletePoint, deleteCampaign }: any) {
