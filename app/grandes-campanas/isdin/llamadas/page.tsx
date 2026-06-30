@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { FileDown } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { AppSession, filterBySessionProvince, getCurrentAppSession } from "@/lib/access-control";
 import { createDomainEvent, publishDomainEvent } from "@/lib/domain-events";
 import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
 import {
@@ -142,6 +143,7 @@ export default function IsdinCallsPage() {
   const [mode, setMode] = useState<"operativa" | "analisis">("operativa");
   const [filters, setFilters] = useState<CallsFilterState>(emptyFilters);
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
+  const [session, setSession] = useState<AppSession | null>(() => getCurrentAppSession());
 
   function flash(text: string) {
     setNotice(text);
@@ -188,18 +190,20 @@ export default function IsdinCallsPage() {
   }
 
   useEffect(() => {
+    setSession(getCurrentAppSession());
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filtered = useMemo(() => filterIsdinCalls(calls, filters), [calls, filters]);
+  const visibleCalls = useMemo(() => filterBySessionProvince(calls, session), [calls, session]);
+  const filtered = useMemo(() => filterIsdinCalls(visibleCalls, filters), [visibleCalls, filters]);
   const stats = useMemo(() => getCallStats(filtered), [filtered]);
-  const selectedCall = selectedCallId ? calls.find(call => call.id === selectedCallId) || null : null;
-  const weeks = Array.from(new Set(calls.map(x => x.desired_installation_week).filter(Boolean))) as string[];
-  const provinces = Array.from(new Set(calls.map(x => x.province).filter(Boolean))) as string[];
-  const cities = Array.from(new Set(calls.map(x => x.city).filter(Boolean))) as string[];
-  const installers = Array.from(new Set(calls.map(x => x.installer_name || x.worker_name).filter(Boolean))) as string[];
-  const backofficeUsers = Array.from(new Set(calls.map(x => x.backoffice_user).filter(Boolean))) as string[];
+  const selectedCall = selectedCallId ? visibleCalls.find(call => call.id === selectedCallId) || null : null;
+  const weeks = Array.from(new Set(visibleCalls.map(x => x.desired_installation_week).filter(Boolean))) as string[];
+  const provinces = Array.from(new Set(visibleCalls.map(x => x.province).filter(Boolean))) as string[];
+  const cities = Array.from(new Set(visibleCalls.map(x => x.city).filter(Boolean))) as string[];
+  const installers = Array.from(new Set(visibleCalls.map(x => x.installer_name || x.worker_name).filter(Boolean))) as string[];
+  const backofficeUsers = Array.from(new Set(visibleCalls.map(x => x.backoffice_user).filter(Boolean))) as string[];
   const analytics = {
     byProvince: groupCallsBy(filtered, x => x.province || "Sin provincia"),
     byWeek: groupCallsBy(filtered, x => x.desired_installation_week || "Sin semana"),
