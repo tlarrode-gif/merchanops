@@ -6,6 +6,7 @@ import { AppSession, canAccessModule, getCurrentAppSession, merchanopsSessionCha
 
 const links = [
   { href: "/", label: "Inicio", exact: true, module: "servicios" },
+  { href: "/auditoria-pagos", label: "Auditoría pagos", exact: true, module: "pagos" },
   { href: "/logistica", label: "Logística", exact: false, module: "logistica" },
   { href: "/grandes-campanas", label: "Grandes Campañas", exact: false, module: "isdin" },
   { href: "/grandes-campanas/isdin", label: "ISDIN", exact: true, module: "isdin" },
