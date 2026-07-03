@@ -8,7 +8,7 @@ const links = [
   { href: "/", label: "Inicio", exact: true, module: "servicios" },
   { href: "/auditoria-pagos", label: "Auditoría pagos", exact: true, module: "pagos" },
   { href: "/logistica", label: "Logística", exact: false, module: "logistica" },
-  { href: "/grandes-campanas", label: "Grandes Campañas", exact: false, module: "isdin" },
+  { href: "/grandes-campanas", label: "Grandes Campañas", exact: false, module: "servicios" },
   { href: "/grandes-campanas/isdin", label: "ISDIN", exact: true, module: "isdin" },
   { href: "/grandes-campanas/isdin/llamadas", label: "Llamadas ISDIN", exact: false, module: "isdin" },
   { href: "/grandes-campanas/isdin/dashboard", label: "KPIs ISDIN", exact: false, module: "isdin" },

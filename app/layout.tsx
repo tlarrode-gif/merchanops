@@ -8,8 +8,9 @@ import "./forms-visual.css";
 import "./campaigns-visual.css";
 import "./final-ui-shell.css";
 import "./isdin-refined-table.css";
+import "./grandes-campanas-visual.css";
 import type { Metadata } from "next";
-import { DM_Mono, DM_Sans } from "next/font/google";
+import { DM_Mono, DM_Sans, Inter } from "next/font/google";
 import { MainNav } from "./main-nav";
 
 const dmSans = DM_Sans({
@@ -26,6 +27,12 @@ const dmMono = DM_Mono({
   display: "swap"
 });
 
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap"
+});
+
 export const metadata: Metadata = {
   title: "MerchanOps",
   description: "Gestión de servicios de trade marketing"
@@ -34,7 +41,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
-      <body className={`${dmSans.variable} ${dmMono.variable}`}>
+      <body className={`${dmSans.variable} ${dmMono.variable} ${inter.variable}`}>
         <MainNav />
         {children}
       </body>
