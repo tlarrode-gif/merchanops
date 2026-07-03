@@ -222,7 +222,10 @@ export function newCallFromVinyl(vinyl: IsdinVinylBase): IsdinCall {
 
 export function mergeCallsWithVinyls(calls: IsdinCall[], vinyls: IsdinVinylBase[]) {
   const byVin = new Map(calls.map(c => [c.vin, c]));
-  return vinyls.map(v => byVin.has(v.vinyl) ? mergeCallBase(byVin.get(v.vinyl) as IsdinCall, v) : newCallFromVinyl(v));
+  // Un vinilo duplicado por VIN rompería el upsert onConflict:"vin" de todo el lote,
+  // así que se deduplica quedándose con la última fila (la más reciente del listado).
+  const uniqueVinyls = Array.from(new Map(vinyls.filter(v => v.vinyl).map(v => [v.vinyl, v])).values());
+  return uniqueVinyls.map(v => byVin.has(v.vinyl) ? mergeCallBase(byVin.get(v.vinyl) as IsdinCall, v) : newCallFromVinyl(v));
 }
 
 export function callForDb(call: IsdinCall) {

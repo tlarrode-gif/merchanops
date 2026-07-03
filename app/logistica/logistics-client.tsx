@@ -8,6 +8,7 @@ import { createDomainEvent, publishDomainEvent, retryFailedIntegrationEvents } f
 import { LogisticsState, StockMovement, available, cancelLogisticsIncident, closePicking, confirmInstallerDelivery, createIncident, createMovement, createPickingFromPendingArrival, createPickingFromRequest, generateShipping, logisticsAlerts, logisticsKpis, logisticsStatusLabel, materialName, preparePickingLine, receiveEntry, receivePendingArrival, rejectLogisticsRequest, resolveLogisticsIncident, seedLogistics, setLogisticsIncidentStatus, today, uid, upsertLogisticsVin, upsertMaterialCatalog } from "@/lib/logistics";
 import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
 import { acceptRequestAndReserve, detectLogisticsSyncIssues, materialDisplay, sourceHref } from "@/lib/logistics-sync";
+import { AppSession, canAccessModule, getCurrentAppSession, merchanopsSessionChangeEvent } from "@/lib/access-control";
 
 const modules = [
   ["panel", "Panel logístico"],
@@ -31,13 +32,22 @@ export function LogisticsClient({ section, detailId }: { section: string; detail
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [remote, setRemote] = useState(false);
+  const [session, setSession] = useState<AppSession | null>(() => typeof window !== "undefined" ? getCurrentAppSession() : null);
   const kpis = useMemo(() => logisticsKpis(state), [state]);
   const alerts = useMemo(() => logisticsAlerts(state), [state]);
 
   useEffect(() => {
+    const syncSession = () => setSession(getCurrentAppSession());
+    syncSession();
+    window.addEventListener(merchanopsSessionChangeEvent, syncSession);
+    window.addEventListener("storage", syncSession);
     refresh();
     const timer = setInterval(refresh, 30000);
-    return () => clearInterval(timer);
+    return () => {
+      window.removeEventListener(merchanopsSessionChangeEvent, syncSession);
+      window.removeEventListener("storage", syncSession);
+      clearInterval(timer);
+    };
   }, []);
 
   async function refresh() {
@@ -69,6 +79,9 @@ export function LogisticsClient({ section, detailId }: { section: string; detail
 
   const syncIssues = useMemo(() => detectLogisticsSyncIssues(state), [state]);
   const counts = { panel: alerts.length, solicitudes: kpis.openRequests, entradas: kpis.pendingEntries, stock: kpis.lowStock, picking: kpis.pendingPickings, envios: kpis.unconfirmedShipments, incidencias: kpis.openIncidents, pendientes: state.pendings.filter(x => !["cerrado", "recibido"].includes(x.estado)).length, sincronizacion: syncIssues.length };
+
+  if (!session?.active) return <AccessGate text="Inicia sesión en MerchanOps para acceder a Logística." />;
+  if (!canAccessModule(session, "logistica")) return <AccessGate text="No tienes permiso para acceder al módulo de Logística." />;
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
@@ -502,6 +515,18 @@ function Sincronizacion({ state, q, commit }: ViewProps) {
   const issues = detectLogisticsSyncIssues(state).filter(x => hay([x.text, x.fix, x.severity], q));
   const logs = state.syncLogs.filter(x => hay([x.evento, x.origen_modulo, x.destino_modulo, x.resultado, x.error_message], q));
   return <div className="space-y-4"><Card title="Estado de sincronización logística" action={<button onClick={() => commit(d => { retryFailedIntegrationEvents(d); }, "Eventos reintentados")} disabled={!state.events.some(x => x.status === "error")} className="rounded-xl border px-3 py-2 text-sm disabled:opacity-40"><RefreshCw className="mr-1 inline h-4 w-4" />Reintentar errores</button>}><div className="grid gap-3 md:grid-cols-5"><Mini title="Eventos" text={String(state.events.length)} /><Mini title="Completados" text={String(state.events.filter(x => x.status === "completado").length)} /><Mini title="Errores" text={String(state.events.filter(x => x.status === "error").length)} /><Mini title="SyncLog" text={String(state.syncLogs.length)} /><Mini title="Avisos" text={String(issues.length)} /></div></Card><Card title="Diagnóstico">{issues.length ? issues.map(i => <div key={i.id} className="border-t py-3 text-sm"><Badge tone={i.severity === "critica" ? "critica" : i.severity === "alta" ? "alta" : "info"} /> <b>{i.text}</b><p className="mt-1 text-slate-500">{i.fix || "Revisión manual recomendada."}</p><div className="mt-2 flex gap-2">{i.sourceHref && <a className="rounded-xl border px-3 py-1" href={i.sourceHref}>Abrir origen</a>}{i.logisticsHref && <a className="rounded-xl border px-3 py-1" href={i.logisticsHref}>Abrir logística</a>}</div></div>) : <Empty text="No se detectan errores de sincronización." />}</Card><Card title="SyncLog">{logs.slice(0, 40).map(log => <div key={log.id} className="border-t py-2 text-xs"><b>{log.evento}</b> · {log.origen_modulo} → {log.destino_modulo} · {log.resultado}<p className="text-slate-500">{new Date(log.created_at).toLocaleString("es-ES")}{log.error_message ? ` · ${log.error_message}` : ""}</p></div>)}{!logs.length && <Empty text="Sin trazas de sincronización todavía." />}</Card><Card title="Eventos recientes">{state.events.slice(0, 20).map(e => <div key={e.id} className="border-t py-2 text-xs"><b>{e.event_type}</b> · {e.source_type}:{e.source_id} · {e.status}<p className="text-slate-500">{e.idempotency_key}{e.last_error ? ` · ${e.last_error}` : ""}</p></div>)}</Card></div>;
+}
+
+function AccessGate({ text }: { text: string }) {
+  return (
+    <main className="min-h-screen bg-slate-100 p-4 text-slate-900">
+      <section className="mx-auto max-w-3xl rounded-3xl border bg-white p-6 shadow-sm">
+        <h1 className="text-2xl font-bold">Logística</h1>
+        <p className="mt-2 text-sm text-slate-600">{text}</p>
+        <a href="/" className="mt-4 inline-flex rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Ir al inicio</a>
+      </section>
+    </main>
+  );
 }
 
 type ViewProps = { state: LogisticsState; q: string; detailId?: string; commit: (mutator: (draft: LogisticsState) => void, message?: string) => Promise<void> };

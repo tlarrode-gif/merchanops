@@ -7,6 +7,7 @@ import { LogisticsState, RequestStatus, available, createPickingFromRequest, log
 import { cancelLogisticsRequest, updateLogisticsRequest } from "@/lib/logistics-actions";
 import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
 import { acceptRequestAndReserve, materialDisplay, sourceHref } from "@/lib/logistics-sync";
+import { AppSession, canAccessModule, getCurrentAppSession, merchanopsSessionChangeEvent } from "@/lib/access-control";
 
 type Request = LogisticsState["requests"][number];
 type Requirement = LogisticsState["requirements"][number];
@@ -32,12 +33,21 @@ export function SolicitudesLogisticaClient({ detailId }: { detailId?: string }) 
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
+  const [session, setSession] = useState<AppSession | null>(() => typeof window !== "undefined" ? getCurrentAppSession() : null);
   const kpis = useMemo(() => logisticsKpis(state), [state]);
 
   useEffect(() => {
+    const syncSession = () => setSession(getCurrentAppSession());
+    syncSession();
+    window.addEventListener(merchanopsSessionChangeEvent, syncSession);
+    window.addEventListener("storage", syncSession);
     refresh();
     const timer = setInterval(refresh, 30000);
-    return () => clearInterval(timer);
+    return () => {
+      window.removeEventListener(merchanopsSessionChangeEvent, syncSession);
+      window.removeEventListener("storage", syncSession);
+      clearInterval(timer);
+    };
   }, []);
 
   async function refresh() {
@@ -87,6 +97,9 @@ export function SolicitudesLogisticaClient({ detailId }: { detailId?: string }) 
   }), [q, state]);
   const selected = state.requests.find(x => x.id === detailId) || rows[0];
   const selectedRequirements = selected ? requestRequirements(state, selected) : [];
+
+  if (!session?.active) return <AccessGate text="Inicia sesión en MerchanOps para acceder a Logística." />;
+  if (!canAccessModule(session, "logistica")) return <AccessGate text="No tienes permiso para acceder al módulo de Logística." />;
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
@@ -239,6 +252,18 @@ function RequestRow({ state, request }: { state: LogisticsState; request: Reques
       <td className="p-3 align-top"><p className="font-medium">{requestMaterialSummary(state, requirements)}</p><p className="text-xs text-slate-500">{firstText(request.required_date, request.installation_date, primary?.required_date, primary?.installation_date) || "Sin fecha"}</p></td>
       <td className="p-3 align-top"><p>{firstText(request.installer_name, primary?.installer_name, request.delivery_address, primary?.delivery_address) || "Pendiente"}</p><p className="text-xs text-slate-500">{firstText(request.province, primary?.province, request.city, primary?.city) || "Sin provincia"}</p></td>
     </tr>
+  );
+}
+
+function AccessGate({ text }: { text: string }) {
+  return (
+    <main className="min-h-screen bg-slate-100 p-4 text-slate-900">
+      <section className="mx-auto max-w-3xl rounded-3xl border bg-white p-6 shadow-sm">
+        <h1 className="text-2xl font-bold">Logística</h1>
+        <p className="mt-2 text-sm text-slate-600">{text}</p>
+        <a href="/" className="mt-4 inline-flex rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Ir al inicio</a>
+      </section>
+    </main>
   );
 }
 

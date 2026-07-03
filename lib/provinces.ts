@@ -94,4 +94,39 @@ export function normalizeProvince(value?: string | null) {
   return direct || aliases[raw.toLowerCase()] || aliases[key] || raw;
 }
 
+// Graf\u00edas con acento u otros nombres que existen en datos hist\u00f3ricos de Supabase.
+// Las queries .in("province", ...) comparan literales, as\u00ed que el scope debe incluirlas.
+const accentedVariants: Record<string, string[]> = {
+  "A Coruna": ["A Coru\u00f1a"],
+  "Alava": ["\u00c1lava", "Araba"],
+  "Almeria": ["Almer\u00eda"],
+  "Avila": ["\u00c1vila"],
+  "Caceres": ["C\u00e1ceres"],
+  "Cadiz": ["C\u00e1diz"],
+  "Castellon": ["Castell\u00f3n"],
+  "Cordoba": ["C\u00f3rdoba"],
+  "Gipuzkoa": ["Guip\u00fazcoa", "Guipuzcoa"],
+  "Girona": ["Gerona"],
+  "Illes Balears": ["Islas Baleares", "Baleares"],
+  "Jaen": ["Ja\u00e9n"],
+  "Leon": ["Le\u00f3n"],
+  "Malaga": ["M\u00e1laga"],
+  "Ourense": ["Orense"],
+  "Bizkaia": ["Vizcaya"],
+  "Santa Cruz de Tenerife": ["Tenerife"]
+};
+
+export function provinceScopeValues(provinces: Array<string | null | undefined>) {
+  const out = new Set<string>();
+  provinces.forEach(value => {
+    const raw = String(value || "").trim();
+    if (!raw) return;
+    const normalized = normalizeProvince(raw);
+    out.add(raw);
+    if (normalized) out.add(normalized);
+    (accentedVariants[normalized] || []).forEach(variant => out.add(variant));
+  });
+  return Array.from(out);
+}
+
 export const provinceOptions = ["", ...spanishProvinces];

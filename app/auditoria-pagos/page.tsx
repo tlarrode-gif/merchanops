@@ -14,6 +14,7 @@ import {
   type PaymentIssue,
   type PaymentLine
 } from "@/lib/payment-ledger";
+import { provinceScopeValues } from "@/lib/provinces";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 type Row = Record<string, any>;
@@ -52,7 +53,7 @@ export default function PaymentAuditPage() {
     setMessage("");
 
     if (isSupabaseConfigured && supabase && canAccessModule(activeSession, "pagos")) {
-      const scopedProvinces = !isAdminSession(activeSession) ? (activeSession?.provinces || []).filter(Boolean) : [];
+      const scopedProvinces = !isAdminSession(activeSession) ? provinceScopeValues(activeSession?.provinces || []) : [];
       let serviceQuery = supabase.from("services").select("*");
       if (scopedProvinces.length) serviceQuery = serviceQuery.in("province", scopedProvinces);
       let campaignPointQuery = supabase.from("big_campaign_points").select("*");

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, CheckCircle2, CreditCard, FileDown, Package, Plus, Trash2, Users } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { AppSession, canAccessModule, filterBySessionProvince, getCurrentAppSession, isAdminSession, sessionProvinceLabel, userCanSeeProvince } from "@/lib/access-control";
-import { provinceOptions } from "@/lib/provinces";
+import { provinceOptions, provinceScopeValues } from "@/lib/provinces";
 
 type Client = { id: string; name: string; ceco?: string | null };
 type Worker = { id: string; name: string; phone?: string | null; province?: string | null };
@@ -95,7 +95,7 @@ export default function GrandesCampanasPage() {
   async function refresh() {
     setLoading(true);
     if (isSupabaseConfigured && supabase) {
-      const scopedProvinces = !isAdminSession(session) ? (session?.provinces || []).filter(Boolean) : [];
+      const scopedProvinces = !isAdminSession(session) ? provinceScopeValues(session?.provinces || []) : [];
       let workerQuery = supabase.from("workers").select("*").order("name");
       if (scopedProvinces.length) workerQuery = workerQuery.in("province", scopedProvinces);
       let pointQuery = supabase.from("big_campaign_points").select("*");

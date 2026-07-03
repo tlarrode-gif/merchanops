@@ -160,7 +160,8 @@ export default function IsdinCallsPage() {
     });
 
     if (rowsToWrite.length && supabase) {
-      await supabase.from("isdin_calls").upsert(rowsToWrite.map(callForDb), { onConflict: "vin" });
+      const { error: upsertError } = await supabase.from("isdin_calls").upsert(rowsToWrite.map(callForDb), { onConflict: "vin" });
+      if (upsertError) setError(`No se pudieron sincronizar ${rowsToWrite.length} llamadas con la base de datos: ${upsertError.message}`);
     }
 
     return merged;
