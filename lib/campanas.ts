@@ -1,8 +1,8 @@
-import { AppSession, AppUser, isAdminSession, userCanSeeProvince } from "@/lib/access-control";
+import { AppSession, AppUser, canDeleteCampaigns, canManageCampaigns, isAdminSession, userCanSeeProvince } from "@/lib/access-control";
 import { normalizeProvince, provinceScopeValues } from "@/lib/provinces";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
-export type CampanaEstado = "borrador" | "planificada" | "activa" | "pausada" | "completada" | "cancelada";
+export type CampanaEstado = "borrador" | "planificada" | "activa" | "pausada" | "completada" | "cancelada" | "archivada";
 export type PuntoEstado = "pendiente" | "completado" | "incidencia" | "cancelado";
 export type IncidenciaEstado = "abierta" | "en_gestion" | "resuelta";
 
@@ -18,6 +18,8 @@ export type Campana = {
   presupuesto?: number | null;
   created_by?: string | null;
   created_by_name?: string | null;
+  archived_at?: string | null;
+  duplicada_de?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -87,14 +89,15 @@ export type CampanaGestor = {
   assigned_at?: string | null;
 };
 
-export const campanaEstados: CampanaEstado[] = ["borrador", "planificada", "activa", "pausada", "completada", "cancelada"];
+export const campanaEstados: CampanaEstado[] = ["borrador", "planificada", "activa", "pausada", "completada", "cancelada", "archivada"];
 export const campanaEstadoLabels: Record<CampanaEstado, string> = {
   borrador: "Borrador",
   planificada: "Planificada",
   activa: "Activa",
   pausada: "Pausada",
   completada: "Completada",
-  cancelada: "Cancelada"
+  cancelada: "Cancelada",
+  archivada: "Archivada"
 };
 export const puntoEstados: PuntoEstado[] = ["pendiente", "completado", "incidencia", "cancelado"];
 export const puntoEstadoLabels: Record<PuntoEstado, string> = {
@@ -178,7 +181,56 @@ export async function fetchCampanasListado(session: AppSession | null): Promise<
     gestores_nombres: row.gestores_nombres || [],
     gestores_ids: row.gestores_ids || []
   }));
-  return { data: rows.filter(row => sessionCanSeeCampana(session, row)) };
+  const visibles = rows.filter(row => sessionCanSeeCampana(session, row));
+  if (isAdminSession(session) || !visibles.length) return { data: visibles };
+  return { data: await scopeListadoKpis(visibles, session) };
+}
+
+// La vista v_campanas_listado agrega KPIs globales de cada campaña. Un gestor solo debe
+// ver los números de sus provincias, así que se recalculan aquí con los puntos a los que
+// realmente tiene acceso (y el presupuesto se elimina de la fila).
+async function scopeListadoKpis(rows: CampanaListadoRow[], session: AppSession | null): Promise<CampanaListadoRow[]> {
+  if (!supabase) return rows;
+  const ids = rows.map(row => row.id);
+  const [puntosResult, incidenciasResult] = await Promise.all([
+    supabase.from("puntos_venta_campana").select("id,campana_id,provincia,gestor_id,gestor_nombre,estado,importe").in("campana_id", ids),
+    supabase.from("incidencias_campana").select("id,campana_id,punto_id,estado").in("campana_id", ids).neq("estado", "resuelta")
+  ]);
+  if (puntosResult.error) return rows.map(row => ({ ...row, presupuesto: null }));
+  const puntos = (puntosResult.data || []) as Array<Pick<PuntoVenta, "id" | "campana_id" | "provincia" | "gestor_id" | "gestor_nombre" | "estado" | "importe">>;
+  const visibles = puntos.filter(punto => sessionCanSeePunto(session, punto));
+  const puntoIds = new Set(visibles.map(punto => punto.id));
+  const incidencias = (incidenciasResult.data || []) as Array<{ campana_id: string | null; punto_id: string | null }>;
+  return rows.map(row => {
+    const propios = visibles.filter(punto => punto.campana_id === row.id);
+    return {
+      ...row,
+      presupuesto: null,
+      total_puntos: propios.length,
+      completados: propios.filter(punto => punto.estado === "completado").length,
+      pendientes: propios.filter(punto => punto.estado === "pendiente").length,
+      asignados: propios.filter(punto => punto.gestor_id || punto.gestor_nombre).length,
+      importe_total: propios.reduce((sum, punto) => sum + Number(punto.importe || 0), 0),
+      coste_ejecutado: propios.filter(punto => punto.estado === "completado").reduce((sum, punto) => sum + Number(punto.importe || 0), 0),
+      incidencias_abiertas: incidencias.filter(incidencia => incidencia.campana_id === row.id && incidencia.punto_id && puntoIds.has(incidencia.punto_id)).length
+    };
+  });
+}
+
+// KPIs de detalle calculados sobre los puntos visibles para la sesión (visión provincial del gestor).
+export function kpisDesdePuntos(campanaId: string, puntos: PuntoVenta[], incidencias: IncidenciaCampana[], fechaFin?: string | null): CampanaKpis {
+  const puntoIds = new Set(puntos.map(punto => punto.id));
+  return {
+    campana_id: campanaId,
+    total_puntos: puntos.length,
+    completados: puntos.filter(punto => punto.estado === "completado").length,
+    pendientes: puntos.filter(punto => punto.estado === "pendiente").length,
+    asignados: puntos.filter(punto => punto.gestor_id || punto.gestor_nombre).length,
+    incidencias_abiertas: incidencias.filter(incidencia => incidencia.estado !== "resuelta" && incidencia.punto_id && puntoIds.has(incidencia.punto_id)).length,
+    coste_ejecutado: puntos.filter(punto => punto.estado === "completado").reduce((sum, punto) => sum + Number(punto.importe || 0), 0),
+    importe_total: puntos.reduce((sum, punto) => sum + Number(punto.importe || 0), 0),
+    dias_restantes: fechaFin ? Math.ceil((new Date(`${dateOnly(fechaFin)}T00:00:00`).getTime() - Date.now()) / 86400000) : null
+  };
 }
 
 export async function fetchCampana(id: string): Promise<Result<Campana | null>> {
@@ -264,6 +316,125 @@ export async function saveGestoresCampana(campanaId: string, gestores: Array<Pic
   return { data: true };
 }
 
+export type CampanaImpacto = { puntos: number; incidencias: number; gestores: number; importe_total: number };
+
+export async function fetchCampanaImpacto(id: string): Promise<Result<CampanaImpacto>> {
+  const empty: CampanaImpacto = { puntos: 0, incidencias: 0, gestores: 0, importe_total: 0 };
+  if (!supabase) return { data: empty, error: "Supabase no está configurado." };
+  const [puntosResult, incidenciasResult, gestoresResult] = await Promise.all([
+    supabase.from("puntos_venta_campana").select("importe", { count: "exact" }).eq("campana_id", id),
+    supabase.from("incidencias_campana").select("id", { count: "exact", head: true }).eq("campana_id", id),
+    supabase.from("campana_gestores").select("id", { count: "exact", head: true }).eq("campana_id", id)
+  ]);
+  const error = puntosResult.error || incidenciasResult.error || gestoresResult.error;
+  if (error) return { data: empty, error: error.message };
+  return {
+    data: {
+      puntos: puntosResult.count || 0,
+      incidencias: incidenciasResult.count || 0,
+      gestores: gestoresResult.count || 0,
+      importe_total: (puntosResult.data || []).reduce((sum, row) => sum + Number((row as { importe?: number | null }).importe || 0), 0)
+    }
+  };
+}
+
+export async function archiveCampana(id: string, session: AppSession | null): Promise<Result<boolean>> {
+  if (!canManageCampaigns(session)) return { data: false, error: "Solo un administrador puede archivar campañas." };
+  return updateCampanaInterno(id, { estado: "archivada", archived_at: new Date().toISOString() });
+}
+
+export async function restoreCampana(id: string, session: AppSession | null): Promise<Result<boolean>> {
+  if (!canManageCampaigns(session)) return { data: false, error: "Solo un administrador puede restaurar campañas." };
+  return updateCampanaInterno(id, { estado: "pausada", archived_at: null });
+}
+
+// Borrado definitivo: solo admin. Las FK con on delete cascade eliminan puntos,
+// incidencias y gestores de la campaña, sin dejar datos huérfanos.
+export async function deleteCampana(id: string, session: AppSession | null): Promise<Result<boolean>> {
+  if (!canDeleteCampaigns(session)) return { data: false, error: "Solo un administrador puede borrar campañas." };
+  if (!supabase) return { data: false, error: "Supabase no está configurado." };
+  const { error } = await supabase.from("grandes_campanas").delete().eq("id", id);
+  if (error) return { data: false, error: error.message };
+  return { data: true };
+}
+
+async function updateCampanaInterno(id: string, patch: Record<string, unknown>): Promise<Result<boolean>> {
+  if (!supabase) return { data: false, error: "Supabase no está configurado." };
+  const { error } = await supabase.from("grandes_campanas").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
+  if (error) return { data: false, error: error.message };
+  return { data: true };
+}
+
+export type DuplicarOpciones = {
+  nombre: string;
+  cliente_marca?: string | null;
+  fecha_inicio?: string | null;
+  fecha_fin?: string | null;
+  copiarPuntos: boolean;
+  copiarEquipo: boolean;
+  copiarAsignaciones: boolean;
+  copiarImportes: boolean;
+};
+
+// Duplicar nunca arrastra incidencias ni avances: los puntos copiados nacen en
+// "pendiente" y sin fecha de visita. Pagos/facturación tampoco se copian (no existen
+// aún como entidad propia de campaña; se generarán desde eventos en la fase económica).
+export async function duplicateCampana(id: string, opciones: DuplicarOpciones, session: AppSession | null): Promise<Result<Campana | null>> {
+  if (!canManageCampaigns(session)) return { data: null, error: "Solo un administrador puede duplicar campañas." };
+  if (!supabase) return { data: null, error: "Supabase no está configurado." };
+  const original = await fetchCampana(id);
+  if (original.error || !original.data) return { data: null, error: original.error || "Campaña original no encontrada." };
+  const creada = await insertCampana({
+    nombre: opciones.nombre.trim(),
+    cliente_marca: opciones.cliente_marca ?? original.data.cliente_marca,
+    descripcion: original.data.descripcion,
+    estado: "borrador",
+    fecha_inicio: opciones.fecha_inicio || null,
+    fecha_fin: opciones.fecha_fin || null,
+    provincias: original.data.provincias || [],
+    presupuesto: original.data.presupuesto ?? null
+  }, session);
+  if (creada.error || !creada.data) return { data: null, error: creada.error || "No se pudo crear la copia." };
+  const nuevaId = creada.data.id;
+  await updateCampanaInterno(nuevaId, { duplicada_de: id });
+
+  if (opciones.copiarEquipo) {
+    const gestores = await fetchGestoresCampana(id);
+    if (gestores.data.length) {
+      await supabase.from("campana_gestores").insert(gestores.data.map(gestor => ({
+        campana_id: nuevaId,
+        gestor_id: gestor.gestor_id,
+        gestor_nombre: gestor.gestor_nombre,
+        provincia: gestor.provincia
+      })));
+    }
+  }
+
+  if (opciones.copiarPuntos) {
+    const puntos = await fetchPuntos(id);
+    if (puntos.error) return { data: creada.data, error: `Campaña duplicada, pero los puntos no se pudieron leer: ${puntos.error}` };
+    const filas: PuntoInput[] = puntos.data.map(punto => ({
+      codigo: punto.codigo,
+      nombre_comercial: punto.nombre_comercial,
+      direccion: punto.direccion,
+      provincia: punto.provincia,
+      tipo: punto.tipo,
+      estado: "pendiente",
+      fecha_visita: null,
+      importe: opciones.copiarImportes ? punto.importe : null,
+      gestor_id: opciones.copiarAsignaciones ? punto.gestor_id : null,
+      gestor_nombre: opciones.copiarAsignaciones ? punto.gestor_nombre : null,
+      notas: null,
+      datos_extra: punto.datos_extra || {}
+    }));
+    for (let index = 0; index < filas.length; index += 500) {
+      const lote = await insertPuntosBatch(nuevaId, filas.slice(index, index + 500));
+      if (lote.error) return { data: creada.data, error: `Campaña duplicada, pero la copia de puntos se interrumpió: ${lote.error}` };
+    }
+  }
+  return { data: creada.data };
+}
+
 export type PuntoInput = Omit<PuntoVenta, "id" | "campana_id" | "created_at" | "updated_at">;
 
 export async function insertPuntosBatch(campanaId: string, puntos: PuntoInput[]): Promise<Result<number>> {
@@ -279,6 +450,37 @@ export async function insertPuntosBatch(campanaId: string, puntos: PuntoInput[])
   const { error } = await supabase.from("puntos_venta_campana").insert(rows);
   if (error) return { data: 0, error: error.message };
   return { data: rows.length };
+}
+
+export type AsignacionMasiva = { asignados: number; omitidos: number };
+
+// Asignación en bloque. El ámbito se verifica aquí (no solo en la UI): un gestor solo
+// puede tocar puntos de sus provincias o ya asignados a él; los demás se omiten.
+export async function bulkAssignPuntos(
+  ids: string[],
+  gestor: { id: string | null; nombre: string | null } | null,
+  session: AppSession | null
+): Promise<Result<AsignacionMasiva>> {
+  if (!supabase) return { data: { asignados: 0, omitidos: 0 }, error: "Supabase no está configurado." };
+  if (!session?.active) return { data: { asignados: 0, omitidos: 0 }, error: "Sesión no válida." };
+  if (!ids.length) return { data: { asignados: 0, omitidos: 0 } };
+  const { data, error } = await supabase.from("puntos_venta_campana").select("id,provincia,gestor_id").in("id", ids);
+  if (error) return { data: { asignados: 0, omitidos: 0 }, error: error.message };
+  const permitidos = ((data || []) as Array<Pick<PuntoVenta, "id" | "provincia" | "gestor_id">>)
+    .filter(punto => sessionCanSeePunto(session, punto))
+    .map(punto => punto.id);
+  const omitidos = ids.length - permitidos.length;
+  if (!permitidos.length) return { data: { asignados: 0, omitidos }, error: "Ninguno de los puntos seleccionados está dentro de tu ámbito." };
+  const patch = {
+    gestor_id: gestor?.id || null,
+    gestor_nombre: gestor?.nombre || null,
+    updated_at: new Date().toISOString()
+  };
+  for (let index = 0; index < permitidos.length; index += 200) {
+    const { error: updateError } = await supabase.from("puntos_venta_campana").update(patch).in("id", permitidos.slice(index, index + 200));
+    if (updateError) return { data: { asignados: index, omitidos }, error: updateError.message };
+  }
+  return { data: { asignados: permitidos.length, omitidos } };
 }
 
 export async function updatePunto(id: string, patch: Partial<PuntoVenta>): Promise<Result<boolean>> {
@@ -367,7 +569,8 @@ export function normalizeProvincia(value?: string | null) {
 
 export type CampanaExportRow = Record<string, string | number>;
 
-export function campanaCsvRows(rows: CampanaListadoRow[]): CampanaExportRow[] {
+// El presupuesto solo se incluye en exportaciones de administrador.
+export function campanaCsvRows(rows: CampanaListadoRow[], incluirFinancieros = true): CampanaExportRow[] {
   return rows.map(row => ({
     Nombre: row.nombre,
     Cliente: row.cliente_marca || "",
@@ -377,7 +580,7 @@ export function campanaCsvRows(rows: CampanaListadoRow[]): CampanaExportRow[] {
     Puntos: row.total_puntos,
     Asignados: row.asignados,
     Incidencias: row.incidencias_abiertas,
-    Presupuesto: Number(row.presupuesto || 0),
+    ...(incluirFinancieros ? { Presupuesto: Number(row.presupuesto || 0) } : {}),
     "Importe puntos": Number(row.importe_total || 0),
     Inicio: dateOnly(row.fecha_inicio),
     Fin: dateOnly(row.fecha_fin)

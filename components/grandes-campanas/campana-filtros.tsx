@@ -45,24 +45,20 @@ export function CampanaFiltros({
             {campanaEstados.map(estado => <option key={estado} value={estado}>{campanaEstadoLabels[estado as CampanaEstado]}</option>)}
           </select>
         </label>
-        {isAdmin && (
-          <label className="w-44">
-            <span className="gc-label">Provincia</span>
-            <select className="gc-select" value={filtros.provincia} onChange={event => patch({ provincia: event.target.value })}>
-              <option value="">Todas</option>
-              {provincias.map(provincia => <option key={provincia} value={provincia}>{provincia}</option>)}
-            </select>
-          </label>
-        )}
-        {isAdmin && (
-          <label className="w-44">
-            <span className="gc-label">Gestor</span>
-            <select className="gc-select" value={filtros.gestor} onChange={event => patch({ gestor: event.target.value })}>
-              <option value="">Todos</option>
-              {gestores.map(gestor => <option key={gestor} value={gestor}>{gestor}</option>)}
-            </select>
-          </label>
-        )}
+        <label className="w-44">
+          <span className="gc-label">Provincia</span>
+          <select className="gc-select" value={filtros.provincia} onChange={event => patch({ provincia: event.target.value })}>
+            <option value="">{isAdmin ? "Todas" : "Mis provincias"}</option>
+            {provincias.map(provincia => <option key={provincia} value={provincia}>{provincia}</option>)}
+          </select>
+        </label>
+        <label className="w-44">
+          <span className="gc-label">Gestor</span>
+          <select className="gc-select" value={filtros.gestor} onChange={event => patch({ gestor: event.target.value })}>
+            <option value="">Todos</option>
+            {gestores.map(gestor => <option key={gestor} value={gestor}>{gestor}</option>)}
+          </select>
+        </label>
         <label className="w-40">
           <span className="gc-label">Fecha inicio</span>
           <input type="date" className="gc-input" value={filtros.desde} onChange={event => patch({ desde: event.target.value })} />

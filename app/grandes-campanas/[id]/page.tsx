@@ -6,7 +6,7 @@ import { CampanaBadgeEstado, IncidenciaBadgeEstado } from "@/components/grandes-
 import { CampanaDetalleKpis } from "@/components/grandes-campanas/campana-detalle-kpis";
 import { GestorAvatar } from "@/components/grandes-campanas/gestor-avatars";
 import { PuntosTabla } from "@/components/grandes-campanas/puntos-tabla";
-import { AppSession, canAccessModule, getCurrentAppSession, isAdminSession } from "@/lib/access-control";
+import { AppSession, canAccessModule, canManageCampaigns, getCurrentAppSession, isAdminSession } from "@/lib/access-control";
 import {
   Campana,
   CampanaGestor,
@@ -25,6 +25,7 @@ import {
   formatDate,
   insertIncidencia,
   insertPuntosBatch,
+  kpisDesdePuntos,
   puntosCsvRows,
   setIncidenciaEstado,
   syncPuntoCompletadoConLogistica,
@@ -205,8 +206,9 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
             </div>
             <div className="flex flex-wrap gap-2 gc-no-print">
               <button className="gc-btn-outline" onClick={() => downloadXlsx(`campana_${campana.nombre.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}.xlsx`, puntosCsvRows(puntos))}><FileDown className="h-4 w-4" />Exportar</button>
-              <a href={`/grandes-campanas/${campana.id}/editar`} className="gc-btn-outline"><Pencil className="h-4 w-4" />Editar</a>
-              <button className="gc-btn-dark" onClick={() => setNuevoAbierto(open => !open)}><Plus className="h-4 w-4" />Añadir puntos</button>
+              <a href={`/grandes-campanas/${campana.id}/asignacion`} className="gc-btn-outline"><Users className="h-4 w-4" />Asignación rápida</a>
+              {canManageCampaigns(session) && <a href={`/grandes-campanas/${campana.id}/editar`} className="gc-btn-outline"><Pencil className="h-4 w-4" />Editar</a>}
+              {canManageCampaigns(session) && <button className="gc-btn-dark" onClick={() => setNuevoAbierto(open => !open)}><Plus className="h-4 w-4" />Añadir puntos</button>}
             </div>
           </div>
         </div>
@@ -235,7 +237,12 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
           </section>
         )}
 
-        <CampanaDetalleKpis campana={campana} kpis={kpis} />
+        {/* El gestor ve KPIs recalculados sobre sus provincias, sin presupuesto de campaña. */}
+        <CampanaDetalleKpis
+          campana={campana}
+          kpis={admin ? kpis : kpisDesdePuntos(campana.id, puntos, incidencias, campana.fecha_fin)}
+          showFinancials={admin}
+        />
 
         <div className="gc-tabs gc-no-print">
           {tabs.map(([key, label]) => (

@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Eye, FileDown, MapPin, Pencil, Plus } from "lucide-react";
+import { ArrowLeft, Eye, MapPin, Plus } from "lucide-react";
+import { CampanaAcciones, nombreArchivoCampana } from "@/components/grandes-campanas/campana-acciones";
 import { CampanaBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
 import { CampanaFiltros, CampanaFiltrosState, emptyCampanaFiltros } from "@/components/grandes-campanas/campana-filtros";
 import { CampanaKpiCards } from "@/components/grandes-campanas/campana-kpi-cards";
 import { GestorAvatarStack } from "@/components/grandes-campanas/gestor-avatars";
-import { AppSession, canAccessModule, getCurrentAppSession, isAdminSession, merchanopsSessionChangeEvent, sessionProvinceLabel } from "@/lib/access-control";
+import { AppSession, canAccessModule, canManageCampaigns, getCurrentAppSession, isAdminSession, merchanopsSessionChangeEvent, sessionProvinceLabel } from "@/lib/access-control";
 import { CampanaListadoRow, campanaCsvRows, dateOnly, downloadCsv, eurCompact, fetchCampanasListado, formatDate } from "@/lib/campanas";
 
 const PAGE_SIZE = 25;
@@ -18,7 +19,13 @@ export default function GrandesCampanasPage() {
   const [error, setError] = useState("");
   const [filtros, setFiltros] = useState<CampanaFiltrosState>(emptyCampanaFiltros);
   const [page, setPage] = useState(1);
+  const [notice, setNotice] = useState("");
   const admin = isAdminSession(session);
+
+  function flash(text: string) {
+    setNotice(text);
+    setTimeout(() => setNotice(""), 2500);
+  }
 
   async function refresh(scope?: AppSession | null) {
     setLoading(true);
@@ -39,10 +46,11 @@ export default function GrandesCampanasPage() {
   const provincias = useMemo(() => Array.from(new Set(rows.flatMap(row => row.provincias || []))).sort(), [rows]);
   const gestores = useMemo(() => Array.from(new Set(rows.flatMap(row => row.gestores_nombres || []))).sort(), [rows]);
 
+  // Las archivadas quedan fuera de la vista por defecto; se recuperan filtrando por estado «Archivada».
   const filtradas = useMemo(() => rows.filter(row => {
     const hay = [row.nombre, row.cliente_marca, (row.provincias || []).join(" ")].join(" ").toLowerCase();
-    return (!filtros.q || hay.includes(filtros.q.toLowerCase()))
-      && (!filtros.estado || row.estado === filtros.estado)
+    return (filtros.estado ? row.estado === filtros.estado : row.estado !== "archivada")
+      && (!filtros.q || hay.includes(filtros.q.toLowerCase()))
       && (!filtros.provincia || (row.provincias || []).includes(filtros.provincia))
       && (!filtros.gestor || (row.gestores_nombres || []).includes(filtros.gestor))
       && (!filtros.desde || dateOnly(row.fecha_inicio) >= filtros.desde)
@@ -61,7 +69,7 @@ export default function GrandesCampanasPage() {
   }
 
   function exportarCampana(row: CampanaListadoRow) {
-    downloadCsv(`campana_${row.nombre.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}.csv`, campanaCsvRows([row]));
+    downloadCsv(nombreArchivoCampana(row), campanaCsvRows([row], admin));
   }
 
   if (!session?.active) {
@@ -87,10 +95,11 @@ export default function GrandesCampanasPage() {
                 Vista: {admin ? (filtros.provincia || "Todas las provincias") : sessionProvinceLabel(session)}{admin ? " [admin]" : ""}
               </p>
             </div>
-            <a href="/grandes-campanas/nueva" className="gc-btn-dark"><Plus className="h-4 w-4" />Crear gran campaña</a>
+            {canManageCampaigns(session) && <a href="/grandes-campanas/nueva" className="gc-btn-dark"><Plus className="h-4 w-4" />Crear gran campaña</a>}
           </div>
         </div>
 
+        {notice && <div className="gc-toast">{notice}</div>}
         {error && <div className="gc-toast gc-toast-error">{error}</div>}
 
         {loading ? (
@@ -98,7 +107,7 @@ export default function GrandesCampanasPage() {
             {[0, 1, 2, 3, 4].map(index => <div key={index} className="gc-skeleton h-24" />)}
           </div>
         ) : (
-          <CampanaKpiCards rows={filtradas} />
+          <CampanaKpiCards rows={filtradas} showFinancials={admin} />
         )}
 
         <CampanaFiltros filtros={filtros} onChange={cambiarFiltros} provincias={provincias} gestores={gestores} isAdmin={admin} />
@@ -121,7 +130,7 @@ export default function GrandesCampanasPage() {
                   <th style={{ textAlign: "right" }}>Puntos</th>
                   <th style={{ textAlign: "right" }}>Asig.</th>
                   <th style={{ textAlign: "right" }}>Incid.</th>
-                  <th style={{ textAlign: "right" }}>Presupuesto</th>
+                  <th style={{ textAlign: "right" }}>{admin ? "Presupuesto" : "Importe"}</th>
                   <th>Estado</th>
                   <th>Inicio</th>
                   <th>Acciones</th>
@@ -151,8 +160,13 @@ export default function GrandesCampanasPage() {
                     <td onClick={event => event.stopPropagation()}>
                       <span className="inline-flex gap-1">
                         <a href={`/grandes-campanas/${row.id}`} title="Ver detalle" className="rounded-lg border p-1.5 hover:bg-slate-50" style={{ borderColor: "var(--gc-border)" }}><Eye className="h-4 w-4" /></a>
-                        <a href={`/grandes-campanas/${row.id}/editar`} title="Editar" className="rounded-lg border p-1.5 hover:bg-slate-50" style={{ borderColor: "var(--gc-border)" }}><Pencil className="h-4 w-4" /></a>
-                        <button title="Exportar CSV" onClick={() => exportarCampana(row)} className="rounded-lg border p-1.5 hover:bg-slate-50" style={{ borderColor: "var(--gc-border)" }}><FileDown className="h-4 w-4" /></button>
+                        <CampanaAcciones
+                          row={row}
+                          session={session}
+                          onExport={exportarCampana}
+                          onDone={mensaje => { flash(mensaje); refresh(); }}
+                          onError={mensaje => setError(mensaje)}
+                        />
                       </span>
                     </td>
                   </tr>

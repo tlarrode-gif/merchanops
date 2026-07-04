@@ -85,15 +85,13 @@ export function PuntosTabla({
             <input className="gc-input" placeholder="Buscar por nombre, código o dirección..." value={filtros.q} onChange={event => patchFiltros({ q: event.target.value })} />
           </span>
         </label>
-        {isAdmin && (
-          <label className="w-40">
-            <span className="gc-label">Provincia</span>
-            <select className="gc-select" value={filtros.provincia} onChange={event => patchFiltros({ provincia: event.target.value })}>
-              <option value="">Todas</option>
-              {provincias.map(provincia => <option key={provincia} value={provincia}>{provincia}</option>)}
-            </select>
-          </label>
-        )}
+        <label className="w-40">
+          <span className="gc-label">Provincia</span>
+          <select className="gc-select" value={filtros.provincia} onChange={event => patchFiltros({ provincia: event.target.value })}>
+            <option value="">{isAdmin ? "Todas" : "Mis provincias"}</option>
+            {provincias.map(provincia => <option key={provincia} value={provincia}>{provincia}</option>)}
+          </select>
+        </label>
         <label className="w-40">
           <span className="gc-label">Estado</span>
           <select className="gc-select" value={filtros.estado} onChange={event => patchFiltros({ estado: event.target.value })}>

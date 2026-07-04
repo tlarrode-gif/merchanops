@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Plus } from "lucide-react";
 import { CampanaForm, CampanaFormState, emptyCampanaForm } from "@/components/grandes-campanas/campana-form";
 import { ImportProgress, ImportadorCSV, ImportadorEstado } from "@/components/grandes-campanas/importador-csv";
-import { AppSession, AppUser, canAccessModule, getCurrentAppSession, loadInternalUsers } from "@/lib/access-control";
+import { AppSession, AppUser, canAccessModule, canManageCampaigns, getCurrentAppSession, loadInternalUsers } from "@/lib/access-control";
 import { PuntoInput, insertCampana, insertPuntosBatch, saveGestoresCampana } from "@/lib/campanas";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
@@ -104,6 +104,9 @@ export default function NuevaCampanaPage() {
   }
   if (!canAccessModule(session, "servicios")) {
     return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl">No tienes permiso para crear grandes campañas.</section></main>;
+  }
+  if (!canManageCampaigns(session)) {
+    return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl">La creación de grandes campañas está reservada a administración. <a className="underline" href="/grandes-campanas">Volver al listado</a>.</section></main>;
   }
 
   return (

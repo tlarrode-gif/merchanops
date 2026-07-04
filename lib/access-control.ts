@@ -163,6 +163,25 @@ export function isAdminSession(session?: AppSession | null) {
   return session?.role === "admin";
 }
 
+// Capacidades sensibles por rol. Los gestores nunca ven datos financieros del cliente
+// (presupuesto, facturación, margen) ni tocan la estructura de campañas; su visión
+// operativa se limita además a sus provincias asignadas.
+export function canViewFinancials(session?: AppSession | null) {
+  return Boolean(session?.active) && isAdminSession(session);
+}
+
+export function canViewGlobalDashboards(session?: AppSession | null) {
+  return Boolean(session?.active) && isAdminSession(session);
+}
+
+export function canManageCampaigns(session?: AppSession | null) {
+  return Boolean(session?.active) && isAdminSession(session);
+}
+
+export function canDeleteCampaigns(session?: AppSession | null) {
+  return Boolean(session?.active) && isAdminSession(session);
+}
+
 export function canAccessModule(session: AppSession | null | undefined, module: AppPermissionKey) {
   if (!session || !session.active) return false;
   if (isAdminSession(session)) return true;

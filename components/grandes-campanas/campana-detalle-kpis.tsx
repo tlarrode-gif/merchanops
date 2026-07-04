@@ -7,7 +7,7 @@ function pct(numerator: number, denominator: number) {
   return denominator ? Math.round((numerator / denominator) * 100) : 0;
 }
 
-export function CampanaDetalleKpis({ campana, kpis }: { campana: Campana; kpis: CampanaKpis | null }) {
+export function CampanaDetalleKpis({ campana, kpis, showFinancials = true }: { campana: Campana; kpis: CampanaKpis | null; showFinancials?: boolean }) {
   const total = Number(kpis?.total_puntos || 0);
   const completados = Number(kpis?.completados || 0);
   const pendientes = Number(kpis?.pendientes || 0);
@@ -37,11 +37,20 @@ export function CampanaDetalleKpis({ campana, kpis }: { campana: Campana; kpis: 
         <p className="gc-kpi-label"><AlertTriangle className="gc-kpi-icon h-4 w-4" />Incidencias abiertas</p>
         <p className={`gc-kpi-value ${incidencias > 0 ? "gc-red" : ""}`}>{incidencias}</p>
       </div>
-      <div className="gc-kpi">
-        <p className="gc-kpi-label"><CreditCard className="gc-kpi-icon h-4 w-4" />Coste vs previsto</p>
-        <p className="gc-kpi-value">{eurCompact(coste)}</p>
-        <p className="gc-kpi-sub">de {eurCompact(presupuesto)} presupuestado</p>
-      </div>
+      {/* El presupuesto de campaña es información financiera: solo administración. */}
+      {showFinancials ? (
+        <div className="gc-kpi">
+          <p className="gc-kpi-label"><CreditCard className="gc-kpi-icon h-4 w-4" />Coste vs previsto</p>
+          <p className="gc-kpi-value">{eurCompact(coste)}</p>
+          <p className="gc-kpi-sub">de {eurCompact(presupuesto)} presupuestado</p>
+        </div>
+      ) : (
+        <div className="gc-kpi">
+          <p className="gc-kpi-label"><CreditCard className="gc-kpi-icon h-4 w-4" />Importe ejecutado</p>
+          <p className="gc-kpi-value">{eurCompact(coste)}</p>
+          <p className="gc-kpi-sub">en tus provincias</p>
+        </div>
+      )}
       <div className="gc-kpi">
         <p className="gc-kpi-label"><CalendarClock className="gc-kpi-icon h-4 w-4" />Días restantes</p>
         <p className="gc-kpi-value">{dias}</p>

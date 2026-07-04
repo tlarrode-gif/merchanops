@@ -2,17 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { AppSession, canAccessModule, getCurrentAppSession, merchanopsSessionChangeEvent } from "@/lib/access-control";
+import { AppSession, canAccessModule, getCurrentAppSession, isAdminSession, merchanopsSessionChangeEvent } from "@/lib/access-control";
 
+// adminOnly: secciones con datos financieros del cliente o visión global (ocultas a gestores).
 const links = [
-  { href: "/", label: "Inicio", exact: true, module: "servicios" },
-  { href: "/auditoria-pagos", label: "Auditoría pagos", exact: true, module: "pagos" },
-  { href: "/logistica", label: "Logística", exact: false, module: "logistica" },
-  { href: "/grandes-campanas", label: "Grandes Campañas", exact: false, module: "servicios" },
-  { href: "/grandes-campanas/isdin", label: "ISDIN", exact: true, module: "isdin" },
-  { href: "/grandes-campanas/isdin/llamadas", label: "Llamadas ISDIN", exact: false, module: "isdin" },
-  { href: "/grandes-campanas/isdin/dashboard", label: "KPIs ISDIN", exact: false, module: "isdin" },
-  { href: "/grandes-campanas/isdin/facturacion", label: "Facturación ISDIN", exact: false, module: "isdin" }
+  { href: "/", label: "Inicio", exact: true, module: "servicios", adminOnly: false },
+  { href: "/auditoria-pagos", label: "Auditoría pagos", exact: true, module: "pagos", adminOnly: true },
+  { href: "/logistica", label: "Logística", exact: false, module: "logistica", adminOnly: false },
+  { href: "/grandes-campanas", label: "Grandes Campañas", exact: false, module: "servicios", adminOnly: false },
+  { href: "/grandes-campanas/isdin", label: "ISDIN", exact: true, module: "isdin", adminOnly: false },
+  { href: "/grandes-campanas/isdin/llamadas", label: "Llamadas ISDIN", exact: false, module: "isdin", adminOnly: false },
+  { href: "/grandes-campanas/isdin/dashboard", label: "KPIs ISDIN", exact: false, module: "isdin", adminOnly: true },
+  { href: "/grandes-campanas/isdin/facturacion", label: "Facturación ISDIN", exact: false, module: "isdin", adminOnly: true }
 ] as const;
 
 export function MainNav() {
@@ -35,7 +36,7 @@ export function MainNav() {
   return (
     <div className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
       <nav className="mx-auto flex max-w-[1480px] flex-wrap gap-2 px-4 py-3 text-sm">
-        {links.filter(link => canAccessModule(session, link.module)).map(link => {
+        {links.filter(link => canAccessModule(session, link.module) && (!link.adminOnly || isAdminSession(session))).map(link => {
           const active = link.exact ? pathname === link.href : pathname === link.href || pathname.startsWith(`${link.href}/`);
           return (
             <a

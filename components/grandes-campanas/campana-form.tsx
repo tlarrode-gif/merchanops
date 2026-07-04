@@ -117,10 +117,13 @@ export function CampanaForm({
               <input type="date" className="gc-input" value={value.fecha_fin} onChange={event => patch({ fecha_fin: event.target.value })} />
             </label>
           </div>
-          <label className="block">
-            <span className="gc-label">Presupuesto (€)</span>
-            <input type="number" className="gc-input" placeholder="0,00" value={value.presupuesto} onChange={event => patch({ presupuesto: event.target.value })} />
-          </label>
+          {/* Presupuesto: información financiera visible solo para administración. */}
+          {admin && (
+            <label className="block">
+              <span className="gc-label">Presupuesto (€)</span>
+              <input type="number" className="gc-input" placeholder="0,00" value={value.presupuesto} onChange={event => patch({ presupuesto: event.target.value })} />
+            </label>
+          )}
           <div>
             <span className="gc-label">Provincias (Multi-selección)</span>
             <div className="flex flex-wrap items-center gap-2">

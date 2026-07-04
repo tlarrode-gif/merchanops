@@ -205,3 +205,46 @@
 @media print {
   .gc-no-print { display: none !important; }
 }
+
+/* Badge estado archivada */
+.gc-badge-archivada { background: #e2e8f0; color: #334155; }
+
+/* Menú de acciones por campaña */
+.gc-menu-wrap { position: relative; display: inline-block; }
+.gc-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; min-width: 210px;
+  background: #fff; border: 1px solid var(--gc-border); border-radius: 12px; padding: 6px;
+  box-shadow: 0 12px 32px rgba(26,26,46,.14); text-align: left;
+}
+.gc-menu a, .gc-menu button {
+  display: flex; width: 100%; align-items: center; gap: 8px;
+  border-radius: 8px; padding: 8px 10px; font-size: 13px; font-weight: 600; color: var(--gc-text);
+}
+.gc-menu a:hover, .gc-menu button:hover { background: #f4f6f8; }
+.gc-menu .gc-menu-danger { color: var(--gc-secondary); }
+.gc-menu-sep { margin: 6px 4px; border-top: 1px solid var(--gc-border); }
+
+/* Modales de gestión */
+.gc-modal-backdrop {
+  position: fixed; inset: 0; z-index: 70; display: grid; place-items: center;
+  background: rgba(26,26,46,.45); padding: 16px;
+}
+.gc-modal {
+  width: 100%; max-width: 560px; max-height: 90vh; overflow: auto;
+  background: #fff; border-radius: 16px; padding: 20px;
+  box-shadow: 0 24px 64px rgba(26,26,46,.28);
+}
+.gc-impacto { list-style: disc; padding-left: 20px; }
+.gc-impacto li { padding: 2px 0; }
+.gc-btn-danger-solid { background: var(--gc-secondary) !important; border-color: var(--gc-secondary) !important; }
+
+/* Asignación rápida */
+.gc-split { display: grid; gap: 16px; align-items: start; }
+@media (min-width: 1100px) { .gc-split { grid-template-columns: minmax(0, 1fr) 360px; } }
+.gc-worker-card {
+  display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--gc-border);
+  border-radius: 12px; padding: 10px 12px; background: #fff; cursor: pointer;
+}
+.gc-worker-card.gc-worker-active { border-color: var(--gc-primary); box-shadow: 0 0 0 2px rgba(26,26,46,.12); }
+.gc-worker-warn { color: #a16207; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+.gc-row-sugerida td { background: #fdf7e7 !important; }

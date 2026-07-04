@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Save } from "lucide-react";
 import { CampanaForm, CampanaFormState, emptyCampanaForm } from "@/components/grandes-campanas/campana-form";
-import { AppSession, AppUser, canAccessModule, getCurrentAppSession, loadInternalUsers } from "@/lib/access-control";
+import { AppSession, AppUser, canAccessModule, canManageCampaigns, getCurrentAppSession, loadInternalUsers } from "@/lib/access-control";
 import { CampanaEstado, campanaEstadoLabels, campanaEstados, dateOnly, fetchCampana, fetchGestoresCampana, saveGestoresCampana, updateCampana } from "@/lib/campanas";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
@@ -77,6 +77,9 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
   }
   if (!canAccessModule(session, "servicios")) {
     return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl">No tienes permiso para editar Grandes Campañas.</section></main>;
+  }
+  if (!canManageCampaigns(session)) {
+    return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl">La edición de detalles de campaña está reservada a administración. <a className="underline" href={`/grandes-campanas/${params.id}`}>Volver al detalle</a>.</section></main>;
   }
   if (loading) {
     return <main className="gc-module"><section className="mx-auto max-w-[1100px] space-y-3 p-4"><div className="gc-skeleton h-16" /><div className="gc-skeleton h-72" /></section></main>;
