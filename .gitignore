@@ -17,3 +17,7 @@ out/
 npm-debug.log*
 *.tsbuildinfo
 .DS_Store
+
+# Generados por Next/npm en entornos de sesión (el repo no versiona lockfile)
+next-env.d.ts
+package-lock.json
