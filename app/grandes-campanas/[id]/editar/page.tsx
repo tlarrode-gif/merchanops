@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { Save } from "lucide-react";
 import { CampanaForm, CampanaFormState, emptyCampanaForm } from "@/components/grandes-campanas/campana-form";
+import { ColumnasConfig } from "@/components/grandes-campanas/columnas-config";
 import { AppSession, AppUser, canAccessModule, canManageCampaigns, getCurrentAppSession, loadInternalUsers } from "@/lib/access-control";
+import { CampanaColumna, fetchCampanaColumnas, saveCampanaColumnas } from "@/lib/campana-columnas";
 import { CampanaEstado, campanaEstadoLabels, campanaEstados, dateOnly, fetchCampana, fetchGestoresCampana, saveGestoresCampana, updateCampana } from "@/lib/campanas";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
@@ -16,6 +18,8 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
   const [nombreCampana, setNombreCampana] = useState("");
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [gestores, setGestores] = useState<AppUser[]>([]);
+  const [columnas, setColumnas] = useState<CampanaColumna[]>([]);
+  const [columnasEditadas, setColumnasEditadas] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -29,9 +33,10 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
         const { data } = await supabase.from("clients").select("id,name").order("name");
         setClients((data || []) as ClientOption[]);
       }
-      const [campanaResult, gestoresResult] = await Promise.all([fetchCampana(params.id), fetchGestoresCampana(params.id)]);
+      const [campanaResult, gestoresResult, columnasResult] = await Promise.all([fetchCampana(params.id), fetchGestoresCampana(params.id), fetchCampanaColumnas(params.id)]);
       if (campanaResult.error) setError(campanaResult.error);
       if (!campanaResult.data) { setNotFound(true); setLoading(false); return; }
+      setColumnas(columnasResult.data);
       const campana = campanaResult.data;
       setNombreCampana(campana.nombre);
       setEstado(campana.estado);
@@ -69,6 +74,10 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
     const seleccionados = gestores.filter(gestor => form.gestorIds.includes(gestor.id));
     const gestoresResult = await saveGestoresCampana(params.id, seleccionados);
     if (gestoresResult.error) { setError(`Campaña guardada, pero el equipo no se pudo actualizar: ${gestoresResult.error}`); setSaving(false); return; }
+    if (columnasEditadas) {
+      const columnasResult = await saveCampanaColumnas(params.id, columnas);
+      if (columnasResult.error) { setError(`Campaña guardada, pero el esquema de columnas no se pudo actualizar: ${columnasResult.error}`); setSaving(false); return; }
+    }
     window.location.href = `/grandes-campanas/${params.id}`;
   }
 
@@ -113,6 +122,17 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
         </section>
 
         <CampanaForm value={form} onChange={setForm} clients={clients} gestores={gestores} session={session} showEstadoInicial={false} />
+
+        {columnas.length > 0 && (
+          <section className="gc-form-section">
+            <h2 className="gc-form-title">Columnas del archivo importado</h2>
+            <p className="mb-3 text-xs" style={{ color: "var(--gc-muted)" }}>
+              Ajusta el nombre visible, la visibilidad por rol o el mapeo de las columnas de esta campaña.
+              Los cambios de mapeo solo afectan a importaciones futuras; los datos ya importados no se modifican.
+            </p>
+            <ColumnasConfig columnas={columnas} onChange={next => { setColumnas(next); setColumnasEditadas(true); }} disabled={saving} />
+          </section>
+        )}
 
         {error && <div className="gc-note"><b>Error:</b> {error}</div>}
 

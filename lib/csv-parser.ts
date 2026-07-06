@@ -1,5 +1,6 @@
 import { spanishProvinces, normalizeProvince } from "@/lib/provinces";
 import { PuntoEstado, PuntoInput } from "@/lib/campanas";
+import { CAMPO_IGNORAR, CampanaColumna } from "@/lib/campana-columnas";
 
 export const MAX_IMPORT_ROWS = 50000;
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -14,6 +15,8 @@ export type ParsedRow = {
 export type ParseResult = {
   rows: ParsedRow[];
   headers: string[];
+  // Campo interno detectado por cabecera (null = dato extra), alineado con headers.
+  mapping: Array<string | null>;
   unmappedColumns: string[];
   fileError?: string;
 };
@@ -151,20 +154,27 @@ async function fileToMatrix(file: File): Promise<{ matrix: unknown[][]; error?: 
   return { matrix: [], error: "Formato no soportado. Sube un archivo CSV, XLS o XLSX." };
 }
 
-export async function parseImportFile(file: File): Promise<ParseResult> {
+// Con `esquema` (configuración de columnas editada por el usuario) el mapeo del
+// archivo se decide por columna: campo interno, dato extra, ignorada, obligatoria,
+// valor por defecto y tipo. Sin esquema se aplica el mapeo automático de siempre.
+export async function parseImportFile(file: File, esquema?: CampanaColumna[] | null): Promise<ParseResult> {
   const { matrix, error } = await fileToMatrix(file);
-  if (error) return { rows: [], headers: [], unmappedColumns: [], fileError: error };
-  if (!matrix.length) return { rows: [], headers: [], unmappedColumns: [], fileError: "El archivo está vacío." };
+  if (error) return { rows: [], headers: [], mapping: [], unmappedColumns: [], fileError: error };
+  if (!matrix.length) return { rows: [], headers: [], mapping: [], unmappedColumns: [], fileError: "El archivo está vacío." };
 
   const headers = (matrix[0] || []).map(cell => String(cell ?? "").trim());
-  const mapping = headers.map(mapHeader);
+  const configPorHeader = new Map((esquema || []).map(col => [fold(col.nombre_original), col]));
+  const mapping = headers.map(header => {
+    const config = configPorHeader.get(fold(header));
+    return config ? config.campo_interno : mapHeader(header);
+  });
   if (!mapping.includes("nombre_comercial")) {
-    return { rows: [], headers, unmappedColumns: [], fileError: "No se ha encontrado ninguna columna de nombre del punto (acepta: Nombre, Nombre Comercial, Punto, Farmacia...)." };
+    return { rows: [], headers, mapping, unmappedColumns: [], fileError: "No se ha encontrado ninguna columna de nombre del punto (acepta: Nombre, Nombre Comercial, Punto, Farmacia...)." };
   }
 
   const bodyRows = matrix.slice(1).filter(row => (row || []).some(cell => String(cell ?? "").trim() !== ""));
   if (bodyRows.length > MAX_IMPORT_ROWS) {
-    return { rows: [], headers, unmappedColumns: [], fileError: `El archivo tiene ${bodyRows.length.toLocaleString("es-ES")} filas y el máximo permitido es ${MAX_IMPORT_ROWS.toLocaleString("es-ES")}. Divide el archivo e importa por partes.` };
+    return { rows: [], headers, mapping, unmappedColumns: [], fileError: `El archivo tiene ${bodyRows.length.toLocaleString("es-ES")} filas y el máximo permitido es ${MAX_IMPORT_ROWS.toLocaleString("es-ES")}. Divide el archivo e importa por partes.` };
   }
 
   const unmappedColumns = headers.filter((_, i) => mapping[i] === null && headers[i]);
@@ -176,9 +186,34 @@ export async function parseImportFile(file: File): Promise<ParseResult> {
     headers.forEach((header, col) => {
       const value = raw[col];
       const field = mapping[col];
-      if (field) record[field] = value;
-      else if (header && String(value ?? "").trim() !== "") extra[header] = value;
+      if (field === CAMPO_IGNORAR) return;
+      if (field) { record[field] = value; return; }
+      if (!header) return;
+      const config = configPorHeader.get(fold(header));
+      let final: unknown = value;
+      if (String(final ?? "").trim() === "" && config?.valor_defecto) final = config.valor_defecto;
+      if (String(final ?? "").trim() === "") {
+        if (config?.obligatoria) errors.push(`Falta valor en la columna obligatoria «${config.nombre_visible}».`);
+        return;
+      }
+      if (config?.tipo === "numero") {
+        const parsed = parseImporte(final);
+        if (parsed.error) warnings.push(`Columna «${config.nombre_visible}»: valor no numérico "${String(final)}".`);
+        else final = parsed.value;
+      } else if (config?.tipo === "fecha") {
+        const parsed = parseFecha(final);
+        if (parsed.error) warnings.push(`Columna «${config.nombre_visible}»: ${parsed.error}`);
+        else if (parsed.value) final = parsed.value;
+      }
+      extra[header] = final;
     });
+
+    // Valores por defecto del esquema también para campos internos vacíos.
+    for (const config of Array.from(configPorHeader.values())) {
+      const campo = config.campo_interno;
+      if (!campo || campo === CAMPO_IGNORAR || !config.valor_defecto) continue;
+      if (String(record[campo] ?? "").trim() === "") record[campo] = config.valor_defecto;
+    }
 
     const nombre = String(record.nombre_comercial ?? "").trim();
     if (!nombre) errors.push("Falta el nombre comercial (campo obligatorio).");
@@ -222,7 +257,7 @@ export async function parseImportFile(file: File): Promise<ParseResult> {
     return { index: index + 2, data, errors, warnings };
   });
 
-  return { rows, headers, unmappedColumns };
+  return { rows, headers, mapping, unmappedColumns };
 }
 
 export function buildTemplateCsv() {

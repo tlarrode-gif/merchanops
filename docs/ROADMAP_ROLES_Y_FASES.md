@@ -35,11 +35,22 @@ desactivado y sesión en cliente). El control se aplica en guardas de página y 
 de `lib/` compartidas. El control real a nivel de datos requiere la futura migración a
 Supabase Auth + RLS (pendiente de fase posterior).
 
-## Fase 2 — Importación dinámica de Excel (pendiente)
-- Schema de columnas por campaña (`campana_columnas`: nombre_original, nombre_visible, tipo,
-  visible por rol, obligatoria, orden, valor por defecto, campo interno mapeado).
-- Pantalla de configuración de columnas al importar, reutilizable al duplicar/editar.
-- Compatibilidad hacia atrás con `datos_extra` de campañas existentes.
+## Fase 2 — Importación dinámica de Excel ✅
+
+- Schema de columnas por campaña: tabla `campana_columnas` (migración `v7_2_columnas_dinamicas.sql`,
+  aplicada en producción) con nombre_original, nombre_visible, tipo (texto/número/fecha/sí-no),
+  campo interno mapeado, visible_gestor, obligatoria, orden y valor por defecto.
+- `lib/campana-columnas.ts`: CRUD del esquema, derivación automática desde las cabeceras del
+  archivo, filtrado por rol y formateo de valores por tipo.
+- Importador (`importador-csv.tsx` + `columnas-config.tsx`): al analizar el archivo se genera el
+  esquema; «Configurar columnas» permite renombrar, remapear a campo interno, marcar obligatorias,
+  tipar, ocultar al gestor, ordenar, poner valores por defecto o ignorar columnas, y revalidar el
+  archivo con esa configuración antes de crear la campaña.
+- Reutilizable: el esquema se copia al duplicar campañas y es editable a posteriori desde la
+  página de edición (los cambios de mapeo solo afectan a importaciones futuras).
+- Render dinámico: el detalle del punto muestra los datos extra con su nombre visible y formato,
+  ocultando al gestor las columnas marcadas como no visibles.
+- Compatibilidad hacia atrás: campañas sin esquema siguen mostrando `datos_extra` tal cual.
 
 ## Fase 3 — Flujo económico (pendiente)
 - Tabla `economic_events` (pago trabajador / facturación cliente / extras) generada por cambios

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, FileDown, Printer, Search, Trash2 } from "lucide-react";
 import { PuntoBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
 import { GestorAvatar } from "@/components/grandes-campanas/gestor-avatars";
+import { CampanaColumna, columnasExtraVisibles, formatearValorColumna } from "@/lib/campana-columnas";
 import { IncidenciaCampana, PuntoEstado, PuntoVenta, dateOnly, downloadCsv, downloadXlsx, eur, formatDate, puntoEstadoLabels, puntoEstados, puntosCsvRows } from "@/lib/campanas";
 
 const PAGE_SIZE = 25;
@@ -15,6 +16,7 @@ export function PuntosTabla({
   puntos,
   incidencias,
   isAdmin,
+  columnas = [],
   saving,
   onUpdatePunto,
   onDeletePunto,
@@ -23,6 +25,7 @@ export function PuntosTabla({
   puntos: PuntoVenta[];
   incidencias: IncidenciaCampana[];
   isAdmin: boolean;
+  columnas?: CampanaColumna[];
   saving: boolean;
   onUpdatePunto: (punto: PuntoVenta, patch: Partial<PuntoVenta>) => Promise<void>;
   onDeletePunto: (punto: PuntoVenta) => Promise<void>;
@@ -42,6 +45,11 @@ export function PuntosTabla({
     });
     return map;
   }, [incidencias]);
+
+  // Esquema de columnas de la campaña (Fase 2): columnas extra visibles según rol.
+  // Sin esquema (campañas anteriores) se muestran las claves crudas de datos_extra.
+  const extrasVisibles = useMemo(() => columnasExtraVisibles(columnas, isAdmin), [columnas, isAdmin]);
+  const hayEsquema = useMemo(() => columnas.some(col => !col.campo_interno), [columnas]);
 
   const provincias = useMemo(() => Array.from(new Set(puntos.map(p => p.provincia).filter(Boolean))) as string[], [puntos]);
   const gestores = useMemo(() => Array.from(new Set(puntos.map(p => p.gestor_nombre).filter(Boolean))) as string[], [puntos]);
@@ -199,9 +207,15 @@ export function PuntosTabla({
                           </div>
                           <div className="space-y-1 text-sm">
                             <p className="text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>Datos del archivo importado</p>
-                            {punto.datos_extra && Object.keys(punto.datos_extra).length
-                              ? Object.entries(punto.datos_extra).map(([key, value]) => <p key={key}><b>{key}:</b> {String(value)}</p>)
-                              : <p style={{ color: "var(--gc-muted)" }}>Sin campos adicionales.</p>}
+                            {hayEsquema
+                              ? extrasVisibles.length
+                                ? extrasVisibles.map(col => (
+                                    <p key={col.nombre_original}><b>{col.nombre_visible}:</b> {formatearValorColumna(punto.datos_extra?.[col.nombre_original], col.tipo)}</p>
+                                  ))
+                                : <p style={{ color: "var(--gc-muted)" }}>Sin campos visibles para tu rol.</p>
+                              : punto.datos_extra && Object.keys(punto.datos_extra).length
+                                ? Object.entries(punto.datos_extra).map(([key, value]) => <p key={key}><b>{key}:</b> {String(value)}</p>)
+                                : <p style={{ color: "var(--gc-muted)" }}>Sin campos adicionales.</p>}
                             <p className="pt-2 text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>Notas</p>
                             <textarea
                               className="gc-textarea"

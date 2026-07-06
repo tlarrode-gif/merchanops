@@ -1,4 +1,5 @@
 import { AppSession, AppUser, canDeleteCampaigns, canManageCampaigns, isAdminSession, userCanSeeProvince } from "@/lib/access-control";
+import { copyCampanaColumnas } from "@/lib/campana-columnas";
 import { normalizeProvince, provinceScopeValues } from "@/lib/provinces";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
@@ -397,6 +398,8 @@ export async function duplicateCampana(id: string, opciones: DuplicarOpciones, s
   if (creada.error || !creada.data) return { data: null, error: creada.error || "No se pudo crear la copia." };
   const nuevaId = creada.data.id;
   await updateCampanaInterno(nuevaId, { duplicada_de: id });
+  // El esquema de columnas siempre acompaña a la copia (define cómo se leen los datos extra).
+  await copyCampanaColumnas(id, nuevaId);
 
   if (opciones.copiarEquipo) {
     const gestores = await fetchGestoresCampana(id);
