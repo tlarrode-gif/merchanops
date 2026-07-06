@@ -6,12 +6,11 @@ import "./payments-visual.css";
 import "./calendar-visual.css";
 import "./forms-visual.css";
 import "./campaigns-visual.css";
-import "./final-ui-shell.css";
 import "./isdin-refined-table.css";
 import "./grandes-campanas-visual.css";
 import type { Metadata } from "next";
 import { DM_Mono, DM_Sans, Inter } from "next/font/google";
-import { MainNav } from "./main-nav";
+import { AppShell } from "./app-shell";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -42,8 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="es">
       <body className={`${dmSans.variable} ${dmMono.variable} ${inter.variable}`}>
-        <MainNav />
-        {children}
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

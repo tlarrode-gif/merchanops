@@ -168,8 +168,7 @@ export default function HistorialEconomicoPage() {
     <main className="min-h-screen bg-slate-100 p-4 text-slate-900">
       <section className="mx-auto max-w-7xl space-y-5">
         <div>
-          <a href="/" className="text-sm text-slate-500">← Volver</a>
-          <h1 className="mt-2 text-3xl font-bold">Historial económico</h1>
+          <h1 className="text-3xl font-bold">Historial económico</h1>
           <p className="text-sm text-slate-500">
             Registro contable de pagos a trabajadores{admin ? ", facturación a cliente y extras" : ""} generado desde los cambios de estado. Vista: {sessionProvinceLabel(session)}.
             {!admin && " Como gestor ves únicamente los pagos de tus provincias."}
