@@ -440,19 +440,65 @@ export async function duplicateCampana(id: string, opciones: DuplicarOpciones, s
 
 export type PuntoInput = Omit<PuntoVenta, "id" | "campana_id" | "created_at" | "updated_at">;
 
-export async function insertPuntosBatch(campanaId: string, puntos: PuntoInput[]): Promise<Result<number>> {
+// Campañas en las que ya no se puede tocar la operativa (auditoría C2): lo
+// completado/cancelado/archivado es histórico y sus pagos pueden estar liquidados.
+const estadosCampanaCerrada: CampanaEstado[] = ["completada", "cancelada", "archivada"];
+
+export async function assertCampanaEditable(campanaId: string): Promise<string | null> {
+  if (!supabase) return "Supabase no está configurado.";
+  const { data, error } = await supabase.from("grandes_campanas").select("estado").eq("id", campanaId).maybeSingle();
+  if (error) return error.message;
+  if (!data) return "Campaña no encontrada.";
+  const estado = (data as { estado: CampanaEstado }).estado;
+  if (estadosCampanaCerrada.includes(estado)) return `La campaña está ${campanaEstadoLabels[estado].toLowerCase()}: sus puntos son de solo lectura. Restáurala o reábrela para editar.`;
+  return null;
+}
+
+async function campanaIdDePunto(puntoId: string): Promise<{ campanaId: string | null; error?: string }> {
+  if (!supabase) return { campanaId: null, error: "Supabase no está configurado." };
+  const { data, error } = await supabase.from("puntos_venta_campana").select("campana_id").eq("id", puntoId).maybeSingle();
+  if (error) return { campanaId: null, error: error.message };
+  return { campanaId: (data as { campana_id?: string } | null)?.campana_id || null };
+}
+
+// Alta por lotes con controles de la auditoría:
+//  * importes negativos rechazados (P-7);
+//  * deduplicación por código dentro del lote y contra la campaña (C5): reimportar
+//    el mismo archivo no duplica puntos; devuelve cuántos se omitieron.
+export async function insertPuntosBatch(campanaId: string, puntos: PuntoInput[]): Promise<Result<number> & { omitidos?: number }> {
   if (!supabase) return { data: 0, error: "Supabase no está configurado." };
   if (!puntos.length) return { data: 0 };
-  const rows = puntos.map(punto => ({
-    ...punto,
-    campana_id: campanaId,
-    fecha_visita: punto.fecha_visita || null,
-    importe: punto.importe ?? null,
-    datos_extra: punto.datos_extra || {}
-  }));
+  const bloqueada = await assertCampanaEditable(campanaId);
+  if (bloqueada) return { data: 0, error: bloqueada };
+  const negativos = puntos.filter(punto => Number(punto.importe ?? 0) < 0);
+  if (negativos.length) return { data: 0, error: `${negativos.length} punto(s) tienen importe negativo; corrígelos antes de importar.` };
+
+  const codigos = Array.from(new Set(puntos.map(punto => (punto.codigo || "").trim()).filter(Boolean)));
+  const existentes = new Set<string>();
+  for (let index = 0; index < codigos.length; index += 500) {
+    const { data, error } = await supabase.from("puntos_venta_campana").select("codigo").eq("campana_id", campanaId).in("codigo", codigos.slice(index, index + 500));
+    if (error) return { data: 0, error: error.message };
+    (data || []).forEach(row => existentes.add(String((row as { codigo?: string }).codigo || "").trim()));
+  }
+  const vistosEnLote = new Set<string>();
+  const rows: Array<Record<string, unknown>> = [];
+  let omitidos = 0;
+  for (const punto of puntos) {
+    const codigo = (punto.codigo || "").trim();
+    if (codigo && (existentes.has(codigo) || vistosEnLote.has(codigo))) { omitidos += 1; continue; }
+    if (codigo) vistosEnLote.add(codigo);
+    rows.push({
+      ...punto,
+      campana_id: campanaId,
+      fecha_visita: punto.fecha_visita || null,
+      importe: punto.importe ?? null,
+      datos_extra: punto.datos_extra || {}
+    });
+  }
+  if (!rows.length) return { data: 0, omitidos };
   const { error } = await supabase.from("puntos_venta_campana").insert(rows);
-  if (error) return { data: 0, error: error.message };
-  return { data: rows.length };
+  if (error) return { data: 0, omitidos, error: error.message };
+  return { data: rows.length, omitidos };
 }
 
 export type AsignacionMasiva = { asignados: number; omitidos: number };
@@ -467,8 +513,13 @@ export async function bulkAssignPuntos(
   if (!supabase) return { data: { asignados: 0, omitidos: 0 }, error: "Supabase no está configurado." };
   if (!session?.active) return { data: { asignados: 0, omitidos: 0 }, error: "Sesión no válida." };
   if (!ids.length) return { data: { asignados: 0, omitidos: 0 } };
-  const { data, error } = await supabase.from("puntos_venta_campana").select("id,provincia,gestor_id").in("id", ids);
+  const { data, error } = await supabase.from("puntos_venta_campana").select("id,provincia,gestor_id,campana_id").in("id", ids);
   if (error) return { data: { asignados: 0, omitidos: 0 }, error: error.message };
+  const campanas = Array.from(new Set(((data || []) as Array<{ campana_id?: string }>).map(row => row.campana_id).filter(Boolean))) as string[];
+  for (const campanaId of campanas) {
+    const bloqueada = await assertCampanaEditable(campanaId);
+    if (bloqueada) return { data: { asignados: 0, omitidos: 0 }, error: bloqueada };
+  }
   const permitidos = ((data || []) as Array<Pick<PuntoVenta, "id" | "provincia" | "gestor_id">>)
     .filter(punto => sessionCanSeePunto(session, punto))
     .map(punto => punto.id);
@@ -488,6 +539,13 @@ export async function bulkAssignPuntos(
 
 export async function updatePunto(id: string, patch: Partial<PuntoVenta>): Promise<Result<boolean>> {
   if (!supabase) return { data: false, error: "Supabase no está configurado." };
+  if (patch.importe !== undefined && Number(patch.importe ?? 0) < 0) return { data: false, error: "El importe no puede ser negativo." };
+  const punto = await campanaIdDePunto(id);
+  if (punto.error) return { data: false, error: punto.error };
+  if (punto.campanaId) {
+    const bloqueada = await assertCampanaEditable(punto.campanaId);
+    if (bloqueada) return { data: false, error: bloqueada };
+  }
   const { error } = await supabase.from("puntos_venta_campana").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
   if (error) return { data: false, error: error.message };
   return { data: true };
@@ -495,6 +553,12 @@ export async function updatePunto(id: string, patch: Partial<PuntoVenta>): Promi
 
 export async function deletePunto(id: string): Promise<Result<boolean>> {
   if (!supabase) return { data: false, error: "Supabase no está configurado." };
+  const punto = await campanaIdDePunto(id);
+  if (punto.error) return { data: false, error: punto.error };
+  if (punto.campanaId) {
+    const bloqueada = await assertCampanaEditable(punto.campanaId);
+    if (bloqueada) return { data: false, error: bloqueada };
+  }
   const { error } = await supabase.from("puntos_venta_campana").delete().eq("id", id);
   if (error) return { data: false, error: error.message };
   return { data: true };

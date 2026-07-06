@@ -83,22 +83,24 @@ export default function NuevaCampanaPage() {
 
       const puntos = [...(importEstado?.readyRows || []), ...manualPuntos];
       let importados = 0;
+      let duplicados = 0;
       if (puntos.length) {
         setProgress({ done: 0, total: puntos.length });
         for (let index = 0; index < puntos.length; index += BATCH_SIZE) {
           const batch = puntos.slice(index, index + BATCH_SIZE);
           const result = await insertPuntosBatch(campanaId, batch);
           if (result.error) {
-            setFormError(`Se importaron ${importados} de ${puntos.length} puntos antes de un error: ${result.error}. Puedes reintentar el resto desde el detalle de la campaña.`);
+            setFormError(`Se importaron ${importados} de ${puntos.length} puntos antes de un error: ${result.error}. Puedes reintentar desde el detalle de la campaña: los códigos ya importados no se duplicarán.`);
             window.location.href = `/grandes-campanas/${campanaId}?importados=${importados}`;
             return;
           }
           importados += result.data;
-          setProgress({ done: importados, total: puntos.length });
+          duplicados += result.omitidos || 0;
+          setProgress({ done: importados + duplicados, total: puntos.length });
         }
       }
       const omitidos = (importEstado?.rows.filter(row => row.errors.length).length || 0);
-      window.location.href = `/grandes-campanas/${campanaId}?importados=${importados}&omitidos=${importEstado?.omitErrors ? omitidos : 0}`;
+      window.location.href = `/grandes-campanas/${campanaId}?importados=${importados}&omitidos=${importEstado?.omitErrors ? omitidos : 0}${duplicados ? `&duplicados=${duplicados}` : ""}`;
     } finally {
       setSaving(false);
       setProgress(null);
