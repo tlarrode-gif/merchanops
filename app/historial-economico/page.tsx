@@ -7,11 +7,15 @@ import {
   EconomicEventOrigen,
   EconomicEventTipo,
   addExtraEvent,
+  cerrarMes,
+  economicEstadoLabels,
   economicOrigenLabels,
   economicTipoLabels,
   facturacionEventsFromIsdin,
   fetchEconomicEvents,
+  fetchMesesCerrados,
   mesContable,
+  reabrirMes,
   pagoEventsFromCampanaPuntos,
   pagoEventsFromPaymentLines,
   revertEconomicEvent,
@@ -44,15 +48,20 @@ export default function HistorialEconomicoPage() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [extra, setExtra] = useState({ ...emptyExtra });
+  const [mesesCerrados, setMesesCerrados] = useState<string[]>([]);
 
   async function load(activeSession?: AppSession | null) {
     const current = activeSession ?? getCurrentAppSession();
     setSession(current);
     if (!current?.active || !canAccessModule(current, "pagos")) return;
     setLoading(true);
-    const result = await fetchEconomicEvents({ mes, tipo, origen, worker, provincia }, current);
+    const [result, cerrados] = await Promise.all([
+      fetchEconomicEvents({ mes, tipo, origen, worker, provincia }, current),
+      fetchMesesCerrados()
+    ]);
     if (result.error) setMessage(result.error);
     setEventos(result.data);
+    setMesesCerrados(cerrados.data);
     setLoading(false);
   }
 
@@ -95,7 +104,15 @@ export default function HistorialEconomicoPage() {
       ];
       const result = await syncEconomicEvents(nuevos, current);
       if (result.error) setMessage(`Error al sincronizar: ${result.error}`);
-      else setMessage(result.data ? `${result.data} eventos nuevos registrados.` : "Sin eventos nuevos: el historial ya estaba al día.");
+      else {
+        const { nuevos: altas, sustituidos, retenidos } = result.data;
+        const partes = [
+          altas ? `${altas} eventos nuevos` : "",
+          sustituidos ? `${sustituidos} sustituidos (el origen cambió: reverso automático + evento nuevo)` : "",
+          retenidos ? `${retenidos} retenidos en revisión (sin beneficiario)` : ""
+        ].filter(Boolean);
+        setMessage(partes.length ? partes.join(" · ") + "." : "Sin cambios: el historial ya estaba al día.");
+      }
 
       setIssues([...auditServices(services, points), ...auditBigCampaigns(bigCampaigns, bigPoints), ...auditIsdinPreventiveCalls(vinyls)].sort((a, b) => issueWeight(b) - issueWeight(a)));
       await load(current);
@@ -123,12 +140,24 @@ export default function HistorialEconomicoPage() {
   const workers = useMemo(() => Array.from(new Map(eventos.filter(evento => evento.worker_id || evento.worker_name).map(evento => [evento.worker_id || evento.worker_name, evento.worker_name || "Sin trabajador"])).entries()), [eventos]);
   const provincias = useMemo(() => Array.from(new Set(eventos.map(evento => evento.provincia).filter(Boolean))) as string[], [eventos]);
 
+  const mesCerrado = Boolean(mes && mesesCerrados.includes(mes));
+
+  async function alternarCierreMes() {
+    if (!mes) return;
+    const actor = getCurrentAppSession();
+    const result = mesCerrado ? await reabrirMes(mes, actor) : await cerrarMes(mes, actor);
+    setMessage(result.error || (mesCerrado ? `Mes ${mes} reabierto.` : `Mes ${mes} cerrado: sus eventos quedan congelados y lo nuevo se contabilizará en el mes abierto en curso.`));
+    if (!result.error) await load();
+  }
+
+  // Los eventos retenidos en revisión no se exportan: no son pagables/facturables
+  // hasta que administración los resuelva.
   function exportar(tipoExport: "pagos" | "facturacion") {
-    const objetivo = eventos.filter(evento => tipoExport === "pagos" ? evento.tipo === "pago_trabajador" : evento.tipo === "facturacion_cliente");
-    if (!objetivo.length) { setMessage("No hay eventos de ese tipo en el filtro actual."); return; }
+    const objetivo = eventos.filter(evento => (tipoExport === "pagos" ? evento.tipo === "pago_trabajador" : evento.tipo === "facturacion_cliente") && evento.estado !== "revision");
+    if (!objetivo.length) { setMessage("No hay eventos exportables de ese tipo en el filtro actual."); return; }
     downloadCsv(`${tipoExport}_${mes || "todo"}.csv`, [
       ["Mes contable", "Fecha", "Tipo", "Origen", "Trabajador", "Cliente", "CECO", "Campaña", "Provincia", "Concepto", "Importe", "Estado", "Motivo reverso"],
-      ...objetivo.map(evento => [evento.mes_contable, evento.fecha_evento, economicTipoLabels[evento.tipo], economicOrigenLabels[evento.origen], evento.worker_name || "", evento.client || "", evento.ceco || "", evento.campana || "", evento.provincia || "", evento.concepto, evento.importe, evento.estado, evento.motivo_reverso || ""])
+      ...objetivo.map(evento => [evento.mes_contable, evento.fecha_evento, economicTipoLabels[evento.tipo], economicOrigenLabels[evento.origen], evento.worker_name || "", evento.client || "", evento.ceco || "", evento.campana || "", evento.provincia || "", evento.concepto, evento.importe, economicEstadoLabels[evento.estado], evento.motivo_reverso || ""])
     ]);
   }
 
@@ -160,19 +189,26 @@ export default function HistorialEconomicoPage() {
             <label><span className="text-xs text-slate-500">Provincia</span><select className="mt-1 w-full rounded-xl border bg-white px-3 py-2" value={provincia} onChange={event => setProvincia(event.target.value)}><option value="">Todas</option>{provincias.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
             <button onClick={() => load()} className="self-end rounded-2xl border bg-white px-4 py-2">Actualizar</button>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             {admin && <button onClick={sync} disabled={syncing} className="rounded-2xl bg-slate-900 px-4 py-2 text-white">{syncing ? "Sincronizando..." : "Sincronizar eventos"}</button>}
             <button onClick={() => exportar("pagos")} className="rounded-2xl border bg-white px-4 py-2">Exportar pagos del mes</button>
             {admin && <button onClick={() => exportar("facturacion")} className="rounded-2xl border bg-white px-4 py-2">Exportar facturación del mes</button>}
+            {admin && mes && (
+              <button onClick={alternarCierreMes} className={`rounded-2xl border px-4 py-2 ${mesCerrado ? "border-amber-300 bg-amber-50 text-amber-900" : "bg-white"}`}>
+                {mesCerrado ? `Reabrir mes ${mes}` : `Cerrar mes ${mes}`}
+              </button>
+            )}
+            {mesCerrado && <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">🔒 Mes cerrado: eventos congelados</span>}
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-5">
+        <div className="grid gap-3 md:grid-cols-6">
           <K label="Pagos (neto)" value={eur(summary.pagos)} />
           {admin && <K label="Facturación (neto)" value={eur(summary.facturacion)} />}
           {admin && <K label="Extras (neto)" value={eur(summary.extras)} />}
           <K label="Eventos" value={summary.total} />
           <K label="Reversos" value={summary.reversos} />
+          <K label="En revisión" value={summary.enRevision} />
         </div>
 
         {admin && (
@@ -196,7 +232,7 @@ export default function HistorialEconomicoPage() {
                 <thead><tr className="bg-slate-50"><th className="p-2 text-left">Mes</th><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Trabajador</th><th>Cliente</th><th>Campaña</th><th>Provincia</th><th>Concepto</th><th className="text-right">Importe</th><th>Estado</th>{admin && <th></th>}</tr></thead>
                 <tbody>
                   {eventos.map(evento => (
-                    <tr key={evento.id} className={`border-t ${evento.estado === "revertido" ? "text-slate-400 line-through" : evento.estado === "reverso" ? "bg-amber-50" : ""}`}>
+                    <tr key={evento.id} className={`border-t ${evento.estado === "revertido" ? "text-slate-400 line-through" : evento.estado === "reverso" ? "bg-amber-50" : evento.estado === "revision" ? "bg-rose-50" : ""}`}>
                       <td className="p-2">{evento.mes_contable}</td>
                       <td>{evento.fecha_evento}</td>
                       <td>{economicTipoLabels[evento.tipo]}</td>
@@ -207,8 +243,8 @@ export default function HistorialEconomicoPage() {
                       <td>{evento.provincia || "—"}</td>
                       <td title={evento.motivo_reverso || undefined}>{evento.concepto}</td>
                       <td className="text-right font-semibold">{eur(evento.importe)}</td>
-                      <td className="capitalize">{evento.estado}</td>
-                      {admin && <td className="p-2 text-right">{evento.estado === "activo" && <button onClick={() => revertir(evento)} className="rounded-xl border px-3 py-1 text-xs text-red-600">Revertir</button>}</td>}
+                      <td>{economicEstadoLabels[evento.estado]}</td>
+                      {admin && <td className="p-2 text-right">{evento.estado === "activo" ? <button onClick={() => revertir(evento)} className="rounded-xl border px-3 py-1 text-xs text-red-600">Revertir</button> : evento.estado === "revision" ? <button onClick={() => revertir(evento)} className="rounded-xl border px-3 py-1 text-xs text-red-600">Descartar</button> : null}</td>}
                     </tr>
                   ))}
                 </tbody>

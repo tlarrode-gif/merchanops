@@ -92,3 +92,33 @@ Supabase Auth + RLS (pendiente de fase posterior).
 - **Export CSV del dashboard**: además del informe HTML, export plano para Excel con el
   resumen ejecutivo y los desgloses por semana, provincia, tipo, campaña e instalador,
   etiquetado con el alcance y el ámbito de la sesión.
+
+## Post-auditoría · Sprint 1 — Estabilización de pagos ✅
+
+Basado en `docs/AUDITORIA_MERCHANOPS_2026-07.md` (bloque 2, críticos):
+
+- **C1 Reconciliación**: `syncEconomicEvents` garantiza como máximo un evento vigente por
+  línea (`claveDeLinea`). Si el origen cambia (estado, fecha, importe o beneficiario — ahora
+  parte del fingerprint), el evento anterior se revierte automáticamente con rastro
+  («Sustituido: el origen cambió») y entra el nuevo. El resumen de sincronización informa
+  de nuevos / sustituidos / retenidos.
+- **C2 Cierre de mes**: tabla `economic_month_closures` (migración `v7_4_cierre_economico.sql`,
+  aplicada en producción). Un mes cerrado es inmutable: los eventos nuevos con fecha de un mes
+  cerrado se contabilizan en el mes abierto en curso con `payload.mes_origen`; los extras
+  manuales sobre mes cerrado se rechazan. Botón Cerrar/Reabrir mes en Historial económico (admin).
+- **C2b Campañas cerradas**: `updatePunto`, `deletePunto`, `bulkAssignPuntos` e
+  `insertPuntosBatch` rechazan cambios si la campaña está completada/cancelada/archivada.
+- **C4 Cancelado ISDIN**: pagos (calc/buildPay) solo devengan visita fallida en cancelaciones
+  con visita previa real (`incident_payment_week`), igual que la facturación.
+- **C5 Dedupe importación**: `insertPuntosBatch` omite códigos ya existentes en la campaña y
+  duplicados dentro del lote; reimportar un archivo no duplica puntos y se informa del recuento.
+- **C7 Filtro seguro**: el filtro de trabajador del Historial se aplica en cliente (eliminado
+  el `.or` interpolado de PostgREST).
+- **P-6 Estado 'revision'**: pagos sin beneficiario quedan retenidos (fuera del neto y de los
+  exports) hasta corregir el origen y resincronizar, o descartarlos.
+- **P-7 Importes negativos**: rechazados en alta y edición de puntos.
+- Refuerzo C3 parcial: `syncEconomicEvents`, `revertEconomicEvent`, `addExtraEvent`,
+  `cerrarMes`/`reabrirMes` verifican rol admin en la librería, no solo en la UI.
+
+Pendiente del roadmap de auditoría: Sprint 2 (seguridad/Auth+RLS, beneficiario unificado,
+navegación única), Sprint 3 (modelo único de campaña, change_log), Sprint 4 (operativa fina).

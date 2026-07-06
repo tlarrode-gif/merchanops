@@ -94,7 +94,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     refresh();
     const search = new URLSearchParams(window.location.search);
     const importados = search.get("importados");
-    if (importados) flash(`${Number(importados).toLocaleString("es-ES")} puntos importados${search.get("omitidos") && search.get("omitidos") !== "0" ? `, ${search.get("omitidos")} omitidos` : ""}.`);
+    if (importados) flash(`${Number(importados).toLocaleString("es-ES")} puntos importados${search.get("omitidos") && search.get("omitidos") !== "0" ? `, ${search.get("omitidos")} omitidos` : ""}${search.get("duplicados") ? `, ${search.get("duplicados")} duplicados no importados (código ya existente)` : ""}.`);
     const timer = setInterval(() => refresh(true), 30000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps

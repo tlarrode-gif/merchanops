@@ -11,7 +11,9 @@ import { supabase } from "@/lib/supabase";
 
 export type EconomicEventTipo = "pago_trabajador" | "facturacion_cliente" | "extra";
 export type EconomicEventOrigen = "servicio" | "gran_campana" | "isdin" | "manual";
-export type EconomicEventEstado = "activo" | "revertido" | "reverso";
+// 'revision': pago retenido (sin beneficiario claro u otra anomalía); fuera del
+// neto y de los exports hasta que administración lo resuelva.
+export type EconomicEventEstado = "activo" | "revertido" | "reverso" | "revision";
 
 export type EconomicEvent = {
   id: string;
@@ -67,13 +69,25 @@ type AnyRow = Record<string, any>;
 
 // --- Generación de eventos desde los cambios de estado registrados en origen ---
 
+// Identidad estable de una línea económica, independiente de estado/fecha/importe.
+// Es la clave de la reconciliación: puede existir COMO MÁXIMO un evento vigente
+// (activo o en revisión) por clave. En facturación un mismo vinilo genera varias
+// líneas en paralelo (incidencia inicial, instalación, revisitas), así que ahí el
+// concepto forma parte de la identidad; en pagos no (el concepto cambia con el
+// estado y precisamente queremos que esa transición sustituya al evento anterior).
+export function claveDeLinea(evento: Pick<EconomicEvent, "tipo" | "origen" | "source_id" | "source_line_id" | "concepto">) {
+  const base = ["linea", evento.tipo, evento.origen, evento.source_id || "", evento.source_line_id || ""];
+  if (evento.tipo === "facturacion_cliente") base.push(evento.concepto);
+  return fingerprint(base);
+}
+
 // Pagos a trabajador desde las líneas de pago calculadas (Servicios + módulo
-// clásico de grandes campañas). El fingerprint de la línea ya incorpora
-// origen, entidad, estado, fecha e importe: si el estado del origen cambia,
-// nace un evento nuevo en lugar de duplicarse el anterior.
+// clásico de grandes campañas). El fingerprint incorpora también el beneficiario:
+// si cambia el estado, la fecha, el importe o el trabajador, nace un fingerprint
+// nuevo y la reconciliación de syncEconomicEvents revierte el evento anterior.
 export function pagoEventsFromPaymentLines(lines: PaymentLine[]): EconomicEventInput[] {
   return lines.map(line => ({
-    fingerprint: fingerprint(["evt", "pago", line.fingerprint]),
+    fingerprint: fingerprint(["evt", "pago", line.fingerprint, line.worker_id || line.worker_name || ""]),
     tipo: "pago_trabajador" as const,
     origen: line.origin,
     source_id: line.source_id,
@@ -103,7 +117,7 @@ export function pagoEventsFromCampanaPuntos(puntos: AnyRow[], campanas: AnyRow[]
       const campana = porCampana.get(punto.campana_id) || {};
       const fecha = dateOnly(punto.fecha_visita) || dateOnly(punto.updated_at) || hoy();
       return {
-        fingerprint: fingerprint(["evt", "pago", "gc_punto", punto.id, "completado", fecha, Number(punto.importe || 0)]),
+        fingerprint: fingerprint(["evt", "pago", "gc_punto", punto.id, "completado", fecha, Number(punto.importe || 0), punto.gestor_id || punto.gestor_nombre || ""]),
         tipo: "pago_trabajador" as const,
         origen: "gran_campana" as const,
         source_id: String(punto.campana_id || ""),
@@ -176,29 +190,153 @@ export function facturacionEventsFromIsdin(lines: IsdinBillingLine[], adjustment
 
 type Result<T> = { data: T; error: string | null };
 
-// Idempotente: los fingerprints ya registrados se ignoran, nunca se sobreescriben
-// (un evento contabilizado es inmutable). Devuelve cuántos eventos nuevos entraron.
-export async function syncEconomicEvents(eventos: EconomicEventInput[], actor?: AppSession | null): Promise<Result<number>> {
-  if (!supabase) return { data: 0, error: "Supabase no está configurado." };
-  if (!eventos.length) return { data: 0, error: null };
-  const { data: existentes, error: readError } = await supabase
+export type SyncResumen = { nuevos: number; sustituidos: number; retenidos: number };
+
+function sinBeneficiario(evento: EconomicEventInput) {
+  if (evento.tipo !== "pago_trabajador") return false;
+  if (evento.worker_id) return false;
+  const nombre = String(evento.worker_name || "").trim().toLowerCase();
+  return !nombre || nombre === "sin gestor" || nombre === "sin instalador" || nombre === "sin trabajador";
+}
+
+// --- Cierre de mes contable ---
+
+export async function fetchMesesCerrados(): Promise<Result<string[]>> {
+  if (!supabase) return { data: [], error: "Supabase no está configurado." };
+  const { data, error } = await supabase.from("economic_month_closures").select("mes_contable");
+  if (error) return { data: [], error: error.message };
+  return { data: (data || []).map(row => row.mes_contable as string), error: null };
+}
+
+export async function cerrarMes(mes: string, actor: AppSession | null): Promise<Result<boolean>> {
+  if (!isAdminSession(actor)) return { data: false, error: "Solo administración puede cerrar meses." };
+  if (!supabase) return { data: false, error: "Supabase no está configurado." };
+  if (!/^\d{4}-\d{2}$/.test(mes)) return { data: false, error: "Mes no válido." };
+  const { error } = await supabase.from("economic_month_closures").upsert({
+    mes_contable: mes,
+    closed_at: new Date().toISOString(),
+    closed_by_user_id: actor?.id || null,
+    closed_by_user_name: actor?.display_name || null
+  });
+  if (error) return { data: false, error: error.message };
+  return { data: true, error: null };
+}
+
+export async function reabrirMes(mes: string, actor: AppSession | null): Promise<Result<boolean>> {
+  if (!isAdminSession(actor)) return { data: false, error: "Solo administración puede reabrir meses." };
+  if (!supabase) return { data: false, error: "Supabase no está configurado." };
+  const { error } = await supabase.from("economic_month_closures").delete().eq("mes_contable", mes);
+  if (error) return { data: false, error: error.message };
+  return { data: true, error: null };
+}
+
+// Sincronización idempotente CON reconciliación (auditoría C1):
+//  1. Los fingerprints ya registrados se ignoran (nada cambió en el origen).
+//  2. Si un evento nuevo comparte clave de línea con un evento vigente pero con
+//     fingerprint distinto (cambió estado, fecha, importe o beneficiario en el
+//     origen), el evento antiguo se revierte automáticamente y entra el nuevo:
+//     nunca hay dos eventos vigentes para la misma línea.
+//  3. Pagos sin beneficiario entran en estado 'revision' (fuera de neto y export).
+//  4. Eventos cuyo mes contable esté cerrado se contabilizan en el mes actual,
+//     guardando el mes de origen en payload.mes_origen. Lo cerrado no se toca.
+export async function syncEconomicEvents(eventos: EconomicEventInput[], actor?: AppSession | null): Promise<Result<SyncResumen>> {
+  const vacio: SyncResumen = { nuevos: 0, sustituidos: 0, retenidos: 0 };
+  if (!supabase) return { data: vacio, error: "Supabase no está configurado." };
+  if (!isAdminSession(actor)) return { data: vacio, error: "Solo administración puede sincronizar eventos." };
+  if (!eventos.length) return { data: vacio, error: null };
+
+  const [existentesR, cerradosR] = await Promise.all([
+    supabase.from("economic_events").select("fingerprint").in("fingerprint", eventos.map(evento => evento.fingerprint)),
+    fetchMesesCerrados()
+  ]);
+  if (existentesR.error) return { data: vacio, error: existentesR.error.message };
+  if (cerradosR.error) return { data: vacio, error: cerradosR.error };
+  const conocidos = new Set((existentesR.data || []).map(row => row.fingerprint as string));
+  const cerrados = new Set(cerradosR.data);
+  const mesActual = mesContable();
+  if (cerrados.has(mesActual)) return { data: vacio, error: `El mes actual (${mesActual}) está cerrado; reábrelo para sincronizar.` };
+
+  const candidatos = eventos.filter(evento => !conocidos.has(evento.fingerprint));
+  if (!candidatos.length) return { data: vacio, error: null };
+
+  // Eventos vigentes de las mismas líneas, para reconciliar.
+  const sourceIds = Array.from(new Set(candidatos.map(evento => evento.source_id).filter(Boolean))) as string[];
+  const { data: vigentesData, error: vigentesError } = await supabase
     .from("economic_events")
-    .select("fingerprint")
-    .in("fingerprint", eventos.map(evento => evento.fingerprint));
-  if (readError) return { data: 0, error: readError.message };
-  const conocidos = new Set((existentes || []).map(row => row.fingerprint as string));
-  const nuevos = eventos
-    .filter(evento => !conocidos.has(evento.fingerprint))
-    .map(evento => ({
-      ...evento,
-      payload: evento.payload || {},
+    .select("*")
+    .in("estado", ["activo", "revision"])
+    .in("source_id", sourceIds);
+  if (vigentesError) return { data: vacio, error: vigentesError.message };
+  const vigentesPorClave = new Map<string, EconomicEvent>();
+  for (const vigente of (vigentesData || []) as EconomicEvent[]) vigentesPorClave.set(claveDeLinea(vigente), vigente);
+
+  const resumen: SyncResumen = { nuevos: 0, sustituidos: 0, retenidos: 0 };
+  for (const candidato of candidatos) {
+    const retenido = sinBeneficiario(candidato);
+    const mesCerrado = cerrados.has(candidato.mes_contable);
+    const fila = {
+      ...candidato,
+      estado: retenido ? "revision" as const : "activo" as const,
+      mes_contable: mesCerrado ? mesActual : candidato.mes_contable,
+      payload: { ...(candidato.payload || {}), ...(mesCerrado ? { mes_origen: candidato.mes_contable } : {}) },
       created_by_user_id: actor?.id || null,
       created_by_user_name: actor?.display_name || null
-    }));
-  if (!nuevos.length) return { data: 0, error: null };
-  const { error } = await supabase.from("economic_events").upsert(nuevos, { onConflict: "fingerprint", ignoreDuplicates: true });
-  if (error) return { data: 0, error: error.message };
-  return { data: nuevos.length, error: null };
+    };
+
+    const anterior = vigentesPorClave.get(claveDeLinea(candidato));
+    if (anterior) {
+      const sustituido = await sustituirEvento(anterior, fila, actor || null, cerrados, mesActual);
+      if (sustituido.error) return { data: resumen, error: sustituido.error };
+      resumen.sustituidos += 1;
+      vigentesPorClave.delete(claveDeLinea(candidato));
+    } else {
+      const { error } = await supabase.from("economic_events").upsert(fila, { onConflict: "fingerprint", ignoreDuplicates: true });
+      if (error) return { data: resumen, error: error.message };
+      resumen.nuevos += 1;
+    }
+    if (retenido) resumen.retenidos += 1;
+  }
+  return { data: resumen, error: null };
+}
+
+// Reverso del evento anterior + alta del nuevo, dejando rastro cruzado. El reverso
+// se contabiliza siempre en un mes abierto (el actual).
+async function sustituirEvento(anterior: EconomicEvent, nuevo: Record<string, unknown>, actor: AppSession | null, cerrados: Set<string>, mesActual: string): Promise<Result<boolean>> {
+  if (!supabase) return { data: false, error: "Supabase no está configurado." };
+  // Un evento en revisión nunca llegó a contar: se marca revertido sin reverso espejo.
+  if (anterior.estado === "activo") {
+    const { error: reversoError } = await supabase.from("economic_events").insert({
+      fingerprint: fingerprint(["evt", "reverso", anterior.fingerprint]),
+      tipo: anterior.tipo,
+      origen: anterior.origen,
+      source_id: anterior.source_id || null,
+      source_line_id: anterior.source_line_id || null,
+      fecha_evento: hoy(),
+      mes_contable: mesActual,
+      worker_id: anterior.worker_id || null,
+      worker_name: anterior.worker_name || null,
+      client: anterior.client || null,
+      ceco: anterior.ceco || null,
+      campana: anterior.campana || null,
+      provincia: anterior.provincia || null,
+      concepto: `Reverso · ${anterior.concepto}`,
+      importe: -Number(anterior.importe || 0),
+      estado: "reverso",
+      reverso_de: anterior.id,
+      motivo_reverso: "Sustituido: el origen cambió tras la sincronización.",
+      created_by_user_id: actor?.id || null,
+      created_by_user_name: actor?.display_name || null,
+      payload: { original_fingerprint: anterior.fingerprint, sustitucion_automatica: true }
+    });
+    if (reversoError && reversoError.code !== "23505" && !/duplicate|unique/i.test(reversoError.message)) return { data: false, error: reversoError.message };
+  }
+  const { error: marcaError } = await supabase.from("economic_events")
+    .update({ estado: "revertido", motivo_reverso: "Sustituido: el origen cambió tras la sincronización." })
+    .eq("id", anterior.id);
+  if (marcaError) return { data: false, error: marcaError.message };
+  const { error: altaError } = await supabase.from("economic_events").upsert(nuevo, { onConflict: "fingerprint", ignoreDuplicates: true });
+  if (altaError) return { data: false, error: altaError.message };
+  return { data: true, error: null };
 }
 
 export type EconomicEventFilters = {
@@ -218,7 +356,6 @@ export async function fetchEconomicEvents(filters: EconomicEventFilters, session
   if (filters.mes) query = query.eq("mes_contable", filters.mes);
   if (filters.tipo) query = query.eq("tipo", filters.tipo);
   if (filters.origen) query = query.eq("origen", filters.origen);
-  if (filters.worker) query = query.or(`worker_id.eq.${filters.worker},worker_name.eq.${filters.worker}`);
   if (!isAdminSession(session)) {
     query = query.eq("tipo", "pago_trabajador");
     const provincias = provinceScopeValues(session?.provinces || []);
@@ -228,6 +365,9 @@ export async function fetchEconomicEvents(filters: EconomicEventFilters, session
   const { data, error } = await query;
   if (error) return { data: [], error: error.message };
   let eventos = (data || []) as EconomicEvent[];
+  // El filtro de trabajador se aplica en cliente: el valor viene de un texto libre
+  // (id o nombre) y no debe interpolarse jamás en un `.or` de PostgREST.
+  if (filters.worker) eventos = eventos.filter(evento => evento.worker_id === filters.worker || evento.worker_name === filters.worker);
   if (filters.provincia) eventos = eventos.filter(evento => normalizeProvince(evento.provincia) === normalizeProvince(filters.provincia));
   return { data: eventos, error: null };
 }
@@ -236,6 +376,13 @@ export async function fetchEconomicEvents(filters: EconomicEventFilters, session
 // espejo con importe opuesto, contabilizado en el mes actual.
 export async function revertEconomicEvent(evento: EconomicEvent, motivo: string, actor: AppSession | null): Promise<Result<boolean>> {
   if (!supabase) return { data: false, error: "Supabase no está configurado." };
+  if (!isAdminSession(actor)) return { data: false, error: "Solo administración puede revertir eventos." };
+  // Un evento retenido en revisión nunca contó en el neto: se marca revertido sin espejo.
+  if (evento.estado === "revision") {
+    const { error } = await supabase.from("economic_events").update({ estado: "revertido", motivo_reverso: motivo || "Descartado desde revisión." }).eq("id", evento.id);
+    if (error) return { data: false, error: error.message };
+    return { data: true, error: null };
+  }
   if (evento.estado !== "activo") return { data: false, error: "Solo se pueden revertir eventos activos." };
   const fecha = hoy();
   const { error: insertError } = await supabase.from("economic_events").insert({
@@ -273,9 +420,13 @@ export async function revertEconomicEvent(evento: EconomicEvent, motivo: string,
 // Evento extra manual (ajustes puntuales de administración).
 export async function addExtraEvent(input: { fecha: string; concepto: string; importe: number; tipo: EconomicEventTipo; worker_name?: string | null; client?: string | null; campana?: string | null; provincia?: string | null }, actor: AppSession | null): Promise<Result<boolean>> {
   if (!supabase) return { data: false, error: "Supabase no está configurado." };
+  if (!isAdminSession(actor)) return { data: false, error: "Solo administración puede crear eventos manuales." };
   if (!input.concepto.trim()) return { data: false, error: "El concepto es obligatorio." };
   if (!Number(input.importe)) return { data: false, error: "El importe no puede ser cero." };
   const fecha = dateOnly(input.fecha) || hoy();
+  const cerrados = await fetchMesesCerrados();
+  if (cerrados.error) return { data: false, error: cerrados.error };
+  if (cerrados.data.includes(mesContable(fecha))) return { data: false, error: `El mes ${mesContable(fecha)} está cerrado; usa una fecha de un mes abierto.` };
   const { error } = await supabase.from("economic_events").insert({
     fingerprint: fingerprint(["evt", "manual", actor?.id || "anon", Date.now(), Math.random()]),
     tipo: input.tipo,
@@ -297,15 +448,25 @@ export async function addExtraEvent(input: { fecha: string; concepto: string; im
   return { data: true, error: null };
 }
 
-// Neto contable: se suman todos los eventos; un original revertido (+X) y su
-// reverso (-X) se anulan entre sí, así el neto refleja solo lo vigente.
+export const economicEstadoLabels: Record<EconomicEventEstado, string> = {
+  activo: "Activo",
+  revertido: "Revertido",
+  reverso: "Reverso",
+  revision: "En revisión"
+};
+
+// Neto contable: se suman todos los eventos contabilizados; un original revertido
+// (+X) y su reverso (-X) se anulan entre sí, así el neto refleja solo lo vigente.
+// Los eventos 'revision' NO cuentan en el neto (nunca llegaron a contabilizarse).
 export function summarizeEconomicEvents(eventos: EconomicEvent[]) {
+  const contables = eventos.filter(evento => evento.estado !== "revision");
   const suma = (list: EconomicEvent[]) => list.reduce((total, evento) => total + Number(evento.importe || 0), 0);
   return {
     total: eventos.length,
-    pagos: suma(eventos.filter(evento => evento.tipo === "pago_trabajador")),
-    facturacion: suma(eventos.filter(evento => evento.tipo === "facturacion_cliente")),
-    extras: suma(eventos.filter(evento => evento.tipo === "extra")),
-    reversos: eventos.filter(evento => evento.estado === "reverso").length
+    pagos: suma(contables.filter(evento => evento.tipo === "pago_trabajador")),
+    facturacion: suma(contables.filter(evento => evento.tipo === "facturacion_cliente")),
+    extras: suma(contables.filter(evento => evento.tipo === "extra")),
+    reversos: eventos.filter(evento => evento.estado === "reverso").length,
+    enRevision: eventos.filter(evento => evento.estado === "revision").length
   };
 }
