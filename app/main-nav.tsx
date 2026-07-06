@@ -7,7 +7,7 @@ import { AppSession, canAccessModule, getCurrentAppSession, isAdminSession, merc
 // adminOnly: secciones con datos financieros del cliente o visión global (ocultas a gestores).
 const links = [
   { href: "/", label: "Inicio", exact: true, module: "servicios", adminOnly: false },
-  { href: "/auditoria-pagos", label: "Auditoría pagos", exact: true, module: "pagos", adminOnly: true },
+  { href: "/historial-economico", label: "Historial económico", exact: true, module: "pagos", adminOnly: false },
   { href: "/logistica", label: "Logística", exact: false, module: "logistica", adminOnly: false },
   { href: "/grandes-campanas", label: "Grandes Campañas", exact: false, module: "servicios", adminOnly: false },
   { href: "/grandes-campanas/isdin", label: "ISDIN", exact: true, module: "isdin", adminOnly: false },

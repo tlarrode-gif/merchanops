@@ -3,10 +3,14 @@ import {useEffect,useMemo,useState} from "react";
 import {isSupabaseConfigured,supabase} from "@/lib/supabase";
 import {canAccessModule,canViewFinancials,filterBySessionProvince,getCurrentAppSession} from "@/lib/access-control";
 
-type V={id:string;pharmacy_name:string;vinyl:string;status?:string|null;vinyl_record_type?:string|null;vinyl_campaign?:string|null;province?:string|null;city?:string|null;street?:string|null;street_number?:string|null;postal_code?:string|null;payment_week?:string|null;desired_installation_week?:string|null;incident_payment_week?:string|null;installation_payment_week?:string|null;incident_payment_date?:string|null;installation_payment_date?:string|null;incident_opened_at?:string|null;incident_resolved_at?:string|null;status_changed_at?:string|null;billing_last_status_date?:string|null;billing_extra_equipment?:number|null;billing_type_override?:string|null;comments?:string|null;client_observations?:string|null;scaffold_required?:boolean|null;revisit_count?:number|null};
-type S={id:string;standard_rate:number;custom_rate:number};
-type A={id:string;concept:string;amount:number;billing_week?:string|null;billing_date?:string|null};
-const CLIENT="ISDIN",CECO="3159",localKey="merchanops_isdin_local_v381",legacyLocalKey="merchanops_isdin_local_v373",setKey="merchanops_isdin_billing_settings_v1",adjKey="merchanops_isdin_billing_adjustments_v1";
+// La lógica de facturación (tipos, tarifas y líneas por estado) vive en lib/isdin-billing.ts
+// para compartirla con el Historial económico.
+import {ISDIN_CECO,ISDIN_CLIENT,isdinBillingLines,isdinVinylAddress,isdinVinylType,type IsdinBillingAdjustment,type IsdinBillingSettings,type IsdinVinylBilling} from "@/lib/isdin-billing";
+type V=IsdinVinylBilling;
+type S=IsdinBillingSettings;
+type A=IsdinBillingAdjustment;
+const CLIENT=ISDIN_CLIENT,CECO=ISDIN_CECO,localKey="merchanops_isdin_local_v381",legacyLocalKey="merchanops_isdin_local_v373",setKey="merchanops_isdin_billing_settings_v1",adjKey="merchanops_isdin_billing_adjustments_v1";
+const typ=isdinVinylType,adr=isdinVinylAddress,lines=isdinBillingLines;
 function euro(n:number){return new Intl.NumberFormat("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(n||0))+" €"}
 function d(x?:string|null){return x?String(x).slice(0,10):""}
 function localDate(){const x=new Date();return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,"0")}-${String(x.getDate()).padStart(2,"0")}`}
@@ -14,17 +18,6 @@ function cm(){return localDate().slice(0,7)}
 function today(){return localDate()}
 function csvq(x:any){return `"${String(x??"").replace(/"/g,'""')}"`}
 function download(rows:any[][]){const b=new Blob(["\ufeff"+rows.map(r=>r.map(csvq).join(";")).join("\n")],{type:"text/csv;charset=utf-8;"});const u=URL.createObjectURL(b),a=document.createElement("a");a.href=u;a.download="facturacion_isdin.csv";a.click();URL.revokeObjectURL(u)}
-function typ(v:V){const r=String(v.billing_type_override||v.vinyl_record_type||"").toLowerCase();if(r.includes("medida"))return"Vinilo a medida";if(r.includes("standard")||r.includes("estandar")||r.includes("estándar"))return"Vinilo standard";return"Sin clasificar"}
-function tarifa(v:V,s:S){const t=typ(v);return t==="Vinilo a medida"?Number(s.custom_rate||0):t==="Vinilo standard"?Number(s.standard_rate||0):0}
-function adr(v:V){return[v.street,v.street_number,v.postal_code,v.city,v.province].filter(Boolean).join(", ")}
-function fdate(v:V){return d(v.billing_last_status_date||v.status_changed_at||v.installation_payment_date||v.incident_payment_date||v.incident_opened_at)}
-function mk(v:V,s:S,concept:string,amount:number,week?:string|null,date?:string|null,extra=0){return{week:week||v.payment_week||v.desired_installation_week||"Sin semana",date:d(date)||fdate(v),vin:v.vinyl,farmacia:v.pharmacy_name,camp:v.vinyl_campaign||"",tipo:typ(v),estado:v.status||"Nuevo",concept,dir:adr(v),city:v.city||"",prov:v.province||"",tarifa:amount,extra,total:amount+extra,obs:v.comments||"",clientObs:v.client_observations||"",andamio:v.scaffold_required?"Sí":"No",revisitas:Number(v.revisit_count||0),row:v}}
-function lines(v:V,s:S){const st=v.status||"Nuevo",base=tarifa(v,s),ex=Number(v.billing_extra_equipment||0),iw=v.incident_payment_week||v.payment_week||v.desired_installation_week||"Sin semana",fw=v.installation_payment_week||v.payment_week||v.desired_installation_week||"Sin semana",rv=Math.max(0,Number(v.revisit_count||0));let out:any[]=[];if(st==="Nuevo"||st==="Incidencia llamada")return[];if(st==="Cancelado"){if(v.incident_payment_week)out=[mk(v,s,"Visita facturable previa a cancelación",base,iw,v.incident_payment_date||v.incident_opened_at,ex),mk(v,s,"Cambio de estado a cancelado",0,v.payment_week||v.desired_installation_week||iw,v.billing_last_status_date||v.status_changed_at,0)];else out=[mk(v,s,"Cancelación sin visita facturable",0,iw,v.billing_last_status_date||v.status_changed_at,0)];return out}
-if(st==="Incidencia")out=[mk(v,s,"Visita facturable - incidencia",base,iw,v.incident_payment_date||v.incident_opened_at,ex)];
-else if(st==="Resuelto - Pendiente colocador")out=[mk(v,s,"Visita facturable - pospuesto",base,iw,v.incident_payment_date||v.status_changed_at,ex)];
-else if(st==="Finalizado"&&v.incident_payment_week)out=[mk(v,s,"Visita facturable - incidencia/pospuesto inicial",base,iw,v.incident_payment_date||v.incident_opened_at,0),mk(v,s,"Instalación facturable - resolución",base,fw,v.installation_payment_date||v.incident_resolved_at||v.status_changed_at,ex)];
-else if(st==="Finalizado")out=[mk(v,s,"Instalación facturable",base,fw,v.installation_payment_date||v.status_changed_at,ex)];
-const extras=Math.max(0,rv-out.filter(x=>x.tarifa>0).length);for(let i=0;i<extras;i++)out.push(mk(v,s,`Revisita adicional ${out.filter(x=>x.tarifa>0).length+1}`,base,fw,v.billing_last_status_date||v.status_changed_at,0));return out}
 function localItems(){try{return JSON.parse(localStorage.getItem(localKey)||localStorage.getItem(legacyLocalKey)||"[]")}catch{return[]}}
 function localSet(){try{return JSON.parse(localStorage.getItem(setKey)||"")}catch{return{id:"global",standard_rate:0,custom_rate:0}}}
 function localAdj(){try{return JSON.parse(localStorage.getItem(adjKey)||"[]")}catch{return[]}}
