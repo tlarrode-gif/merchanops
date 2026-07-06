@@ -52,11 +52,28 @@ Supabase Auth + RLS (pendiente de fase posterior).
   ocultando al gestor las columnas marcadas como no visibles.
 - Compatibilidad hacia atrás: campañas sin esquema siguen mostrando `datos_extra` tal cual.
 
-## Fase 3 — Flujo económico (pendiente)
-- Tabla `economic_events` (pago trabajador / facturación cliente / extras) generada por cambios
-  de estado, con idempotencia, reversos y mes contable.
-- Exportaciones mensuales de pagos y facturación filtradas por permisos.
-- Sustituir/renombrar «Auditoría de pagos» por «Historial económico» sobre esos eventos.
+## Fase 3 — Flujo económico ✅
+
+- Tabla `economic_events` (migración `v7_3_economic_events.sql`, aplicada en producción):
+  pago_trabajador / facturacion_cliente / extra, con fingerprint único (idempotencia),
+  mes contable fijado al crear el evento, y reversos enlazados por `reverso_de`.
+  Un evento no se edita ni se borra: se compensa con un reverso de importe opuesto
+  contabilizado en el mes en que se emite.
+- `lib/economic-events.ts`: generación de eventos desde los orígenes (líneas de pago de
+  Servicios y módulo clásico de campañas vía `payment-ledger`, puntos completados del módulo
+  nuevo de Grandes Campañas, y facturación ISDIN + regularizaciones), sincronización
+  idempotente, lectura filtrada por permisos, reverso y eventos manuales.
+- `lib/isdin-billing.ts`: lógica de facturación ISDIN extraída de la página para
+  compartirla con el historial (la página de facturación ahora importa de aquí).
+- «Auditoría de pagos» sustituida por **«Historial económico»** (`/historial-economico`;
+  la URL antigua redirige). Accesible a gestores con permiso de pagos: ven solo
+  pagos a trabajador de sus provincias, sin facturación ni extras. Administración ve todo,
+  sincroniza eventos, revierte y añade eventos manuales. Se conservan los avisos de
+  auditoría cruzada tras cada sincronización.
+- Exportaciones mensuales CSV: «pagos del mes» (todos los roles, sobre su ámbito) y
+  «facturación del mes» (solo administración).
+- El ledger v6.2 (`payment_ledger`) queda como histórico; el flujo nuevo vive en
+  `economic_events`.
 
 ## Fase 4 — ISDIN UX/rendimiento + KPIs (pendiente)
 - Virtualización/paginación del listado de vinilos, panel lateral de detalle, vistas agrupadas.
