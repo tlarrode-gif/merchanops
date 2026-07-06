@@ -5,6 +5,7 @@ import { ArrowRight, Plus } from "lucide-react";
 import { CampanaForm, CampanaFormState, emptyCampanaForm } from "@/components/grandes-campanas/campana-form";
 import { ImportProgress, ImportadorCSV, ImportadorEstado } from "@/components/grandes-campanas/importador-csv";
 import { AppSession, AppUser, canAccessModule, canManageCampaigns, getCurrentAppSession, loadInternalUsers } from "@/lib/access-control";
+import { saveCampanaColumnas } from "@/lib/campana-columnas";
 import { PuntoInput, insertCampana, insertPuntosBatch, saveGestoresCampana } from "@/lib/campanas";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
@@ -74,6 +75,11 @@ export default function NuevaCampanaPage() {
       const seleccionados = gestores.filter(gestor => form.gestorIds.includes(gestor.id));
       const gestoresResult = await saveGestoresCampana(campanaId, seleccionados);
       if (gestoresResult.error) { setFormError(`Campaña creada, pero no se pudieron asignar gestores: ${gestoresResult.error}`); }
+
+      if (importEstado?.columnas.length) {
+        const columnasResult = await saveCampanaColumnas(campanaId, importEstado.columnas);
+        if (columnasResult.error) setFormError(`Campaña creada, pero el esquema de columnas no se pudo guardar: ${columnasResult.error}`);
+      }
 
       const puntos = [...(importEstado?.readyRows || []), ...manualPuntos];
       let importados = 0;

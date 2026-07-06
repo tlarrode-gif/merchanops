@@ -7,6 +7,7 @@ import { CampanaDetalleKpis } from "@/components/grandes-campanas/campana-detall
 import { GestorAvatar } from "@/components/grandes-campanas/gestor-avatars";
 import { PuntosTabla } from "@/components/grandes-campanas/puntos-tabla";
 import { AppSession, canAccessModule, canManageCampaigns, getCurrentAppSession, isAdminSession } from "@/lib/access-control";
+import { CampanaColumna, fetchCampanaColumnas } from "@/lib/campana-columnas";
 import {
   Campana,
   CampanaGestor,
@@ -52,6 +53,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   const [puntos, setPuntos] = useState<PuntoVenta[]>([]);
   const [incidencias, setIncidencias] = useState<IncidenciaCampana[]>([]);
   const [gestores, setGestores] = useState<CampanaGestor[]>([]);
+  const [columnas, setColumnas] = useState<CampanaColumna[]>([]);
   const [tab, setTab] = useState<TabKey>("puntos");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -69,12 +71,13 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
 
   async function refresh(silencioso = false) {
     if (!silencioso) setLoading(true);
-    const [campanaResult, kpisResult, puntosResult, incidenciasResult, gestoresResult] = await Promise.all([
+    const [campanaResult, kpisResult, puntosResult, incidenciasResult, gestoresResult, columnasResult] = await Promise.all([
       fetchCampana(params.id),
       fetchCampanaKpis(params.id),
       fetchPuntos(params.id),
       fetchIncidencias(params.id),
-      fetchGestoresCampana(params.id)
+      fetchGestoresCampana(params.id),
+      fetchCampanaColumnas(params.id)
     ]);
     const firstError = campanaResult.error || kpisResult.error || puntosResult.error || incidenciasResult.error || gestoresResult.error;
     setError(firstError || "");
@@ -83,6 +86,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     setPuntos(filterPuntosBySession(puntosResult.data, getCurrentAppSession()));
     setIncidencias(incidenciasResult.data);
     setGestores(gestoresResult.data);
+    setColumnas(columnasResult.data);
     setLoading(false);
   }
 
@@ -258,6 +262,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
             puntos={puntos}
             incidencias={incidencias}
             isAdmin={admin}
+            columnas={columnas}
             saving={saving}
             onUpdatePunto={handleUpdatePunto}
             onDeletePunto={handleDeletePunto}

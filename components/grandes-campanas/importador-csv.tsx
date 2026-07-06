@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Download, FileUp, Loader2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileUp, Loader2, Settings2, XCircle } from "lucide-react";
+import { ColumnasConfig } from "@/components/grandes-campanas/columnas-config";
+import { CampanaColumna, columnasDesdeImportacion } from "@/lib/campana-columnas";
 import { PuntoInput } from "@/lib/campanas";
 import { ParseResult, ParsedRow, buildTemplateCsv, parseImportFile, summarizeParse } from "@/lib/csv-parser";
 
@@ -13,6 +15,8 @@ export type ImportadorEstado = {
   omitErrors: boolean;
   readyRows: PuntoInput[];
   blockingErrors: number;
+  // Esquema de columnas configurado por el usuario; se persiste con la campaña.
+  columnas: CampanaColumna[];
 };
 
 export function ImportadorCSV({
@@ -28,13 +32,17 @@ export function ImportadorCSV({
   const [dragOver, setDragOver] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [fileName, setFileName] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<ParseResult | null>(null);
   const [omitErrors, setOmitErrors] = useState(false);
   const [showAllErrors, setShowAllErrors] = useState(false);
+  const [columnas, setColumnas] = useState<CampanaColumna[]>([]);
+  const [configAbierta, setConfigAbierta] = useState(false);
+  const [columnasPendientes, setColumnasPendientes] = useState(false);
 
   const summary = useMemo(() => result ? summarizeParse(result.rows) : null, [result]);
 
-  function emit(nextResult: ParseResult | null, nextOmit: boolean, name: string) {
+  function emit(nextResult: ParseResult | null, nextOmit: boolean, name: string, nextColumnas: CampanaColumna[]) {
     if (!nextResult || nextResult.fileError) { onChange(null); return; }
     const usable = nextResult.rows.filter(row => nextOmit ? !row.errors.length : true);
     onChange({
@@ -42,32 +50,57 @@ export function ImportadorCSV({
       rows: nextResult.rows,
       omitErrors: nextOmit,
       readyRows: usable.filter(row => !row.errors.length).map(row => row.data),
-      blockingErrors: nextOmit ? 0 : nextResult.rows.filter(row => row.errors.length).length
+      blockingErrors: nextOmit ? 0 : nextResult.rows.filter(row => row.errors.length).length,
+      columnas: nextColumnas
     });
   }
 
-  async function handleFile(file: File | undefined | null) {
-    if (!file || disabled) return;
+  async function handleFile(nextFile: File | undefined | null) {
+    if (!nextFile || disabled) return;
     setAnalyzing(true);
     setResult(null);
-    setFileName(file.name);
+    setFile(nextFile);
+    setFileName(nextFile.name);
     setShowAllErrors(false);
+    setConfigAbierta(false);
+    setColumnasPendientes(false);
     onChange(null);
     try {
-      const parsed = await parseImportFile(file);
+      const parsed = await parseImportFile(nextFile);
+      const esquema = parsed.fileError ? [] : columnasDesdeImportacion(parsed.headers, parsed.mapping);
       setResult(parsed);
-      emit(parsed, omitErrors, file.name);
+      setColumnas(esquema);
+      emit(parsed, omitErrors, nextFile.name, esquema);
     } catch (error) {
-      setResult({ rows: [], headers: [], unmappedColumns: [], fileError: error instanceof Error ? error.message : "No se pudo leer el archivo." });
+      setResult({ rows: [], headers: [], mapping: [], unmappedColumns: [], fileError: error instanceof Error ? error.message : "No se pudo leer el archivo." });
       onChange(null);
     } finally {
       setAnalyzing(false);
     }
   }
 
+  // Reanaliza el archivo aplicando el esquema editado (mapeos, obligatorias, defectos, tipos).
+  async function aplicarColumnas() {
+    if (!file) return;
+    setAnalyzing(true);
+    try {
+      const parsed = await parseImportFile(file, columnas);
+      setResult(parsed);
+      setColumnasPendientes(false);
+      emit(parsed, omitErrors, fileName, columnas);
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  function cambiarColumnas(next: CampanaColumna[]) {
+    setColumnas(next);
+    setColumnasPendientes(true);
+  }
+
   function toggleOmit(next: boolean) {
     setOmitErrors(next);
-    emit(result, next, fileName);
+    emit(result, next, fileName, columnas);
   }
 
   function downloadTemplate() {
@@ -130,8 +163,28 @@ export function ImportadorCSV({
         <div className="mt-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <p><b>{summary.total.toLocaleString("es-ES")}</b> puntos detectados</p>
-            <p style={{ color: "var(--gc-muted)" }}>{summary.ok.toLocaleString("es-ES")} listos · {summary.errores} con error · {summary.avisos} con avisos</p>
+            <span className="flex flex-wrap items-center gap-3">
+              <button type="button" className="gc-btn-outline" onClick={() => setConfigAbierta(value => !value)}>
+                <Settings2 className="h-4 w-4" />
+                Configurar columnas ({columnas.length})
+              </button>
+              <p style={{ color: "var(--gc-muted)" }}>{summary.ok.toLocaleString("es-ES")} listos · {summary.errores} con error · {summary.avisos} con avisos</p>
+            </span>
           </div>
+
+          {configAbierta && (
+            <div className="space-y-3">
+              <ColumnasConfig columnas={columnas} onChange={cambiarColumnas} disabled={disabled || analyzing} />
+              {columnasPendientes && (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs" style={{ color: "var(--gc-muted)" }}>Hay cambios en las columnas sin aplicar al archivo.</p>
+                  <button type="button" className="gc-btn-dark" disabled={analyzing} onClick={aplicarColumnas}>
+                    {analyzing ? "Revalidando..." : "Aplicar y revalidar archivo"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {progress && (
             <div>
@@ -197,7 +250,8 @@ export function ImportadorCSV({
               )}
               {result.unmappedColumns.length > 0 && (
                 <p className="mt-3 text-xs" style={{ color: "var(--gc-muted)" }}>
-                  Columnas sin mapear (se guardan como datos extra): {result.unmappedColumns.join(", ")}
+                  Columnas sin mapear (se guardan como datos extra): {result.unmappedColumns.join(", ")}.
+                  Puedes cambiar el mapeo, el nombre visible o la visibilidad por rol en «Configurar columnas».
                 </p>
               )}
             </div>
