@@ -12,7 +12,7 @@ const links = [
   { href: "/grandes-campanas", label: "Grandes Campañas", exact: false, module: "servicios", adminOnly: false },
   { href: "/grandes-campanas/isdin", label: "ISDIN", exact: true, module: "isdin", adminOnly: false },
   { href: "/grandes-campanas/isdin/llamadas", label: "Llamadas ISDIN", exact: false, module: "isdin", adminOnly: false },
-  { href: "/grandes-campanas/isdin/dashboard", label: "KPIs ISDIN", exact: false, module: "isdin", adminOnly: true },
+  { href: "/grandes-campanas/isdin/dashboard", label: "KPIs ISDIN", exact: false, module: "isdin", adminOnly: false },
   { href: "/grandes-campanas/isdin/facturacion", label: "Facturación ISDIN", exact: false, module: "isdin", adminOnly: true }
 ] as const;
 
