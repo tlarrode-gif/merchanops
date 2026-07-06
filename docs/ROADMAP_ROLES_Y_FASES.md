@@ -75,7 +75,20 @@ Supabase Auth + RLS (pendiente de fase posterior).
 - El ledger v6.2 (`payment_ledger`) queda como histórico; el flujo nuevo vive en
   `economic_events`.
 
-## Fase 4 — ISDIN UX/rendimiento + KPIs (pendiente)
-- Virtualización/paginación del listado de vinilos, panel lateral de detalle, vistas agrupadas.
-- KPIs ISDIN ejecutivos con export Excel/CSV y variante por rol (gestor: solo sus provincias,
-  sin facturación).
+## Fase 4 — ISDIN UX/rendimiento + KPIs ✅
+
+- **Listado de vinilos**: paginación (50/100/250/500 filas por página, 100 por defecto)
+  para no renderizar miles de filas de golpe; la página se resetea al cambiar filtros u orden.
+  Los exports siguen sacando el conjunto filtrado completo, no solo la página visible.
+- **Vistas agrupadas**: selector «Agrupar por» (estado, provincia, instalador o semana) con
+  cabeceras plegables que resumen cada grupo (vinilos, finalizados, incidencias, pagos) y se
+  expanden a la tabla completa del grupo (tope de 300 filas por grupo).
+- **Panel lateral de detalle**: clic en el nombre de la farmacia abre la ficha completa del
+  vinilo (estado, instalador, fechas, medidas, pagos, semanas, llamada previa, logística,
+  observaciones editables) sin perder filtros, página ni scroll del listado.
+- **KPIs ISDIN por rol**: el dashboard deja de ser solo-admin; el gestor accede con sus
+  provincias (los datos ya se recortan por ámbito) y sin datos financieros (el dashboard no
+  expone facturación ni costes). Facturación ISDIN sigue siendo solo-admin.
+- **Export CSV del dashboard**: además del informe HTML, export plano para Excel con el
+  resumen ejecutivo y los desgloses por semana, provincia, tipo, campaña e instalador,
+  etiquetado con el alcance y el ámbito de la sesión.

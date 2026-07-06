@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import { AppSession, getCurrentAppSession, isAdminSession, merchanopsSessionChangeEvent } from "@/lib/access-control";
 
-// Dashboard y Facturación exponen KPIs globales e importes de cliente: solo admin.
+// Facturación expone importes de cliente: solo admin. El dashboard de KPIs es
+// apto para gestores desde la Fase 4 (los datos se recortan a sus provincias).
 const sections = [
   { href: "/grandes-campanas/isdin", label: "ISDIN · Vinilos", adminOnly: false },
   { href: "/grandes-campanas/isdin/llamadas", label: "Llamadas ISDIN", adminOnly: false },
-  { href: "/grandes-campanas/isdin/dashboard", label: "Dashboard KPIs ISDIN", adminOnly: true },
+  { href: "/grandes-campanas/isdin/dashboard", label: "Dashboard KPIs ISDIN", adminOnly: false },
   { href: "/grandes-campanas/isdin/facturacion", label: "Facturación ISDIN", adminOnly: true }
 ];
 
