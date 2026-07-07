@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileDown, Info, MapPin, Pencil, Plus, Upload, Users } from "lucide-react";
+import { FileDown, Info, MapPin, MessageCircle, Pencil, Plus, Upload, Users } from "lucide-react";
 import { parseImportFile } from "@/lib/csv-parser";
 import { supabase } from "@/lib/supabase";
 import { CampanaBadgeEstado, IncidenciaBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
@@ -20,6 +20,7 @@ import {
   PuntoVenta,
   dateOnly,
   downloadXlsx,
+  eur,
   fetchCampana,
   fetchCampanaKpis,
   fetchGestoresCampana,
@@ -66,13 +67,47 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   const [filtroIncidencias, setFiltroIncidencias] = useState("");
   const [nuevoAbierto, setNuevoAbierto] = useState(false);
   const [nuevoPunto, setNuevoPunto] = useState<PuntoInput>({ ...emptyNuevoPunto });
-  const [workers, setWorkers] = useState<Array<{ id: string; name: string; province?: string | null }>>([]);
+  const [workers, setWorkers] = useState<Array<{ id: string; name: string; province?: string | null; phone?: string | null }>>([]);
   const updateFileRef = useRef<HTMLInputElement>(null);
+  const [waOpen, setWaOpen] = useState(false);
+  const [waWorkerId, setWaWorkerId] = useState("");
+  const [waText, setWaText] = useState("");
   const admin = isAdminSession(session);
 
   useEffect(() => {
-    if (supabase) supabase.from("workers").select("id,name,province").order("name").then(({ data }) => setWorkers((data || []) as Array<{ id: string; name: string; province?: string | null }>));
+    if (supabase) supabase.from("workers").select("id,name,province,phone").order("name").then(({ data }) => setWorkers((data || []) as Array<{ id: string; name: string; province?: string | null; phone?: string | null }>));
   }, []);
+
+  // Mensaje de WhatsApp para el instalador: campaña + sus puntos asignados. Editable
+  // antes de enviar, así se manda solo lo necesario (como en Servicios).
+  function construirMensajeWhatsApp(workerId: string) {
+    if (!campana) return "";
+    const worker = workers.find(w => w.id === workerId);
+    const suyos = puntos.filter(punto => punto.instalador_id === workerId);
+    const lista = suyos.map((punto, index) => `${index + 1}. ${punto.nombre_comercial}${punto.direccion ? ` — ${punto.direccion}` : ""}${punto.provincia ? ` (${punto.provincia})` : ""}${punto.codigo ? ` · Cód: ${punto.codigo}` : ""}`).join("\n");
+    return `*${(campana.cliente_marca || "MerchanOps").toUpperCase()} – ${campana.nombre}*\n\nHola ${worker?.name || ""}, tienes asignados estos puntos de la campaña.\n\n*Periodo:* ${formatDate(campana.fecha_inicio)} — ${formatDate(campana.fecha_fin)}\n*Puntos asignados:* ${suyos.length}\n\n${lista || "Sin puntos asignados todavía."}\n\nConfirma recepción y avisa de cualquier incidencia.`;
+  }
+
+  function abrirWhatsApp() {
+    const primero = workers.find(w => puntos.some(p => p.instalador_id === w.id));
+    const id = primero?.id || "";
+    setWaWorkerId(id);
+    setWaText(id ? construirMensajeWhatsApp(id) : "");
+    setWaOpen(true);
+  }
+
+  function cambiarWaWorker(id: string) {
+    setWaWorkerId(id);
+    setWaText(id ? construirMensajeWhatsApp(id) : "");
+  }
+
+  function enviarWhatsApp() {
+    const worker = workers.find(w => w.id === waWorkerId);
+    if (navigator.clipboard) navigator.clipboard.writeText(waText).catch(() => {});
+    const phone = String(worker?.phone || "").replace(/[^0-9]/g, "");
+    window.open(phone ? `https://wa.me/${phone}?text=${encodeURIComponent(waText)}` : `https://wa.me/?text=${encodeURIComponent(waText)}`, "_blank");
+    setWaOpen(false);
+  }
 
   function flash(text: string) {
     setNotice(text);
@@ -118,6 +153,16 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
       const bridgeError = await syncPuntoCompletadoConLogistica({ ...punto, ...patch }, campana, session);
       if (bridgeError) setError(`Punto guardado, pero la sincronización con Logística falló: ${bridgeError}`);
       else flash("Punto completado y sincronizado con Logística");
+    } else if (patch.estado === "incidencia" && punto.estado !== "incidencia") {
+      // Marcar un punto como incidencia desde el desplegable crea también su registro
+      // en la pestaña Incidencias (si no hay ya una abierta), para que no se pierda.
+      const yaAbierta = incidencias.some(inc => inc.punto_id === punto.id && inc.estado !== "resuelta");
+      if (!yaAbierta) {
+        await insertIncidencia({ punto_id: punto.id, campana_id: params.id, descripcion: `Incidencia marcada en el punto ${punto.nombre_comercial}.`, session });
+        flash("Punto marcado como incidencia y registrado en Incidencias");
+      } else {
+        flash("Punto actualizado");
+      }
     } else {
       flash("Punto actualizado");
     }
@@ -205,6 +250,22 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     [incidencias, filtroIncidencias]
   );
 
+  // Pagos de la campaña: solo puntos completados generan pago; se agrupan por
+  // trabajador (instalador; gestor como respaldo) en una sola línea con el total.
+  const pagosResumen = useMemo(() => {
+    const completados = puntos.filter(punto => punto.estado === "completado" && Number(punto.importe || 0) > 0);
+    const map = new Map<string, { trabajador: string; puntos: number; importe: number }>();
+    for (const punto of completados) {
+      const trabajador = punto.instalador_nombre || punto.gestor_nombre || "Sin instalador";
+      const grupo = map.get(trabajador) || { trabajador, puntos: 0, importe: 0 };
+      grupo.puntos += 1;
+      grupo.importe += Number(punto.importe || 0);
+      map.set(trabajador, grupo);
+    }
+    const filas = Array.from(map.values()).sort((a, b) => b.importe - a.importe);
+    return { filas, totalPuntos: completados.length, totalImporte: filas.reduce((sum, fila) => sum + fila.importe, 0), pendientes: puntos.length - completados.length };
+  }, [puntos]);
+
   if (!session?.active) {
     return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl"><b>Inicia sesión</b> en MerchanOps para ver esta campaña.</section></main>;
   }
@@ -245,6 +306,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
             </div>
             <div className="flex flex-wrap gap-2 gc-no-print">
               <button className="gc-btn-outline" onClick={() => downloadXlsx(`campana_${campana.nombre.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}.xlsx`, puntosCsvRows(puntos))}><FileDown className="h-4 w-4" />Exportar</button>
+              <button className="gc-btn-outline" onClick={abrirWhatsApp}><MessageCircle className="h-4 w-4" />WhatsApp</button>
               <a href={`/grandes-campanas/${campana.id}/asignacion`} className="gc-btn-outline"><Users className="h-4 w-4" />Asignación rápida</a>
               {canManageCampaigns(session) && <a href={`/grandes-campanas/${campana.id}/editar`} className="gc-btn-outline"><Pencil className="h-4 w-4" />Editar</a>}
               {canManageCampaigns(session) && (
@@ -381,8 +443,41 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
           </div>
         )}
 
-        {(tab === "documentos" || tab === "historial" || tab === "pagos") && (
-          <div className="gc-empty"><b>Próximamente.</b> Esta pestaña se activará cuando haya datos de {tab === "documentos" ? "documentación" : tab === "historial" ? "historial de cambios" : "pagos"} para esta campaña.</div>
+        {tab === "pagos" && (
+          admin ? (
+            !pagosResumen.filas.length ? (
+              <div className="gc-empty"><b>Todavía no hay pagos.</b> El pago de un punto se genera cuando pasa a <b>Completado</b> y tiene importe. Ahora mismo hay {pagosResumen.pendientes} punto(s) sin completar.</div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="gc-kpi"><p className="gc-kpi-label">Puntos pagables</p><p className="gc-kpi-value">{pagosResumen.totalPuntos.toLocaleString("es-ES")}</p></div>
+                  <div className="gc-kpi"><p className="gc-kpi-label">Total a pagar</p><p className="gc-kpi-value">{eur(pagosResumen.totalImporte)}</p></div>
+                  <div className="gc-kpi"><p className="gc-kpi-label">Pendientes de completar</p><p className="gc-kpi-value">{pagosResumen.pendientes.toLocaleString("es-ES")}</p></div>
+                </div>
+                <div className="gc-table-wrap">
+                  <table className="gc-table">
+                    <thead><tr><th>Trabajador</th><th style={{ textAlign: "right" }}>Puntos completados</th><th style={{ textAlign: "right" }}>Importe acumulado</th></tr></thead>
+                    <tbody>
+                      {pagosResumen.filas.map(fila => (
+                        <tr key={fila.trabajador}>
+                          <td><span className="inline-flex items-center gap-2"><GestorAvatar name={fila.trabajador} size={24} />{fila.trabajador}</span></td>
+                          <td className="text-right font-semibold">{fila.puntos}</td>
+                          <td className="text-right font-semibold">{eur(fila.importe)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="gc-table-foot"><span>Una línea por trabajador con el importe actualizado según los puntos completados. El detalle contable definitivo vive en <a className="underline" href="/historial-economico">Historial económico</a> (sincroniza allí para exportar pagos).</span></div>
+                </div>
+              </div>
+            )
+          ) : (
+            <div className="gc-empty">El detalle de pagos está reservado a administración.</div>
+          )
+        )}
+
+        {(tab === "documentos" || tab === "historial") && (
+          <div className="gc-empty"><b>Próximamente.</b> Esta pestaña se activará cuando haya datos de {tab === "documentos" ? "documentación" : "historial de cambios"} para esta campaña.</div>
         )}
 
         {admin && (
@@ -392,6 +487,34 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
           </div>
         )}
       </section>
+
+      {waOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-label="Enviar WhatsApp">
+          <div className="absolute inset-0 bg-slate-900/40" onClick={() => setWaOpen(false)} />
+          <div className="relative w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl">
+            <h2 className="text-lg font-bold">Enviar campaña por WhatsApp</h2>
+            <p className="mt-1 text-sm" style={{ color: "var(--gc-muted)" }}>Elige el instalador, edita el mensaje (puedes quitar lo que no necesites) y envía. Se copia al portapapeles y abre WhatsApp.</p>
+            <label className="mt-3 block">
+              <span className="gc-label">Instalador</span>
+              <select className="gc-select" value={waWorkerId} onChange={event => cambiarWaWorker(event.target.value)}>
+                <option value="">— Sin instalador (mensaje genérico) —</option>
+                {workers.map(worker => {
+                  const n = puntos.filter(p => p.instalador_id === worker.id).length;
+                  return <option key={worker.id} value={worker.id}>{worker.name}{n ? ` (${n} puntos)` : ""}{worker.phone ? "" : " · sin teléfono"}</option>;
+                })}
+              </select>
+            </label>
+            <label className="mt-3 block">
+              <span className="gc-label">Mensaje</span>
+              <textarea className="gc-textarea" rows={12} value={waText} onChange={event => setWaText(event.target.value)} />
+            </label>
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="gc-btn-outline" onClick={() => setWaOpen(false)}>Cancelar</button>
+              <button className="gc-btn-dark" disabled={!waText.trim()} onClick={enviarWhatsApp}><MessageCircle className="h-4 w-4" />Copiar y abrir WhatsApp</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
