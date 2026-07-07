@@ -17,6 +17,7 @@ export function PuntosTabla({
   incidencias,
   isAdmin,
   columnas = [],
+  workers = [],
   saving,
   onUpdatePunto,
   onDeletePunto,
@@ -26,6 +27,7 @@ export function PuntosTabla({
   incidencias: IncidenciaCampana[];
   isAdmin: boolean;
   columnas?: CampanaColumna[];
+  workers?: Array<{ id: string; name: string; province?: string | null }>;
   saving: boolean;
   onUpdatePunto: (punto: PuntoVenta, patch: Partial<PuntoVenta>) => Promise<void>;
   onDeletePunto: (punto: PuntoVenta) => Promise<void>;
@@ -149,6 +151,7 @@ export function PuntosTabla({
                 <th>Punto de venta</th>
                 <th>Provincia</th>
                 <th>Gestor</th>
+                <th>Instalador</th>
                 <th>Tipo</th>
                 <th>Estado</th>
                 <th>Fecha visita</th>
@@ -175,6 +178,23 @@ export function PuntosTabla({
                         ? <span className="inline-flex items-center gap-2"><GestorAvatar name={punto.gestor_nombre} size={24} />{punto.gestor_nombre}</span>
                         : <span style={{ color: "var(--gc-muted)" }}>Sin asignar</span>}
                     </td>
+                    <td onClick={event => event.stopPropagation()}>
+                      {workers.length ? (
+                        <select
+                          className="gc-select"
+                          style={{ width: 150, padding: "5px 8px", fontSize: 12 }}
+                          value={punto.instalador_id || ""}
+                          disabled={saving}
+                          onChange={event => {
+                            const worker = workers.find(w => w.id === event.target.value);
+                            onUpdatePunto(punto, { instalador_id: worker?.id || null, instalador_nombre: worker?.name || null });
+                          }}
+                        >
+                          <option value="">Sin instalador</option>
+                          {workers.map(worker => <option key={worker.id} value={worker.id}>{worker.name}</option>)}
+                        </select>
+                      ) : (punto.instalador_nombre || <span style={{ color: "var(--gc-muted)" }}>—</span>)}
+                    </td>
                     <td>{punto.tipo || "—"}</td>
                     <td><PuntoBadgeEstado estado={punto.estado} /></td>
                     <td>{formatDate(punto.fecha_visita)}</td>
@@ -194,7 +214,7 @@ export function PuntosTabla({
                   </tr>,
                   isOpen && (
                     <tr key={`${punto.id}-detalle`}>
-                      <td colSpan={11} style={{ background: "#fafbfc" }}>
+                      <td colSpan={12} style={{ background: "#fafbfc" }}>
                         <div className="grid gap-4 p-3 md:grid-cols-2 lg:grid-cols-3">
                           <div className="space-y-1 text-sm">
                             <p className="text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>Ficha del punto</p>
@@ -202,6 +222,8 @@ export function PuntosTabla({
                             <p><b>Dirección:</b> {punto.direccion || "—"}</p>
                             <p><b>Provincia:</b> {punto.provincia || "—"}</p>
                             <p><b>Tipo:</b> {punto.tipo || "—"}</p>
+                            <p><b>Gestor de zona:</b> {punto.gestor_nombre || "Sin asignar"}</p>
+                            <p><b>Instalador:</b> {punto.instalador_nombre || "Sin asignar"}</p>
                             <p><b>Fecha visita:</b> {formatDate(punto.fecha_visita)}</p>
                             <p><b>Importe:</b> {punto.importe != null ? eur(punto.importe) : "—"}</p>
                           </div>

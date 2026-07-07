@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { FileDown, Info, MapPin, Pencil, Plus, Users } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { FileDown, Info, MapPin, Pencil, Plus, Upload, Users } from "lucide-react";
+import { parseImportFile } from "@/lib/csv-parser";
+import { supabase } from "@/lib/supabase";
 import { CampanaBadgeEstado, IncidenciaBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
 import { CampanaDetalleKpis } from "@/components/grandes-campanas/campana-detalle-kpis";
 import { GestorAvatar } from "@/components/grandes-campanas/gestor-avatars";
@@ -16,6 +18,7 @@ import {
   IncidenciaEstado,
   PuntoInput,
   PuntoVenta,
+  dateOnly,
   downloadXlsx,
   fetchCampana,
   fetchCampanaKpis,
@@ -31,6 +34,7 @@ import {
   setIncidenciaEstado,
   syncPuntoCompletadoConLogistica,
   updatePunto,
+  updatePuntosPorCodigo,
   deletePunto as deletePuntoDb
 } from "@/lib/campanas";
 
@@ -62,7 +66,13 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   const [filtroIncidencias, setFiltroIncidencias] = useState("");
   const [nuevoAbierto, setNuevoAbierto] = useState(false);
   const [nuevoPunto, setNuevoPunto] = useState<PuntoInput>({ ...emptyNuevoPunto });
+  const [workers, setWorkers] = useState<Array<{ id: string; name: string; province?: string | null }>>([]);
+  const updateFileRef = useRef<HTMLInputElement>(null);
   const admin = isAdminSession(session);
+
+  useEffect(() => {
+    if (supabase) supabase.from("workers").select("id,name,province").order("name").then(({ data }) => setWorkers((data || []) as Array<{ id: string; name: string; province?: string | null }>));
+  }, []);
 
   function flash(text: string) {
     setNotice(text);
@@ -149,6 +159,31 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     setSaving(false);
   }
 
+  // Actualización masiva desde Excel/CSV: empareja por código y solo pisa las
+  // celdas con valor. Reutiliza el esquema de columnas de la campaña, así que un
+  // reporte con las mismas cabeceras del archivo original actualiza sin remapear.
+  async function handleUpdateFromExcel(file: File | null | undefined) {
+    if (!file) return;
+    setSaving(true);
+    setError("");
+    try {
+      const parsed = await parseImportFile(file, columnas.length ? columnas : undefined);
+      if (parsed.fileError) { setError(`No se pudo leer el archivo: ${parsed.fileError}`); return; }
+      const sinCodigo = parsed.rows.filter(row => !String(row.data.codigo || "").trim()).length;
+      if (sinCodigo === parsed.rows.length) { setError("El archivo no tiene columna de código; la actualización necesita un código por fila para emparejar los puntos."); return; }
+      const filas = parsed.rows.filter(row => !row.errors.length).map(row => row.data);
+      const insertarNuevos = window.confirm(`Se actualizarán los puntos existentes emparejados por código.\n\n¿Quieres además CREAR como nuevos los puntos cuyo código no exista todavía?\n\nAceptar = actualizar y crear nuevos · Cancelar = solo actualizar existentes`);
+      const result = await updatePuntosPorCodigo(params.id, filas, { insertarNuevos });
+      if (result.error) { setError(result.error); return; }
+      const r = result.data;
+      flash(`Actualización: ${r.actualizados} puntos actualizados · ${r.sinCambios} sin cambios · ${r.nuevos} nuevos · ${r.noEncontrados - r.nuevos} códigos no encontrados${sinCodigo ? ` · ${sinCodigo} filas sin código ignoradas` : ""}.`);
+      await refresh(true);
+    } finally {
+      setSaving(false);
+      if (updateFileRef.current) updateFileRef.current.value = "";
+    }
+  }
+
   async function handleAddPunto() {
     if (!nuevoPunto.nombre_comercial.trim()) { setError("El punto necesita un nombre comercial."); return; }
     setSaving(true);
@@ -212,6 +247,12 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
               <button className="gc-btn-outline" onClick={() => downloadXlsx(`campana_${campana.nombre.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}.xlsx`, puntosCsvRows(puntos))}><FileDown className="h-4 w-4" />Exportar</button>
               <a href={`/grandes-campanas/${campana.id}/asignacion`} className="gc-btn-outline"><Users className="h-4 w-4" />Asignación rápida</a>
               {canManageCampaigns(session) && <a href={`/grandes-campanas/${campana.id}/editar`} className="gc-btn-outline"><Pencil className="h-4 w-4" />Editar</a>}
+              {canManageCampaigns(session) && (
+                <>
+                  <input ref={updateFileRef} type="file" accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={event => handleUpdateFromExcel(event.target.files?.[0])} />
+                  <button className="gc-btn-outline" disabled={saving} onClick={() => updateFileRef.current?.click()} title="Sube un Excel/CSV con la columna de código para actualizar estado, fecha, importe o notas de los puntos existentes sin tocar el resto"><Upload className="h-4 w-4" />Actualizar desde Excel</button>
+                </>
+              )}
               {canManageCampaigns(session) && <button className="gc-btn-dark" onClick={() => setNuevoAbierto(open => !open)}><Plus className="h-4 w-4" />Añadir puntos</button>}
             </div>
           </div>
@@ -263,6 +304,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
             incidencias={incidencias}
             isAdmin={admin}
             columnas={columnas}
+            workers={workers}
             saving={saving}
             onUpdatePunto={handleUpdatePunto}
             onDeletePunto={handleDeletePunto}

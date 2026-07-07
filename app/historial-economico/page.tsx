@@ -85,7 +85,7 @@ export default function HistorialEconomicoPage() {
         supabase.from("isdin_billing_settings").select("*").eq("id", "global").maybeSingle(),
         supabase.from("isdin_billing_adjustments").select("*"),
         supabase.from("grandes_campanas").select("id,nombre,cliente_marca"),
-        supabase.from("puntos_venta_campana").select("id,campana_id,gestor_id,gestor_nombre,codigo,nombre_comercial,provincia,estado,fecha_visita,importe,updated_at")
+        supabase.from("puntos_venta_campana").select("id,campana_id,gestor_id,gestor_nombre,instalador_id,instalador_nombre,codigo,nombre_comercial,provincia,estado,fecha_visita,importe,updated_at")
       ]);
       const services = (servicesR.data || []) as Row[];
       const points = (pointsR.data || []) as Row[];
@@ -150,6 +150,31 @@ export default function HistorialEconomicoPage() {
     if (!result.error) await load();
   }
 
+  // Export agrupado: una línea por campaña × trabajador × mes con el importe
+  // neto acumulado (los reversos restan), en lugar de una línea por punto.
+  // El detalle punto a punto sigue disponible en «Exportar pagos del mes».
+  function exportarPagosAgrupados() {
+    const objetivo = eventos.filter(evento => evento.tipo === "pago_trabajador" && evento.estado !== "revision");
+    if (!objetivo.length) { setMessage("No hay pagos exportables en el filtro actual."); return; }
+    const grupos = new Map<string, { mes: string; campana: string; origen: string; worker: string; provincia: Set<string>; lineas: number; reversos: number; importe: number }>();
+    for (const evento of objetivo) {
+      const campana = evento.campana || economicOrigenLabels[evento.origen];
+      const worker = evento.worker_name || "Sin trabajador";
+      const key = [evento.mes_contable, campana, worker].join("|");
+      const grupo = grupos.get(key) || { mes: evento.mes_contable, campana, origen: economicOrigenLabels[evento.origen], worker, provincia: new Set<string>(), lineas: 0, reversos: 0, importe: 0 };
+      if (evento.provincia) grupo.provincia.add(evento.provincia);
+      if (evento.estado === "reverso") grupo.reversos += 1; else grupo.lineas += 1;
+      grupo.importe += Number(evento.importe || 0);
+      grupos.set(key, grupo);
+    }
+    downloadCsv(`pagos_agrupados_${mes || "todo"}.csv`, [
+      ["Mes contable", "Campaña", "Origen", "Trabajador", "Provincias", "Puntos/líneas", "Reversos", "Importe neto"],
+      ...Array.from(grupos.values())
+        .sort((a, b) => a.campana.localeCompare(b.campana, "es") || a.worker.localeCompare(b.worker, "es"))
+        .map(grupo => [grupo.mes, grupo.campana, grupo.origen, grupo.worker, Array.from(grupo.provincia).join(", "), grupo.lineas, grupo.reversos, grupo.importe.toFixed(2)])
+    ]);
+  }
+
   // Los eventos retenidos en revisión no se exportan: no son pagables/facturables
   // hasta que administración los resuelva.
   function exportar(tipoExport: "pagos" | "facturacion") {
@@ -191,6 +216,7 @@ export default function HistorialEconomicoPage() {
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {admin && <button onClick={sync} disabled={syncing} className="rounded-2xl bg-slate-900 px-4 py-2 text-white">{syncing ? "Sincronizando..." : "Sincronizar eventos"}</button>}
             <button onClick={() => exportar("pagos")} className="rounded-2xl border bg-white px-4 py-2">Exportar pagos del mes</button>
+            <button onClick={exportarPagosAgrupados} className="rounded-2xl border bg-white px-4 py-2" title="Una línea por campaña y trabajador con el importe neto acumulado">Exportar pagos agrupados</button>
             {admin && <button onClick={() => exportar("facturacion")} className="rounded-2xl border bg-white px-4 py-2">Exportar facturación del mes</button>}
             {admin && mes && (
               <button onClick={alternarCierreMes} className={`rounded-2xl border px-4 py-2 ${mesCerrado ? "border-amber-300 bg-amber-50 text-amber-900" : "bg-white"}`}>
