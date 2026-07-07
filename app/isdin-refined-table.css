@@ -262,6 +262,13 @@ body main.isdin-page .isdin-vinyl-table td {
   min-width: 0;
 }
 
+/* La fila de cabecera lleva su propio fondo oscuro: las 3 primeras columnas son
+   "fijas" mediante transform y, al hacer scroll horizontal, dejan su celda del
+   grid desplazada; sin este fondo el hueco se veía blanco. */
+body main.isdin-page .isdin-vinyl-table thead .isdin-grid-row {
+  background: #111827;
+}
+
 body main.isdin-page .isdin-vinyl-table th {
   position: relative;
   top: 0;

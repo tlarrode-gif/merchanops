@@ -28,7 +28,6 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
   useEffect(() => {
     async function load() {
       const users = await loadInternalUsers();
-      setGestores(users.filter(user => user.active));
       if (isSupabaseConfigured && supabase) {
         const { data } = await supabase.from("clients").select("id,name").order("name");
         setClients((data || []) as ClientOption[]);
@@ -36,6 +35,10 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
       const [campanaResult, gestoresResult, columnasResult] = await Promise.all([fetchCampana(params.id), fetchGestoresCampana(params.id), fetchCampanaColumnas(params.id)]);
       if (campanaResult.error) setError(campanaResult.error);
       if (!campanaResult.data) { setNotFound(true); setLoading(false); return; }
+      // El selector muestra los usuarios activos + los ya asignados a la campaña aunque
+      // estén inactivos, para no perderlos al guardar (delete+insert de saveGestoresCampana).
+      const asignadosIds = new Set(gestoresResult.data.map(g => g.gestor_id).filter(Boolean) as string[]);
+      setGestores(users.filter(user => user.active || asignadosIds.has(user.id)));
       setColumnas(columnasResult.data);
       const campana = campanaResult.data;
       setNombreCampana(campana.nombre);
