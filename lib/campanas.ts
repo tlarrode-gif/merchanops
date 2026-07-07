@@ -55,6 +55,9 @@ export type PuntoVenta = {
   campana_id: string;
   gestor_id?: string | null;
   gestor_nombre?: string | null;
+  // Instalador (workers): quien ejecuta el punto y cobra. El gestor coordina.
+  instalador_id?: string | null;
+  instalador_nombre?: string | null;
   codigo?: string | null;
   nombre_comercial: string;
   direccion?: string | null;
@@ -501,6 +504,70 @@ export async function insertPuntosBatch(campanaId: string, puntos: PuntoInput[])
   return { data: rows.length, omitidos };
 }
 
+// Campos internos que una actualización por Excel puede tocar en un punto existente.
+// NO se incluyen gestor_id/instalador ni datos_extra: la actualización de progreso
+// (estado, fecha, importe, notas) no debe pisar la asignación ni los datos originales.
+const camposActualizablesPunto: (keyof PuntoInput)[] = ["nombre_comercial", "direccion", "provincia", "tipo", "estado", "fecha_visita", "importe", "notas"];
+
+export type ActualizacionMasiva = { actualizados: number; sinCambios: number; noEncontrados: number; nuevos: number };
+
+// Actualización masiva por CÓDIGO (auditoría / petición de operaciones):
+// se sube un Excel con avances y se emparejan filas con puntos existentes por su
+// código. Solo se sobrescriben celdas con valor (una celda vacía no borra el dato
+// existente), así una re-subida de reporte actualiza el estado sin perder el resto
+// de la línea. Filas cuyo código no exista pueden insertarse como nuevas (opcional).
+export async function updatePuntosPorCodigo(
+  campanaId: string,
+  filas: PuntoInput[],
+  opciones: { insertarNuevos: boolean }
+): Promise<Result<ActualizacionMasiva> & { detalle?: ActualizacionMasiva }> {
+  const vacio: ActualizacionMasiva = { actualizados: 0, sinCambios: 0, noEncontrados: 0, nuevos: 0 };
+  if (!supabase) return { data: vacio, error: "Supabase no está configurado." };
+  const bloqueada = await assertCampanaEditable(campanaId);
+  if (bloqueada) return { data: vacio, error: bloqueada };
+  const negativos = filas.filter(fila => Number(fila.importe ?? 0) < 0);
+  if (negativos.length) return { data: vacio, error: `${negativos.length} fila(s) con importe negativo; corrígelas antes de actualizar.` };
+
+  const { data: existentesData, error: readError } = await supabase
+    .from("puntos_venta_campana")
+    .select("id,codigo,nombre_comercial,direccion,provincia,tipo,estado,fecha_visita,importe,notas")
+    .eq("campana_id", campanaId);
+  if (readError) return { data: vacio, error: readError.message };
+  const porCodigo = new Map<string, Record<string, unknown>>();
+  for (const punto of (existentesData || []) as Array<Record<string, unknown>>) {
+    const codigo = String(punto.codigo || "").trim();
+    if (codigo) porCodigo.set(codigo, punto);
+  }
+
+  const resumen: ActualizacionMasiva = { actualizados: 0, sinCambios: 0, noEncontrados: 0, nuevos: 0 };
+  const nuevos: PuntoInput[] = [];
+  for (const fila of filas) {
+    const codigo = String(fila.codigo || "").trim();
+    const existente = codigo ? porCodigo.get(codigo) : undefined;
+    if (!existente) { resumen.noEncontrados += 1; if (opciones.insertarNuevos && codigo) nuevos.push(fila); continue; }
+    const patch: Record<string, unknown> = {};
+    for (const campo of camposActualizablesPunto) {
+      const valor = (fila as Record<string, unknown>)[campo];
+      const actual = existente[campo];
+      if (campo === "importe") { if (valor != null && Number(valor) !== Number(actual ?? 0)) patch.importe = valor; continue; }
+      const texto = String(valor ?? "").trim();
+      if (texto === "") continue; // celda vacía no borra
+      if (texto !== String(actual ?? "").trim()) patch[campo] = campo === "fecha_visita" ? (dateOnly(texto) || valor) : valor;
+    }
+    if (!Object.keys(patch).length) { resumen.sinCambios += 1; continue; }
+    patch.updated_at = new Date().toISOString();
+    const { error } = await supabase.from("puntos_venta_campana").update(patch).eq("id", existente.id);
+    if (error) return { data: resumen, error: `Actualizados ${resumen.actualizados} antes de un error: ${error.message}` };
+    resumen.actualizados += 1;
+  }
+  if (nuevos.length) {
+    const insertResult = await insertPuntosBatch(campanaId, nuevos);
+    if (insertResult.error) return { data: resumen, error: `Actualización correcta, pero los nuevos fallaron: ${insertResult.error}` };
+    resumen.nuevos = insertResult.data;
+  }
+  return { data: resumen, detalle: resumen };
+}
+
 export type AsignacionMasiva = { asignados: number; omitidos: number };
 
 // Asignación en bloque. El ámbito se verifica aquí (no solo en la UI): un gestor solo
@@ -662,6 +729,7 @@ export function puntosCsvRows(puntos: PuntoVenta[]): CampanaExportRow[] {
     Provincia: punto.provincia || "",
     Tipo: punto.tipo || "",
     Gestor: punto.gestor_nombre || "",
+    Instalador: punto.instalador_nombre || "",
     Estado: puntoEstadoLabels[punto.estado] || punto.estado,
     "Fecha visita": dateOnly(punto.fecha_visita),
     Importe: Number(punto.importe || 0),

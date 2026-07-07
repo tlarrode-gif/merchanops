@@ -85,10 +85,30 @@ function userForDb(user: AppUser) {
   };
 }
 
+// Con Supabase configurado, la base de datos es LA fuente de verdad de usuarios.
+// Nunca se vuelve a la lista sembrada por defecto si la consulta falla: hacerlo
+// permitía que un guardado posterior sobrescribiera en la base los usuarios
+// reales con los de fábrica (así se perdieron provincias asignadas una vez).
 export async function loadInternalUsers() {
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase.from("app_users").select("*").order("display_name");
-    if (!error && data && data.length) return data.map(row => normalizeUser(row as Partial<AppUser>));
+    if (!error && data) {
+      if (data.length) {
+        const users = data.map(row => normalizeUser(row as Partial<AppUser>));
+        saveLocalUsers(users);
+        return users;
+      }
+      // Base vacía de verdad (instalación nueva): sembrar una única vez.
+      const seeded = defaultAppUsers();
+      await supabase.from("app_users").upsert(seeded.map(userForDb), { ignoreDuplicates: true, onConflict: "id" });
+      return seeded;
+    }
+    // Error transitorio: usar la última copia local solo para mostrar, jamás sembrar.
+    try {
+      const cached = JSON.parse(localStorage.getItem(usersLocalKey) || "[]");
+      if (Array.isArray(cached) && cached.length) return cached.map(row => normalizeUser(row));
+    } catch {}
+    return [];
   }
   try {
     const local = JSON.parse(localStorage.getItem(usersLocalKey) || "[]");
@@ -100,6 +120,7 @@ export async function loadInternalUsers() {
 }
 
 export async function saveInternalUsers(users: AppUser[]) {
+  if (!users.length) throw new Error("La lista de usuarios está vacía; no se guarda para evitar borrar los existentes.");
   const normalized = users.map(normalizeUser);
   saveLocalUsers(normalized);
   if (isSupabaseConfigured && supabase) {

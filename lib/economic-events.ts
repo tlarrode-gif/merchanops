@@ -107,8 +107,9 @@ export function pagoEventsFromPaymentLines(lines: PaymentLine[]): EconomicEventI
   }));
 }
 
-// Pagos a trabajador del módulo nuevo de Grandes Campañas: cada punto
-// completado con importe y gestor genera un evento.
+// Pagos a trabajador del módulo nuevo de Grandes Campañas: cada punto completado
+// con importe genera un evento. El beneficiario es el INSTALADOR del punto; si
+// aún no tiene, se usa el gestor como respaldo (y sin ninguno queda en revisión).
 export function pagoEventsFromCampanaPuntos(puntos: AnyRow[], campanas: AnyRow[]): EconomicEventInput[] {
   const porCampana = new Map(campanas.map(campana => [campana.id, campana]));
   return puntos
@@ -116,16 +117,18 @@ export function pagoEventsFromCampanaPuntos(puntos: AnyRow[], campanas: AnyRow[]
     .map(punto => {
       const campana = porCampana.get(punto.campana_id) || {};
       const fecha = dateOnly(punto.fecha_visita) || dateOnly(punto.updated_at) || hoy();
+      const beneficiarioId = punto.instalador_id || punto.gestor_id || null;
+      const beneficiarioNombre = punto.instalador_nombre || punto.gestor_nombre || "Sin instalador";
       return {
-        fingerprint: fingerprint(["evt", "pago", "gc_punto", punto.id, "completado", fecha, Number(punto.importe || 0), punto.gestor_id || punto.gestor_nombre || ""]),
+        fingerprint: fingerprint(["evt", "pago", "gc_punto", punto.id, "completado", fecha, Number(punto.importe || 0), beneficiarioId || beneficiarioNombre || ""]),
         tipo: "pago_trabajador" as const,
         origen: "gran_campana" as const,
         source_id: String(punto.campana_id || ""),
         source_line_id: String(punto.id),
         fecha_evento: fecha,
         mes_contable: mesContable(fecha),
-        worker_id: punto.gestor_id || null,
-        worker_name: punto.gestor_nombre || "Sin gestor",
+        worker_id: beneficiarioId,
+        worker_name: beneficiarioNombre,
         client: campana.cliente_marca || "Gran campaña",
         ceco: null,
         campana: campana.nombre || null,
