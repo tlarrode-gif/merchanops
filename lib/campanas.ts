@@ -2,6 +2,7 @@ import { AppSession, AppUser, canDeleteCampaigns, canManageCampaigns, isAdminSes
 import { copyCampanaColumnas } from "@/lib/campana-columnas";
 import { normalizeProvince, provinceScopeValues } from "@/lib/provinces";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { csvSafeCell } from "@/lib/sanitize";
 
 export type CampanaEstado = "borrador" | "planificada" | "activa" | "pausada" | "completada" | "cancelada" | "archivada";
 export type PuntoEstado = "pendiente" | "completado" | "incidencia" | "cancelado";
@@ -741,7 +742,7 @@ export function downloadCsv(filename: string, rows: CampanaExportRow[]) {
   if (!rows.length) return;
   const headers = Object.keys(rows[0]);
   const escape = (value: unknown) => {
-    const text = String(value ?? "");
+    const text = csvSafeCell(value);
     return text.includes(";") || text.includes("\n") || text.includes('"') ? `"${text.replace(/"/g, '""')}"` : text;
   };
   const csv = [headers.join(";"), ...rows.map(row => headers.map(h => escape(row[h])).join(";"))].join("\n");
