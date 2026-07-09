@@ -25,11 +25,12 @@ import {
 import { IsdinBillingSettings, isdinBillingLines } from "@/lib/isdin-billing";
 import { auditBigCampaigns, auditIsdinPreventiveCalls, auditServices, buildBigCampaignPaymentLines, buildServicePaymentLines, type PaymentIssue } from "@/lib/payment-ledger";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { csvSafeCell } from "@/lib/sanitize";
 
 type Row = Record<string, any>;
 
 function eur(value: number) { return new Intl.NumberFormat("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value || 0)) + " €"; }
-function csvEscape(value: unknown) { const text = String(value ?? ""); return text.includes(";") || text.includes("\n") || text.includes('"') ? `"${text.replace(/"/g, '""')}"` : text; }
+function csvEscape(value: unknown) { const text = csvSafeCell(value); return text.includes(";") || text.includes("\n") || text.includes('"') ? `"${text.replace(/"/g, '""')}"` : text; }
 function downloadCsv(name: string, rows: unknown[][]) { const blob = new Blob(["\ufeff" + rows.map(row => row.map(csvEscape).join(";")).join("\n")], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url); }
 function issueWeight(issue: PaymentIssue) { return issue.severity === "critico" ? 4 : issue.severity === "alto" ? 3 : issue.severity === "medio" ? 2 : 1; }
 

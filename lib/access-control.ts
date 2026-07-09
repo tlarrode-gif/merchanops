@@ -1,5 +1,8 @@
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { normalizeProvince } from "@/lib/provinces";
+import { hashPassword, isHashedPassword, randomPassword, verifyPassword } from "@/lib/password";
+import { checkLoginAllowed, clearLoginAttempts, recordLoginFailure } from "@/lib/rate-limit";
+import { sanitizeIdentifier } from "@/lib/sanitize";
 
 export type AppPermissionKey = "servicios" | "isdin" | "calendario" | "pagos" | "logistica" | "usuarios";
 export type AppRole = "admin" | "manager";
@@ -51,9 +54,9 @@ export function normalizeUser(row: Partial<AppUser>): AppUser {
   const permissions = role === "admin" ? adminPermissions : { ...defaultPermissions, ...(row.permissions || {}), usuarios: false };
   return {
     id: row.id || uid(),
-    username: String(row.username || "").trim(),
+    username: sanitizeIdentifier(row.username),
     password: String(row.password || ""),
-    display_name: String(row.display_name || row.username || "").trim(),
+    display_name: sanitizeIdentifier(row.display_name || row.username),
     role,
     active: row.active !== false,
     provinces: Array.from(new Set((row.provinces || []).map(normalizeProvince).filter(Boolean))),
@@ -61,13 +64,28 @@ export function normalizeUser(row: Partial<AppUser>): AppUser {
   };
 }
 
+/**
+ * Usuarios de fábrica para una instalación NUEVA (base vacía). Sin contraseñas
+ * hardcodeadas en el repositorio: la del admin sale de la variable de entorno
+ * NEXT_PUBLIC_INITIAL_ADMIN_PASSWORD; si no está definida, se genera una
+ * aleatoria y se muestra UNA vez por consola para completar la instalación.
+ * Los gestores nacen inactivos y con contraseña aleatoria (el admin la fija
+ * al activarlos desde Usuarios y permisos).
+ */
 export function defaultAppUsers(): AppUser[] {
+  let adminPassword = String(process.env.NEXT_PUBLIC_INITIAL_ADMIN_PASSWORD || "").trim();
+  if (!adminPassword) {
+    adminPassword = randomPassword();
+    if (typeof console !== "undefined") {
+      console.warn(`[MerchanOps] Instalación nueva sin NEXT_PUBLIC_INITIAL_ADMIN_PASSWORD. Contraseña inicial de "admin" (guárdala y cámbiala): ${adminPassword}`);
+    }
+  }
   return [
-    normalizeUser({ id: "admin", username: "admin", password: "admin123", display_name: "Administracion", role: "admin", permissions: adminPermissions }),
-    normalizeUser({ id: "gestor_1", username: "gestor1", password: "gestor123", display_name: "Gestor 1", role: "manager", active: false }),
-    normalizeUser({ id: "gestor_2", username: "gestor2", password: "gestor123", display_name: "Gestor 2", role: "manager", active: false }),
-    normalizeUser({ id: "gestor_3", username: "gestor3", password: "gestor123", display_name: "Gestor 3", role: "manager", active: false }),
-    normalizeUser({ id: "gestor_4", username: "gestor4", password: "gestor123", display_name: "Gestor 4", role: "manager", active: false })
+    normalizeUser({ id: "admin", username: "admin", password: adminPassword, display_name: "Administracion", role: "admin", permissions: adminPermissions }),
+    normalizeUser({ id: "gestor_1", username: "gestor1", password: randomPassword(), display_name: "Gestor 1", role: "manager", active: false }),
+    normalizeUser({ id: "gestor_2", username: "gestor2", password: randomPassword(), display_name: "Gestor 2", role: "manager", active: false }),
+    normalizeUser({ id: "gestor_3", username: "gestor3", password: randomPassword(), display_name: "Gestor 3", role: "manager", active: false }),
+    normalizeUser({ id: "gestor_4", username: "gestor4", password: randomPassword(), display_name: "Gestor 4", role: "manager", active: false })
   ];
 }
 
@@ -99,7 +117,8 @@ export async function loadInternalUsers() {
         return users;
       }
       // Base vacía de verdad (instalación nueva): sembrar una única vez.
-      const seeded = defaultAppUsers();
+      // Las contraseñas se hashean SIEMPRE antes de tocar la base.
+      const seeded = await hashUserPasswords(defaultAppUsers());
       await supabase.from("app_users").upsert(seeded.map(userForDb), { ignoreDuplicates: true, onConflict: "id" });
       return seeded;
     }
@@ -119,9 +138,19 @@ export async function loadInternalUsers() {
   return seeded;
 }
 
+/** Hashea las contraseñas que sigan en claro (nuevas o legadas) antes de persistir. */
+async function hashUserPasswords(users: AppUser[]): Promise<AppUser[]> {
+  return Promise.all(
+    users.map(async user => {
+      if (!user.password || isHashedPassword(user.password)) return user;
+      return { ...user, password: await hashPassword(user.password) };
+    })
+  );
+}
+
 export async function saveInternalUsers(users: AppUser[]) {
   if (!users.length) throw new Error("La lista de usuarios está vacía; no se guarda para evitar borrar los existentes.");
-  const normalized = users.map(normalizeUser);
+  const normalized = await hashUserPasswords(users.map(normalizeUser));
   saveLocalUsers(normalized);
   if (isSupabaseConfigured && supabase) {
     const { error } = await supabase.from("app_users").upsert(normalized.map(userForDb));
@@ -150,11 +179,34 @@ export function userToSession(user: AppUser): AppSession {
   };
 }
 
+/**
+ * Login con rate limiting (5 intentos fallidos por usuario cada 15 minutos) y
+ * verificación de contraseña hasheada. Migración transparente: si la contraseña
+ * almacenada aún está en claro (legado) y el login es correcto, se re-guarda
+ * hasheada en ese momento.
+ */
 export async function loginAppUser(username: string, password: string) {
+  const scope = username.trim().toLowerCase();
+  const limit = checkLoginAllowed(scope);
+  if (!limit.allowed) {
+    throw new Error(`Demasiados intentos fallidos. Vuelve a intentarlo en ${limit.retryInMinutes} minuto(s).`);
+  }
   const users = await loadInternalUsers();
-  const found = users.find(user => user.active && user.username.toLowerCase() === username.trim().toLowerCase() && user.password === password);
-  if (!found) return null;
-  const session = userToSession(found);
+  const candidate = users.find(user => user.active && user.username.toLowerCase() === scope);
+  const valid = candidate ? await verifyPassword(password, candidate.password) : false;
+  if (!candidate || !valid) {
+    recordLoginFailure(scope);
+    return null;
+  }
+  clearLoginAttempts(scope);
+  if (!isHashedPassword(candidate.password)) {
+    try {
+      await saveInternalUsers(users.map(user => (user.id === candidate.id ? { ...user, password } : user)));
+    } catch {
+      // Si el upgrade falla (p.ej. sin red), el login sigue siendo válido; se reintentará en el próximo acceso.
+    }
+  }
+  const session = userToSession(candidate);
   saveCurrentAppSession(session);
   return session;
 }

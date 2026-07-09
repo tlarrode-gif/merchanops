@@ -5,6 +5,7 @@ import { Download, Eye, FileText } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { IsdinCall, loadLocalCalls } from "@/lib/isdin-calls";
 import { AppSession, canAccessModule, filterBySessionProvince, getCurrentAppSession, isAdminSession, sessionProvinceLabel } from "@/lib/access-control";
+import { csvSafeCell } from "@/lib/sanitize";
 
 type Worker = { id: string; name: string; province?: string | null };
 type IsdinVinyl = {
@@ -71,7 +72,7 @@ function defaultScope(v: IsdinVinyl) { return isCurrentWeek(v) || (isPastWeek(v)
 function riskFor(row: { avance: number; tasaIncidencia: number; total: number; nuevos?: number; pospuestos?: number }) { if (!row.total) return "Sin datos"; if (row.avance < 50 || row.tasaIncidencia >= 20 || Number(row.nuevos || 0) + Number(row.pospuestos || 0) > row.total * 0.5) return "Alto"; if (row.avance < 80 || row.tasaIncidencia >= 10) return "Medio"; return "Bajo"; }
 function groupBy(items: IsdinVinyl[], keyFn: (v: IsdinVinyl) => string): GroupRow[] { const map = new Map<string, IsdinVinyl[]>(); items.forEach(v => { const key = keyFn(v) || "Sin dato"; map.set(key, [...(map.get(key) || []), v]); }); return Array.from(map.entries()).map(([name, rows]) => { const total = rows.length; const finalizados = rows.filter(isFinal).length; const incidencias = rows.filter(isIncident).length; const cancelados = rows.filter(isCancel).length; const pendientesColocador = rows.filter(isPendingInstaller).length; const nuevos = rows.filter(isNew).length; const pospuestos = pendientesColocador; const avance = pct(finalizados + cancelados, total); const tasaIncidencia = pct(incidencias, total); return { name, total, finalizados, incidencias, cancelados, pendientesColocador, nuevos, pospuestos, avance, tasaIncidencia, riesgo: riskFor({ avance, tasaIncidencia, total, nuevos, pospuestos }) }; }).sort((a, b) => b.total - a.total); }
 function downloadHtml(filename: string, html: string) { const blob = new Blob([html], { type: "text/html;charset=utf-8" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url); }
-function csvEscape(value: unknown) { const text = String(value ?? ""); return text.includes(";") || text.includes("\n") || text.includes('"') ? `"${text.replace(/"/g, '""')}"` : text; }
+function csvEscape(value: unknown) { const text = csvSafeCell(value); return text.includes(";") || text.includes("\n") || text.includes('"') ? `"${text.replace(/"/g, '""')}"` : text; }
 function downloadCsv(filename: string, rows: unknown[][]) { const blob = new Blob(["\ufeff" + rows.map(row => row.map(csvEscape).join(";")).join("\n")], { type: "text/csv;charset=utf-8;" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url); }
 
 export default function IsdinDashboardPage() {

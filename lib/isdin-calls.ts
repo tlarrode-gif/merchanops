@@ -1,3 +1,4 @@
+import { csvSafeCell } from "@/lib/sanitize";
 export const isdinCallsLocalKey = "merchanops_isdin_calls_local_v4";
 
 export const isdinCallStatuses = [
@@ -399,7 +400,7 @@ export function syncLocalCallsFromVinyls(vinyls: IsdinVinylBase[]) {
 }
 
 export function csvEscape(value: unknown) {
-  const s = String(value ?? "");
+  const s = csvSafeCell(value);
   return s.includes(";") || s.includes("\n") || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
