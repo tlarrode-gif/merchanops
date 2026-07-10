@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileDown, Info, MapPin, MessageCircle, Pencil, Plus, Upload, Users } from "lucide-react";
+import { FileDown, Info, MapPin, MessageCircle, Package, Pencil, Plus, Upload, Users } from "lucide-react";
+import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
+import { createCampaignLogisticsRequest } from "@/lib/logistics-sync";
 import { parseImportFile } from "@/lib/csv-parser";
 import { supabase } from "@/lib/supabase";
 import { CampanaBadgeEstado, IncidenciaBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
@@ -72,6 +74,10 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   const [waOpen, setWaOpen] = useState(false);
   const [waWorkerId, setWaWorkerId] = useState("");
   const [waText, setWaText] = useState("");
+  // Estado logístico por punto (necesidades con source_type "campaign").
+  const [logisticaPuntos, setLogisticaPuntos] = useState<Record<string, { request_id: string | null; status: string | null }>>({});
+  const [matPara, setMatPara] = useState<PuntoVenta[] | null>(null);
+  const [matForm, setMatForm] = useState({ name: "", cantidad: 1, notas: "" });
   const admin = isAdminSession(session);
 
   useEffect(() => {
@@ -132,6 +138,19 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     setIncidencias(incidenciasResult.data);
     setGestores(gestoresResult.data);
     setColumnas(columnasResult.data);
+    // Estado logístico de los puntos: necesidades de material de esta campaña.
+    if (supabase) {
+      const { data } = await supabase
+        .from("logistics_material_requirements")
+        .select("source_id,request_id,status")
+        .eq("source_type", "campaign")
+        .eq("campaign_id", params.id);
+      const map: Record<string, { request_id: string | null; status: string | null }> = {};
+      (data || []).forEach(row => {
+        map[String(row.source_id)] = { request_id: (row.request_id as string) || null, status: (row.status as string) || null };
+      });
+      setLogisticaPuntos(map);
+    }
     setLoading(false);
   }
 
@@ -228,6 +247,47 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
       if (updateFileRef.current) updateFileRef.current.value = "";
     }
   }
+
+  // --- Solicitud de material a Logística (por punto o masiva) ---
+  // El listado `puntos` ya viene filtrado por sesión (filterPuntosBySession),
+  // así que la solicitud masiva de un gestor solo incluye SUS puntos.
+
+  function abrirSolicitudMaterial(target: PuntoVenta[]) {
+    if (!target.length) return;
+    setMatForm({ name: `Material campaña ${campana?.nombre || ""}`.trim(), cantidad: 1, notas: "" });
+    setMatPara(target);
+  }
+
+  async function handleSolicitarMaterial() {
+    if (!campana || !matPara?.length) return;
+    if (!matForm.name.trim()) { setError("Indica qué material se solicita."); return; }
+    setSaving(true);
+    setError("");
+    try {
+      const loaded = await loadLogisticsState();
+      if (loaded.error) { setError(`Logística no disponible: ${loaded.error}`); return; }
+      const request = createCampaignLogisticsRequest(
+        loaded.state,
+        campana,
+        matPara,
+        { name: matForm.name.trim(), quantity: Math.max(1, Number(matForm.cantidad) || 1), notes: matForm.notas.trim() || null },
+        session?.display_name || "Operaciones"
+      );
+      await saveLogisticsState(loaded.state, loaded.remote);
+      flash(`Solicitud ${request.code} enviada a Logística (${matPara.length} punto${matPara.length > 1 ? "s" : ""})`);
+      setMatPara(null);
+      await refresh(true);
+    } catch (err) {
+      setError(err instanceof Error ? `Error logística: ${err.message}` : "Error creando la solicitud de material");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const puntosSinMaterial = useMemo(
+    () => puntos.filter(punto => punto.estado !== "completado" && punto.estado !== "cancelado" && !logisticaPuntos[punto.id]?.request_id),
+    [puntos, logisticaPuntos]
+  );
 
   async function handleAddPunto() {
     if (!nuevoPunto.nombre_comercial.trim()) { setError("El punto necesita un nombre comercial."); return; }
@@ -344,6 +404,27 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
           </section>
         )}
 
+        {matPara && (
+          <section className="gc-form-section gc-no-print">
+            <h2 className="gc-form-title">
+              <Package className="mr-1 inline h-4 w-4" />
+              Solicitar material a Logística — {matPara.length === 1 ? matPara[0].nombre_comercial : `${matPara.length} puntos (los tuyos visibles)`}
+            </h2>
+            <div className="grid gap-2 md:grid-cols-6">
+              <label className="md:col-span-2"><span className="gc-label">Material *</span><input className="gc-input" value={matForm.name} onChange={event => setMatForm({ ...matForm, name: event.target.value })} /></label>
+              <label><span className="gc-label">Cantidad por punto</span><input type="number" min={1} className="gc-input" value={matForm.cantidad} onChange={event => setMatForm({ ...matForm, cantidad: Number(event.target.value) })} /></label>
+              <label className="md:col-span-2"><span className="gc-label">Notas para Logística</span><input className="gc-input" value={matForm.notas} onChange={event => setMatForm({ ...matForm, notas: event.target.value })} placeholder="Opcional" /></label>
+              <div className="flex items-end gap-2">
+                <button className="gc-btn-dark" disabled={saving || !matForm.name.trim()} onClick={handleSolicitarMaterial}>Enviar solicitud</button>
+                <button className="gc-btn-outline" onClick={() => setMatPara(null)}>Cancelar</button>
+              </div>
+            </div>
+            <p className="mt-2 text-xs" style={{ color: "var(--gc-muted)" }}>
+              Se creará una necesidad por punto y una única petición agrupada visible en Logística y en MerchanLOGS. Al completar un punto, su necesidad se cierra automáticamente.
+            </p>
+          </section>
+        )}
+
         {/* El gestor ve KPIs recalculados sobre sus provincias, sin presupuesto de campaña. */}
         <CampanaDetalleKpis
           campana={campana}
@@ -361,17 +442,32 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
         </div>
 
         {tab === "puntos" && (
-          <PuntosTabla
-            puntos={puntos}
-            incidencias={incidencias}
-            isAdmin={admin}
-            columnas={columnas}
-            workers={workers}
-            saving={saving}
-            onUpdatePunto={handleUpdatePunto}
-            onDeletePunto={handleDeletePunto}
-            onRegistrarIncidencia={handleRegistrarIncidencia}
-          />
+          <>
+            <div className="flex justify-end gc-no-print">
+              <button
+                className="gc-btn-dark"
+                disabled={saving || !puntosSinMaterial.length}
+                title={puntosSinMaterial.length ? "Solicitar material para todos tus puntos sin petición" : "Todos tus puntos activos ya tienen petición de material"}
+                onClick={() => abrirSolicitudMaterial(puntosSinMaterial)}
+              >
+                <Package className="h-4 w-4" />
+                Solicitar material ({puntosSinMaterial.length} sin petición)
+              </button>
+            </div>
+            <PuntosTabla
+              puntos={puntos}
+              incidencias={incidencias}
+              isAdmin={admin}
+              columnas={columnas}
+              workers={workers}
+              saving={saving}
+              logistica={logisticaPuntos}
+              onSolicitarMaterial={punto => abrirSolicitudMaterial([punto])}
+              onUpdatePunto={handleUpdatePunto}
+              onDeletePunto={handleDeletePunto}
+              onRegistrarIncidencia={handleRegistrarIncidencia}
+            />
+          </>
         )}
 
         {tab === "gestores" && (

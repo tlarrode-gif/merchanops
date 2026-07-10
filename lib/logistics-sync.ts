@@ -307,6 +307,73 @@ export function createServiceLogisticsRequest(state: LogisticsState, service: So
   }
 }
 
+/**
+ * Petición de material desde una Gran Campaña (grupo 2 de OPS).
+ *
+ * Crea una necesidad por punto de venta (source_type "campaign", source_id =
+ * id del punto, para que el puente de cierre syncPuntoCompletadoConLogistica
+ * la consuma al completar el punto) y agrupa todas las líneas en UNA petición
+ * logística. Idempotente: repetir la llamada actualiza las necesidades en vez
+ * de duplicarlas, y los puntos con necesidad previa se re-enlazan a su
+ * petición original.
+ */
+export function createCampaignLogisticsRequest(
+  state: LogisticsState,
+  campana: { id: string; nombre: string; cliente_marca?: string | null },
+  puntos: Array<{ id: string; nombre_comercial: string; direccion?: string | null; provincia?: string | null; instalador_id?: string | null; instalador_nombre?: string | null; fecha_visita?: string | null }>,
+  material: { name: string; quantity: number; notes?: string | null },
+  actor = "Operaciones"
+) {
+  if (!puntos.length) throw new Error("No hay puntos de venta para solicitar material.");
+  const version = `${material.name}:${material.quantity}:${puntos.map(p => p.id).sort().join(",")}`;
+  const event = ensureIntegrationEvent(state, "campaign.material_requested", "campaign", campana.id, {
+    campana_id: campana.id,
+    campana: campana.nombre,
+    material: material.name,
+    cantidad: material.quantity,
+    puntos: puntos.map(p => p.id),
+    actor
+  }, version);
+  try {
+    const requirements = puntos.map(punto => upsertMaterialRequirement(state, {
+      source_type: "campaign",
+      source: {
+        id: punto.id,
+        client_id: campana.cliente_marca || null,
+        client: campana.cliente_marca || null,
+        campaign_id: campana.id,
+        campaign: campana.nombre,
+        pharmacy_name: punto.nombre_comercial,
+        province: punto.provincia || null,
+        address: punto.direccion || null,
+        installer_id: punto.instalador_id || null,
+        installer_name: punto.instalador_nombre || null,
+        deadline: punto.fecha_visita || null,
+        material_name: material.name,
+        material_quantity: material.quantity,
+        material_type: "consumible",
+        comments: material.notes || null
+      },
+      eventId: event.id,
+      quantity: material.quantity,
+      requested_material_name: material.name,
+      operations_notes: material.notes || null
+    }));
+    const request = createOrUpdateRequestForRequirement(state, requirements[0], { id: puntos[0].id, comments: material.notes || null }, event.id);
+    requirements.slice(1).forEach(req => {
+      if (!req.request_id) req.request_id = request.id;
+      createOrUpdateRequestForRequirement(state, req, { id: req.source_id, comments: material.notes || null }, event.id);
+    });
+    completeEvent(state, event.id);
+    notify(state, { type: "logistics_request_created", priority: request.priority, entity_type: "request", entity_id: request.id, href: `/logistica/solicitudes?id=${request.id}`, message: `Solicitud de material de campaña ${campana.nombre}: ${request.code}` });
+    audit(state, { actor, module: "gran_campanas", entity_type: "request", entity_id: request.id, action: "campaign.material_requested", new_value: { campana: campana.id, puntos: puntos.length, material: material.name, cantidad: material.quantity }, sync_event_id: event.id });
+    return request;
+  } catch (err) {
+    failEvent(state, event.id, err);
+    throw err;
+  }
+}
+
 export function acceptRequestAndReserve(state: LogisticsState, requestId: string, actor = "Logística") {
   const request = state.requests.find(x => x.id === requestId);
   if (!request) return;
@@ -416,6 +483,7 @@ export function detectLogisticsSyncIssues(state: LogisticsState): SyncIssue[] {
 export function sourceHref(req: MaterialRequirement) {
   if (req.source_type === "isdin_vinyl") return `/grandes-campanas/isdin?vin=${encodeURIComponent(req.vin || req.source_id)}`;
   if (req.source_type === "service" || req.source_type === "service_point") return `/?tab=servicios&service=${encodeURIComponent(req.service_id || req.source_id)}`;
+  if (req.source_type === "campaign" && req.campaign_id) return `/grandes-campanas/${encodeURIComponent(req.campaign_id)}`;
   return "/logistica";
 }
 

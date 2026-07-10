@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight, FileDown, Printer, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, FileDown, Package, Printer, Search, Trash2 } from "lucide-react";
 import { PuntoBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
 import { GestorAvatar } from "@/components/grandes-campanas/gestor-avatars";
 import { CampanaColumna, columnasExtraVisibles, formatearValorColumna } from "@/lib/campana-columnas";
@@ -12,6 +12,30 @@ const PAGE_SIZE = 25;
 type PuntosFiltros = { q: string; provincia: string; estado: string; gestor: string; tipo: string; desde: string; hasta: string };
 const emptyFiltros: PuntosFiltros = { q: "", provincia: "", estado: "", gestor: "", tipo: "", desde: "", hasta: "" };
 
+/** Píldora con el estado logístico del punto, enlazada a la solicitud. */
+function LogisticaPill({ info }: { info?: { request_id: string | null; status: string | null } }) {
+  if (!info?.request_id) return null;
+  const text = (info.status || "solicitado").replaceAll("_", " ");
+  const raw = info.status || "";
+  const tone = ["bloqueada", "con_incidencia", "pendiente_stock", "cancelada"].includes(raw)
+    ? { background: "#fdecec", color: "#9f1d2e" }
+    : ["entregada", "consumida"].includes(raw)
+      ? { background: "#e8f7ee", color: "#1c7c43" }
+      : { background: "#fff6e5", color: "#8a5b00" };
+  return (
+    <a
+      href={`/logistica/solicitudes?id=${info.request_id}`}
+      onClick={event => event.stopPropagation()}
+      className="mt-0.5 inline-flex max-w-full items-center gap-1 truncate rounded-full px-2 py-0.5 text-[10px] font-semibold"
+      style={tone}
+      title="Ver solicitud en Logística"
+    >
+      <Package className="h-3 w-3" />
+      Logística: {text}
+    </a>
+  );
+}
+
 export function PuntosTabla({
   puntos,
   incidencias,
@@ -19,6 +43,8 @@ export function PuntosTabla({
   columnas = [],
   workers = [],
   saving,
+  logistica = {},
+  onSolicitarMaterial,
   onUpdatePunto,
   onDeletePunto,
   onRegistrarIncidencia
@@ -29,6 +55,9 @@ export function PuntosTabla({
   columnas?: CampanaColumna[];
   workers?: Array<{ id: string; name: string; province?: string | null }>;
   saving: boolean;
+  /** Estado logístico por punto (necesidades source_type "campaign"). */
+  logistica?: Record<string, { request_id: string | null; status: string | null }>;
+  onSolicitarMaterial?: (punto: PuntoVenta) => void;
   onUpdatePunto: (punto: PuntoVenta, patch: Partial<PuntoVenta>) => Promise<void>;
   onDeletePunto: (punto: PuntoVenta) => Promise<void>;
   onRegistrarIncidencia: (punto: PuntoVenta, descripcion: string) => Promise<void>;
@@ -171,6 +200,7 @@ export function PuntosTabla({
                     <td>
                       <p className="font-semibold">{punto.nombre_comercial}</p>
                       <p className="text-xs" style={{ color: "var(--gc-muted)" }}>{punto.direccion || "Sin dirección"}</p>
+                      <LogisticaPill info={logistica[punto.id]} />
                     </td>
                     <td>{punto.provincia || "—"}</td>
                     <td>
@@ -262,6 +292,17 @@ export function PuntosTabla({
                                 Registrar incidencia
                               </button>
                             )}
+                            {onSolicitarMaterial && (logistica[punto.id]?.request_id ? (
+                              <a className="gc-btn-outline" href={`/logistica/solicitudes?id=${logistica[punto.id]?.request_id}`}>
+                                <Package className="h-4 w-4" />
+                                Ver petición logística
+                              </a>
+                            ) : (
+                              <button className="gc-btn-outline" disabled={saving} onClick={() => onSolicitarMaterial(punto)}>
+                                <Package className="h-4 w-4" />
+                                Solicitar material
+                              </button>
+                            ))}
                             {isAdmin && (
                               <button className="gc-btn-outline gc-btn-danger" disabled={saving} onClick={() => onDeletePunto(punto)}>
                                 <Trash2 className="h-4 w-4" />
