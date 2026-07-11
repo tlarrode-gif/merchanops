@@ -22,6 +22,11 @@ export type AppUser = {
 
 export type AppSession = Pick<AppUser, "id" | "username" | "display_name" | "role" | "active" | "provinces" | "permissions">;
 
+// C1: columnas que el navegador puede leer de app_users. El hash de contraseña
+// JAMÁS vuelve a salir de la base: el login se verifica en el servidor
+// (rpc merchan_auth_bootstrap) y el perfil llega por rpc merchan_auth_whoami.
+const APP_USER_COLUMNS = "id,username,display_name,role,active,provinces,permissions,auth_user_id,created_at,updated_at";
+
 const usersLocalKey = "merchanops_internal_users_v1";
 const sessionLocalKey = "merchanops_internal_session_v1";
 export const merchanopsSessionChangeEvent = "merchanops-session-change";
@@ -89,11 +94,10 @@ export function defaultAppUsers(): AppUser[] {
   ];
 }
 
-function userForDb(user: AppUser) {
-  return {
+function userForDb(user: AppUser, includePassword: boolean) {
+  const row: Record<string, unknown> = {
     id: user.id,
     username: user.username,
-    password: user.password,
     display_name: user.display_name,
     role: user.role,
     active: user.active,
@@ -101,6 +105,10 @@ function userForDb(user: AppUser) {
     permissions: user.permissions,
     updated_at: new Date().toISOString()
   };
+  // Solo se escribe la columna password cuando hay una contraseña nueva; un
+  // upsert sin la columna conserva el hash existente en la base.
+  if (includePassword) row.password = user.password;
+  return row;
 }
 
 // Con Supabase configurado, la base de datos es LA fuente de verdad de usuarios.
@@ -109,7 +117,7 @@ function userForDb(user: AppUser) {
 // reales con los de fábrica (así se perdieron provincias asignadas una vez).
 export async function loadInternalUsers() {
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase.from("app_users").select("*").order("display_name");
+    const { data, error } = await supabase.from("app_users").select(APP_USER_COLUMNS).order("display_name");
     if (!error && data) {
       if (data.length) {
         const users = data.map(row => normalizeUser(row as Partial<AppUser>));
@@ -119,7 +127,7 @@ export async function loadInternalUsers() {
       // Base vacía de verdad (instalación nueva): sembrar una única vez.
       // Las contraseñas se hashean SIEMPRE antes de tocar la base.
       const seeded = await hashUserPasswords(defaultAppUsers());
-      await supabase.from("app_users").upsert(seeded.map(userForDb), { ignoreDuplicates: true, onConflict: "id" });
+      await supabase.from("app_users").upsert(seeded.map(user => userForDb(user, true)), { ignoreDuplicates: true, onConflict: "id" });
       return seeded;
     }
     // Error transitorio: usar la última copia local solo para mostrar, jamás sembrar.
@@ -151,10 +159,20 @@ async function hashUserPasswords(users: AppUser[]): Promise<AppUser[]> {
 export async function saveInternalUsers(users: AppUser[]) {
   if (!users.length) throw new Error("La lista de usuarios está vacía; no se guarda para evitar borrar los existentes.");
   const normalized = await hashUserPasswords(users.map(normalizeUser));
-  saveLocalUsers(normalized);
+  saveLocalUsers(isSupabaseConfigured ? normalized.map(user => ({ ...user, password: "" })) : normalized);
   if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase.from("app_users").upsert(normalized.map(userForDb));
-    if (error) throw error;
+    // Dos lotes con columnas homogéneas: solo los usuarios con contraseña nueva
+    // escriben la columna password (el resto conserva su hash en la base).
+    const withPassword = normalized.filter(user => user.password);
+    const withoutPassword = normalized.filter(user => !user.password);
+    if (withPassword.length) {
+      const { error } = await supabase.from("app_users").upsert(withPassword.map(user => userForDb(user, true)));
+      if (error) throw error;
+    }
+    if (withoutPassword.length) {
+      const { error } = await supabase.from("app_users").upsert(withoutPassword.map(user => userForDb(user, false)));
+      if (error) throw error;
+    }
   }
   return normalized;
 }
@@ -180,16 +198,42 @@ export function userToSession(user: AppUser): AppSession {
 }
 
 /**
- * Login con rate limiting (5 intentos fallidos por usuario cada 15 minutos) y
- * verificación de contraseña hasheada. Migración transparente: si la contraseña
- * almacenada aún está en claro (legado) y el login es correcto, se re-guarda
- * hasheada en ese momento.
+ * Login real (C1). Con Supabase configurado:
+ *  1. rpc merchan_auth_bootstrap verifica la contraseña EN EL SERVIDOR (PBKDF2
+ *     contra app_users, rate limiting de servidor) y crea/sincroniza el usuario
+ *     en Supabase Auth manteniendo usuario y contraseña de siempre;
+ *  2. supabase.auth.signInWithPassword obtiene la sesión JWT real (necesaria
+ *     cuando se active RLS);
+ *  3. rpc merchan_auth_whoami devuelve el perfil SIN hash de contraseña.
+ * Sin Supabase (modo local/demo) se mantiene la verificación local con rate
+ * limiting de cliente.
  */
 export async function loginAppUser(username: string, password: string) {
   const scope = username.trim().toLowerCase();
   const limit = checkLoginAllowed(scope);
   if (!limit.allowed) {
     throw new Error(`Demasiados intentos fallidos. Vuelve a intentarlo en ${limit.retryInMinutes} minuto(s).`);
+  }
+  if (isSupabaseConfigured && supabase) {
+    const { data, error } = await supabase.rpc("merchan_auth_bootstrap", { p_username: username, p_password: password });
+    if (error) throw new Error(`No se ha podido iniciar sesión: ${error.message}`);
+    const result = (data ?? {}) as { email?: string; error?: string };
+    if (result.error || !result.email) {
+      recordLoginFailure(scope);
+      if (String(result.error || "").startsWith("Demasiados intentos")) throw new Error(result.error);
+      return null;
+    }
+    const { error: authError } = await supabase.auth.signInWithPassword({ email: result.email, password });
+    if (authError) throw new Error(`No se ha podido iniciar sesión: ${authError.message}`);
+    const { data: profile, error: profileError } = await supabase.rpc("merchan_auth_whoami");
+    if (profileError || !profile) {
+      await supabase.auth.signOut();
+      throw new Error("Sesión creada pero no se pudo cargar el perfil. Vuelve a intentarlo.");
+    }
+    clearLoginAttempts(scope);
+    const session = userToSession(normalizeUser(profile as Partial<AppUser>));
+    saveCurrentAppSession(session);
+    return session;
   }
   const users = await loadInternalUsers();
   const candidate = users.find(user => user.active && user.username.toLowerCase() === scope);
@@ -229,7 +273,23 @@ export function saveCurrentAppSession(session: AppSession | null) {
 }
 
 export function logoutAppUser() {
+  if (isSupabaseConfigured && supabase) void supabase.auth.signOut().catch(() => undefined);
   saveCurrentAppSession(null);
+}
+
+/**
+ * C1: coherencia entre la sesión de UI (localStorage) y la sesión real de
+ * Supabase Auth. Si hay sesión local pero el JWT no existe (caducado, borrado,
+ * sesión anterior a la migración), se cierra la sesión local para forzar un
+ * login real. Devuelve false cuando ha tenido que cerrarla.
+ */
+export async function ensureAuthSession(): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase) return true;
+  if (!getCurrentAppSession()) return true;
+  const { data } = await supabase.auth.getSession();
+  if (data.session) return true;
+  saveCurrentAppSession(null);
+  return false;
 }
 
 export function isAdminSession(session?: AppSession | null) {
