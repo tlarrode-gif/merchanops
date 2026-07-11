@@ -34,7 +34,7 @@ concurrencia, comunicación entre apps y preparación de backend/RLS.
 | 2 | Ledger idempotente persistente: tabla `payment_obligations` (clave estable, `currency`, céntimos, estados `calculado→revisado→cerrado/anulado` con CHECK de transición y trigger anti-reapertura), ajustes/anulaciones enlazados | `supabase/v8_0_payment_obligations.sql`, `lib/payments/ledger.ts` | ✅ |
 | 3 | Backend transaccional: importar CSV (previsualización + confirmación atómica en RPC, hash de archivo, huella por fila), recalcular obligaciones (`syncObligations`), revisar/cerrar (`changeObligationStatus`) | `supabase/v8_1_import_runs.sql`, `lib/payments/import.ts` | ✅ (UI de importación pendiente de conectar) |
 | 4 | Comandos logísticos atómicos y concurrencia: funciones SQL con `FOR UPDATE`, columna `version` en `logistics_stock`, movimiento+saldo en la misma transacción; reservas de LOGS cableadas al RPC | `supabase/v8_2_logistics_commands.sql`, `merchanlogs/services/atomic-commands.ts` | ✅ (cierre/envío de picking y retirada del guardado en bloque: pendientes con pruebas de equivalencia) |
-| 5 | Inbox/outbox durable entre apps: `outbox_events`/`inbox_processed` con idempotency key, intentos, backoff, dead-letter; consumo con claim seguro | `supabase/v8_3_outbox.sql` | pendiente |
+| 5 | Inbox/outbox durable entre apps: `outbox_events`/`inbox_processed` con idempotency key, intentos, backoff, dead-letter; consumo con claim seguro (SKIP LOCKED) | `supabase/v8_3_outbox.sql`, `lib/outbox.ts` | ✅ (handlers de consumo por conectar) |
 | 6 | Autenticación real (Supabase Auth) + migración RLS documentada SIN activar; modo degradado solo-lectura al fallar Supabase | `supabase/v9_0_rls_prepared.sql` (no aplicada) | pendiente |
 | 7 | Conciliación histórica: herramienta dry-run que detecta revisitas omitidas, "Resuelto" con importe original cobrado, finalizados con 1 sola visita; crea SOLO las obligaciones faltantes con trazabilidad | `scripts/reconcile-payments.ts` | pendiente |
 
@@ -137,6 +137,31 @@ Cableado en LOGS: `reserveStock`/`releaseReservation` usan los RPC en modo
 Supabase (`merchanlogs/services/atomic-commands.ts`). Pendiente de fase 4:
 migrar cierre/envío de picking de LOGS y el guardado en bloque de OPS a los
 comandos (requiere pruebas de equivalencia del flujo completo).
+
+## 3e. Fase 5 — resultado (aplicada el 2026-07-10)
+
+Migración `v8_3_outbox` aplicada: `outbox_events` (event_id único, tipo,
+versión de esquema, app origen, payload, estado, intentos/max, próximo
+intento, último error, claimed_by, fechas) e `inbox_processed` (PK
+event_id+consumer: efectivamente-una-vez por consumidor). RPCs:
+`outbox_publish` (idempotente), `outbox_claim` (FOR UPDATE SKIP LOCKED —
+sin doble reclamo entre consumidores), `outbox_complete` (inbox + estado en
+la misma transacción; duplicado → alreadyProcessed) y `outbox_fail`
+(backoff exponencial 30s·2^n, dead_letter al agotar intentos). Los comandos
+de la fase 4 (envío, entrega, rechazo) publican su evento EN LA MISMA
+transacción que el cambio de dominio.
+
+**Verificado en vivo** (transacción revertida): publicación duplicada = 1
+fila; claim marca procesando+intentos y un segundo consumidor no re-reclama;
+complete escribe inbox y completa; evento repetido reconocido como duplicado
+(escenario 14: no re-crea incidencias); backoff y dead-letter correctos;
+el comando de dominio publica su evento en la misma transacción.
+
+Cliente TS: `lib/outbox.ts` (`publishEvent`, `processOutbox` con validación
+de tipo/versión/payload, duplicados contados, fallos a `outbox_fail`; jamás
+completa antes de aplicar efectos; sin conexión → error, no simulación).
+Pendiente: conectar los handlers concretos de cada app (espejos y
+sincronizaciones actuales) al consumidor.
 
 ## 4. Riesgos abiertos (hasta completar fases 2-7)
 
