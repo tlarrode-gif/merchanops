@@ -9,6 +9,14 @@
  * handler NO debe re-crear incidencias/solicitudes/reservas existentes.
  * Los fallos van a `outbox_fail`: backoff exponencial y dead-letter al
  * agotar los intentos. Jamás se marca completado antes de aplicar efectos.
+ *
+ * Consumidores activos (v8_6): la publicación se hace por TRIGGER en la base
+ * (logistics_requests/shipments/incidents/stock, misma transacción que el
+ * dato) y el consumidor 'db-notifier' corre en pg_cron cada minuto generando
+ * logistics_notifications idempotentes (efectos + inbox + completado en una
+ * sola transacción). Este cliente TS queda para futuros consumidores de app;
+ * sus handlers DEBEN ser idempotentes porque aquí efectos e inbox no
+ * comparten transacción.
  */
 
 import { supabase } from "@/lib/supabase";
