@@ -34,7 +34,20 @@ export type IsdinVinylBilling = {
 
 export type IsdinBillingSettings = { id: string; standard_rate: number; custom_rate: number };
 
-export type IsdinBillingAdjustment = { id: string; concept: string; amount: number; billing_week?: string | null; billing_date?: string | null };
+// v8_5 (A7): una regularización nunca se borra físicamente; se anula con motivo
+// (annulled_at/annulled_by/annul_reason) y queda excluida de totales y exports.
+export type IsdinBillingAdjustment = {
+  id: string;
+  concept: string;
+  amount: number;
+  billing_week?: string | null;
+  billing_date?: string | null;
+  created_at?: string | null;
+  created_by?: string | null;
+  annulled_at?: string | null;
+  annulled_by?: string | null;
+  annul_reason?: string | null;
+};
 
 export type IsdinBillingLine = {
   week: string;
