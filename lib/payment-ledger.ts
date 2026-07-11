@@ -1,4 +1,7 @@
-export const INCIDENT_FEE = 8.56;
+import { FAILED_VISIT_FEE_EUR } from "@/lib/payments/constants";
+
+/** @deprecated usar lib/payments/constants — se mantiene como alias del valor único. */
+export const INCIDENT_FEE = FAILED_VISIT_FEE_EUR;
 
 export type PaymentOrigin = "servicio" | "gran_campana" | "isdin";
 export type PaymentSeverity = "critico" | "alto" | "medio" | "bajo";

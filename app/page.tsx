@@ -15,7 +15,7 @@ type Point={id:string;service_id?:string|null;name:string;address?:string|null;p
 type Service={id:string;client_id?:string|null;client:string;ceco?:string|null;campaign:string;province?:string|null;created_by_user_id?:string|null;created_by_user_name?:string|null;start_date?:string|null;deadline?:string|null;priority?:string|null;service_type?:string|null;reporting_channel?:string|null;worker_id?:string|null;worker_name?:string|null;status?:string|null;material_status?:string|null;logistics_status?:string|null;logistics_request_id?:string|null;tracking?:string|null;default_point_fee?:number|null;estimated_hours?:number|null;instructions?:string|null;communication_sent_at?:string|null;validated_at?:string|null;incident_note?:string|null;resolved_at?:string|null;payment_type?:string|null;hourly_rate?:number|null;hours_worked?:number|null;calendar_color?:string|null;points?:Point[]};
 
 type Data={clients:Client[];workers:Worker[];services:Service[]};
-const INCIDENT_FEE=8.56;
+import { FAILED_VISIT_FEE_EUR as INCIDENT_FEE } from "@/lib/payments/constants";
 const localKey="merchanops_local_v362";
 const provinces=["Asturias","Huesca","Teruel","Zaragoza","Alicante","Castellón","Valencia","Lleida","Sevilla","Córdoba","Jaén","Almería"];
 const serviceStatuses=["Pendiente asignar","Asignado","Info enviada","Material pendiente","Material recibido","En ejecución","Reportado","Validado","Incidencia","Pagado"];
