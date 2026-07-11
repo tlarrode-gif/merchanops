@@ -259,7 +259,7 @@ Verificación tras los fixes: OPS 44/44, LOGS 40/40, lint y build en verde en am
 - ~~Escrituras con anon key sin identidad~~ → RESUELTO: Supabase Auth + RLS activa (v9_1/v9_2).
 - ~~Guardado en bloque de logística~~ → RESUELTO: retirado (C2, v8_7 + OPS Logística solo consulta).
 - ~~Fallback local silencioso~~ → RESUELTO: modo degradado + retirada del guardado en bloque.
-- Refinado de RLS por rol/provincia pendiente (hoy: cualquier usuario autenticado accede a todas las tablas).
+- ~~Refinado de RLS por rol/provincia~~ → RESUELTO (v9_3, 2026-07-11): la base aplica rol (admin/gestora), permiso ('pagos') y provincia (normalización con alias equivalente a lib/provinces.ts) en services/points/workers/big_campaign_points/puntos_venta_campana/isdin_vinyls/isdin_calls; facturación ISDIN solo-admin; app_users solo-lectura sin columna password (GRANT de columnas: los hashes ya no salen por REST ni para admin). Verificado en vivo simulando JWT de gestora y admin.
 - Los 11 hallazgos de la segunda revisión están CERRADOS (2026-07-11).
 
 La tarifa por visita fallida **sigue siendo 8,56 €** en todo el sistema.
