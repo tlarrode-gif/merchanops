@@ -41,11 +41,6 @@ export function dateOnly(value?: string | null) {
   return value ? String(value).slice(0, 10) : "";
 }
 
-export function paymentPeriod(date?: string | null) {
-  const value = dateOnly(date) || new Date().toISOString().slice(0, 10);
-  return value.slice(0, 7);
-}
-
 function number(value: unknown) {
   return Number(value || 0);
 }
@@ -90,11 +85,11 @@ function servicePaymentDate(service: AnyRow) {
   return dateOnly(service.validated_at) || dateOnly(service.resolved_at) || dateOnly(service.deadline) || dateOnly(service.start_date) || new Date().toISOString().slice(0, 10);
 }
 
-export function servicePointTotal(service: AnyRow, points: AnyRow[]) {
+function servicePointTotal(service: AnyRow, points: AnyRow[]) {
   return points.reduce((sum, point) => sum + pointPay(point), 0);
 }
 
-export function serviceHourTotal(service: AnyRow) {
+function serviceHourTotal(service: AnyRow) {
   return number(service.hourly_rate) * number(service.hours_worked);
 }
 
@@ -106,75 +101,6 @@ export function serviceTotal(service: AnyRow, points: AnyRow[]) {
 
 export function fingerprint(parts: Array<string | number | null | undefined>) {
   return parts.map(part => String(part ?? "")).join("|").toLowerCase();
-}
-
-/** @deprecated C3: usar lib/payments/lines (motor único, identidad estable). Congelado; no añadir consumidores. */
-export function buildServicePaymentLines(services: AnyRow[], points: AnyRow[]) {
-  return services.flatMap(service => {
-    if (service.status !== "Validado" && service.status !== "Pagado") return [];
-    const servicePoints = points.filter(point => point.service_id === service.id);
-    const date = servicePaymentDate(service);
-    const amount = serviceTotal(service, servicePoints);
-    if (!amount) return [];
-    const line: PaymentLine = {
-      id: `servicio:${service.id}`,
-      origin: "servicio",
-      source_id: String(service.id),
-      payment_date: date,
-      period: paymentPeriod(date),
-      worker_id: service.worker_id || null,
-      worker_name: service.worker_name || "Sin trabajador",
-      client_id: service.client_id || null,
-      client: service.client || "Servicio",
-      ceco: service.ceco || null,
-      campaign: service.campaign || null,
-      province: service.province || null,
-      concept: service.payment_type === "Horas" ? "Servicio por horas" : service.payment_type === "Mixto" ? "Servicio mixto" : "Servicio por puntos",
-      amount,
-      status: service.status || null,
-      fingerprint: fingerprint(["servicio", service.id, date, amount]),
-      payload: { payment_type: service.payment_type || "Puntos", points: servicePoints.length }
-    };
-    return [line];
-  });
-}
-
-/** @deprecated C3: usar lib/payments/lines (motor único, identidad estable). Congelado; no añadir consumidores. */
-export function buildBigCampaignPaymentLines(campaigns: AnyRow[], points: AnyRow[]) {
-  const byCampaign = new Map(campaigns.map(campaign => [campaign.id, campaign]));
-  return points.flatMap(point => {
-    const campaign = byCampaign.get(point.big_campaign_id) || {};
-    const status = pointStatus(point);
-    const incidentResolved = isIncidentResolved(point);
-    if (!["Finalizado", "Incidencia", "Pospuesto"].includes(status) && !incidentResolved) return [];
-    if (isPostIncidentPending(point)) return [];
-    const active = isIncidentActive(point);
-    const amount = active ? pointIncident(point) : incidentResolved ? pointOriginal(point) + pointIncident(point) : number(point.fee);
-    if (!amount) return [];
-    const date = dateOnly(point.validated_at || point.finished_at || point.incident_resolved_at || point.reported_at || campaign.deadline || campaign.start_date) || new Date().toISOString().slice(0, 10);
-    const concept = active ? `Gran campaña - ${status.toLowerCase()}` : "Gran campaña - punto finalizado";
-    const line: PaymentLine = {
-      id: `gran_campana:${point.id}`,
-      origin: "gran_campana",
-      source_id: String(point.big_campaign_id || campaign.id || ""),
-      source_line_id: String(point.id),
-      payment_date: date,
-      period: paymentPeriod(date),
-      worker_id: point.worker_id || null,
-      worker_name: point.worker_name || "Sin instalador",
-      client_id: campaign.client_id || null,
-      client: campaign.client || "Gran campaña",
-      ceco: campaign.ceco || null,
-      campaign: campaign.name || null,
-      province: point.province || campaign.province || null,
-      concept,
-      amount,
-      status,
-      fingerprint: fingerprint(["gran_campana", point.id, status, date, amount]),
-      payload: { point_name: point.name || "", report_code: point.report_code || "" }
-    };
-    return [line];
-  });
 }
 
 export function auditServices(services: AnyRow[], points: AnyRow[]) {
@@ -234,18 +160,3 @@ export function auditIsdinPreventiveCalls(vinyls: AnyRow[]) {
   return issues;
 }
 
-export function summarizePayments(lines: PaymentLine[]) {
-  return {
-    total: lines.reduce((sum, line) => sum + number(line.amount), 0),
-    count: lines.length,
-    byOrigin: lines.reduce<Record<string, number>>((acc, line) => {
-      acc[line.origin] = (acc[line.origin] || 0) + number(line.amount);
-      return acc;
-    }, {}),
-    byWorker: lines.reduce<Record<string, number>>((acc, line) => {
-      const key = line.worker_name || "Sin trabajador";
-      acc[key] = (acc[key] || 0) + number(line.amount);
-      return acc;
-    }, {})
-  };
-}
