@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { ChevronDown, LogOut, Menu, X } from "lucide-react";
+import { ChevronDown, KeyRound, LogOut, Menu, X } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 import { AppSession, canAccessModule, ensureAuthSession, getCurrentAppSession, isAdminSession, logoutAppUser, merchanopsSessionChangeEvent, sessionProvinceLabel, type AppPermissionKey } from "@/lib/access-control";
 
 // Navegación global de MerchanOps (auditoría, bloque 7): UNA sola sidebar con
@@ -50,7 +51,8 @@ const groups: NavGroup[] = [
   {
     id: "config", label: "Configuración", links: [
       { href: "/?tab=usuarios", label: "Usuarios y permisos", adminOnly: true, tab: "usuarios" },
-      { href: "/configuracion/sincronizacion", label: "Sincronización", adminOnly: true }
+      { href: "/configuracion/sincronizacion", label: "Sincronización", adminOnly: true },
+      { href: "/configuracion/avisos", label: "Avisos del sistema", adminOnly: true }
     ]
   }
 ];
@@ -70,6 +72,7 @@ const crumbLabels: Record<string, string> = {
   "historial-economico": "Historial económico",
   "auditoria-pagos": "Historial económico",
   configuracion: "Configuración",
+  avisos: "Avisos del sistema",
   sincronizacion: "Sincronización"
 };
 const homeTabLabels: Record<string, string> = { panel: "Panel", servicios: "Servicios", calendario: "Calendario", pagos: "Pagos", clientes: "Clientes", trabajadores: "Trabajadores", usuarios: "Usuarios y permisos", "nuevo-servicio": "Nuevo servicio", "nuevo-cliente": "Nuevo cliente", "nuevo-trabajador": "Nuevo trabajador" };
@@ -88,6 +91,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [currentTab, setCurrentTab] = useState("panel");
   const [collapsed, setCollapsed] = useState<string[]>([]);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     const syncSession = () => setSession(getCurrentAppSession());
@@ -179,6 +183,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="border-t px-4 py-3">
         <p className="truncate text-sm font-semibold">{session.display_name}</p>
         <p className="truncate text-xs text-slate-500">{admin ? "Administración" : "Gestor"} · {sessionProvinceLabel(session)}</p>
+        <button onClick={() => setShowPassword(true)} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border bg-white px-3 py-1.5 text-sm hover:bg-slate-50"><KeyRound className="h-4 w-4" />Cambiar contraseña</button>
+        {showPassword && <PasswordModal onClose={() => setShowPassword(false)} />}
         <button onClick={signOut} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border bg-white px-3 py-1.5 text-sm hover:bg-slate-50"><LogOut className="h-4 w-4" />Salir</button>
       </div>
     </div>
@@ -214,6 +220,64 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
         {children}
       </div>
+    </div>
+  );
+}
+
+
+/**
+ * Cambio de contraseña en autoservicio (v9_4): pide la contraseña actual y la
+ * verifica EN EL SERVIDOR (rpc merchan_change_own_password), que actualiza el
+ * hash de app_users y el de Supabase Auth en la misma transacción.
+ */
+function PasswordModal({ onClose }: { onClose: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [repeat, setRepeat] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    if (next.length < 8) return setError("La contraseña nueva debe tener al menos 8 caracteres.");
+    if (next !== repeat) return setError("Las contraseñas nuevas no coinciden.");
+    if (!supabase) return setError("No disponible en modo local.");
+    setBusy(true);
+    const { data, error: rpcError } = await supabase.rpc("merchan_change_own_password", { p_current: current, p_new: next });
+    setBusy(false);
+    if (rpcError) return setError(`No se pudo cambiar: ${rpcError.message}`);
+    const result = (data ?? {}) as { ok?: boolean; error?: string };
+    if (result.error || !result.ok) return setError(result.error || "No se pudo cambiar la contraseña.");
+    setDone(true);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
+      <form onSubmit={submit} onClick={e => e.stopPropagation()} className="w-full max-w-sm space-y-3 rounded-3xl border bg-white p-5 shadow-xl">
+        <h2 className="text-lg font-bold">Cambiar mi contraseña</h2>
+        {done ? (
+          <>
+            <p className="rounded-2xl bg-emerald-50 p-3 text-sm text-emerald-800">Contraseña cambiada. Úsala en el próximo inicio de sesión (también en MerchanLOGS).</p>
+            <button type="button" onClick={onClose} className="w-full rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Cerrar</button>
+          </>
+        ) : (
+          <>
+            {error && <p className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+            <label className="block text-sm"><span className="font-medium">Contraseña actual</span>
+              <input type="password" autoComplete="current-password" value={current} onChange={e => setCurrent(e.target.value)} className="mt-1 w-full rounded-2xl border px-3 py-2" /></label>
+            <label className="block text-sm"><span className="font-medium">Contraseña nueva (mín. 8)</span>
+              <input type="password" autoComplete="new-password" value={next} onChange={e => setNext(e.target.value)} className="mt-1 w-full rounded-2xl border px-3 py-2" /></label>
+            <label className="block text-sm"><span className="font-medium">Repite la contraseña nueva</span>
+              <input type="password" autoComplete="new-password" value={repeat} onChange={e => setRepeat(e.target.value)} className="mt-1 w-full rounded-2xl border px-3 py-2" /></label>
+            <div className="flex gap-2">
+              <button type="button" onClick={onClose} className="w-full rounded-2xl border px-4 py-2 text-sm font-semibold">Cancelar</button>
+              <button disabled={busy} className="w-full rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy ? "Cambiando..." : "Cambiar"}</button>
+            </div>
+          </>
+        )}
+      </form>
     </div>
   );
 }
