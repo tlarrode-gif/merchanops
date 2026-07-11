@@ -23,7 +23,8 @@ import {
   syncEconomicEvents
 } from "@/lib/economic-events";
 import { IsdinBillingSettings, isdinBillingLines } from "@/lib/isdin-billing";
-import { auditBigCampaigns, auditIsdinPreventiveCalls, auditServices, buildBigCampaignPaymentLines, buildServicePaymentLines, type PaymentIssue } from "@/lib/payment-ledger";
+import { auditBigCampaigns, auditIsdinPreventiveCalls, auditServices, type PaymentIssue } from "@/lib/payment-ledger";
+import { buildEnginePaymentLines } from "@/lib/payments/lines";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { csvSafeCell } from "@/lib/sanitize";
 
@@ -96,7 +97,11 @@ export default function HistorialEconomicoPage() {
       const settings = (settingsR.data as IsdinBillingSettings) || { id: "global", standard_rate: 0, custom_rate: 0 };
       const adjustments = (adjustmentsR.data || []) as Row[];
 
-      const paymentLines = [...buildServicePaymentLines(services, points), ...buildBigCampaignPaymentLines(bigCampaigns, bigPoints)];
+      // C3: las líneas de pago salen del MOTOR ÚNICO con identidad estable
+      // (fingerprint = clave de obligación, sin fecha/importe): una corrección
+      // actualiza el mismo evento económico en vez de crear uno paralelo.
+      const engineResult = buildEnginePaymentLines(services, points, bigCampaigns, bigPoints);
+      const paymentLines = engineResult.lines;
       const billingLines = (vinyls as any[]).flatMap(vinyl => isdinBillingLines(vinyl, settings));
       const nuevos = [
         ...pagoEventsFromPaymentLines(paymentLines),
@@ -115,7 +120,7 @@ export default function HistorialEconomicoPage() {
         setMessage(partes.length ? partes.join(" · ") + "." : "Sin cambios: el historial ya estaba al día.");
       }
 
-      setIssues([...auditServices(services, points), ...auditBigCampaigns(bigCampaigns, bigPoints), ...auditIsdinPreventiveCalls(vinyls)].sort((a, b) => issueWeight(b) - issueWeight(a)));
+      setIssues([...engineResult.issues, ...auditServices(services, points), ...auditBigCampaigns(bigCampaigns, bigPoints), ...auditIsdinPreventiveCalls(vinyls)].sort((a, b) => issueWeight(b) - issueWeight(a)));
       await load(current);
     } finally {
       setSyncing(false);
