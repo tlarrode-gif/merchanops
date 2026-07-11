@@ -184,7 +184,25 @@ población inicial es exactamente lo que creará `apply`), 3 "Resuelto -
 Pendiente colocador" activos vigilados, 0 con revisit_count>1 declarado —
 coherente con el bug corregido (nadie incrementaba el contador).
 
-## 3g. Validación post-revisión (2026-07-10): guardado en bloque — HALLAZGO ABIERTO
+## 3g. Validación post-revisión (2026-07-10): guardado en bloque — RESUELTO (2026-07-11)
+
+**Resolución C2 (2026-07-11):** `saveLogisticsState` está RETIRADO — la función
+lanza error siempre (test) y ninguna ruta de producción la invoca. Las 7 rutas
+del inventario quedaron así:
+- `app/page.tsx requestMaterial` → rpc `create_logistics_request_service` (v8_7,
+  transaccional, idempotente, verificado en vivo).
+- `app/page.tsx updateService` (cambio de instalador) → rpc `sync_logistics_installer`.
+- `app/grandes-campanas/[id]` (material de campaña) → rpc `create_logistics_request_campaign`.
+- `isdin/page.tsx` y `isdin/llamadas` → rpc `sync_isdin_vinyl_requests` (lote,
+  idempotente por versión) + rpc `create_logistics_incident_ops`.
+- `logistics-client.tsx` y `solicitudes-logistica-client.tsx` → el módulo
+  Logística de OPS es de **SOLO CONSULTA** (decisión de producto del usuario):
+  los botones de acción abren la pantalla equivalente de MerchanLOGS
+  (`NEXT_PUBLIC_MERCHANLOGS_URL`), que opera con los comandos atómicos de v8_2.
+Con esto desaparece el escenario de pisada OPS↔LOGS: solo hay UN escritor por
+operación y cada comando es una transacción.
+
+Inventario original del hallazgo (histórico):
 
 El revisor exigió comprobar qué rutas de producción siguen invocando
 `saveLogisticsState` (reescritura del agregado completo en múltiples tablas).
@@ -223,7 +241,7 @@ Plan de retirada (siguiente iteración, con pruebas de equivalencia):
 | # | Hallazgo | Estado |
 |---|---|---|
 | C1 | Autenticación eludible (rol en localStorage, hashes al navegador, LOGS arranca admin) | 🟢 RESUELTO (código; queda 1 paso operativo): (1) login REAL con Supabase Auth en OPS y LOGS manteniendo usuarios/contraseñas de app_users — rpc `merchan_auth_bootstrap` verifica PBKDF2 EN EL SERVIDOR (implementación SQL validada contra un vector WebCrypto), crea/sincroniza el usuario en auth.users (confirmado, con identidad email, bcrypt verificado en vivo) y aplica rate limiting DE SERVIDOR (5 fallos/15 min, persistente); (2) el navegador ya NO descarga hashes en ninguna de las dos apps (perfil vía `merchan_auth_whoami` sin password; selects con columnas explícitas); (3) LOGS exige login (pantalla propia; sin selector de usuario en modo supabase) y OPS invalida la sesión local si no hay JWT detrás; (4) migración v9_1 APLICADA y verificada en vivo (5 escenarios, transacción revertida). (5) v9_2 APLICADA (2026-07-11, tras confirmar el usuario el login en producción): RLS activa en 47/47 tablas con política solo-autenticados + revocación total de privilegios de anon sobre tablas/vistas/secuencias (incl. default privileges); verificado en vivo que anon no lee nada y authenticated opera. La anon key sin sesión ya NO puede leer ni escribir. Refinado por rol/provincia: fase futura |
-| C2 | Guardado logístico global activo (7 rutas) | 🔴 ABIERTO (inventario y plan de retirada en §3g; requiere RPCs adicionales + pruebas de equivalencia) |
+| C2 | Guardado logístico global activo (7 rutas) | ✅ RESUELTO (2026-07-11): `saveLogisticsState` retirado (lanza error, test); las peticiones de material de Servicios/Campañas/ISDIN usan los comandos transaccionales de v8_7 (verificados en vivo con rollback: idempotencia, agrupación por campaña, cambio de instalador con avisos, vinilos por versión, incidencias con pendiente de llegada); el módulo Logística de OPS pasa a SOLO CONSULTA con enlaces a MerchanLOGS (decisión del usuario). Detalle en §3g |
 | C3 | Historial económico sigue en payment-ledger legado / dos registros paralelos | 🟢 RESUELTO (núcleo): el Historial económico calcula sus líneas con el MOTOR ÚNICO (`lib/payments/lines.ts`): fingerprint = clave estable de obligación (sin fecha/importe → una corrección actualiza el mismo evento en vez de crear uno paralelo), fechas ausentes bloquean con issue visible, importes inválidos bloquean. Builders legados congelados @deprecated sin consumidores. Nota: `economic_events` sigue existiendo como tabla del Historial; ahora se alimenta del mismo motor que el ledger, eliminando la divergencia de cálculo. La unificación física de ambas tablas queda como mejora futura |
 | A4 | Bajar revisit_count no generaba divergencia | ✅ RESUELTO: `sync_payment_obligations` acepta ámbito y devuelve `missing_in_recalc` (v8_4, verificado en vivo); la conciliación también detecta sobrantes (`obsolete_obligation`, test) |
 | A5 | Importación transaccional sin conectar a UI | 🔴 ABIERTO (pipeline listo; falta sustituir el flujo de la pantalla ISDIN que además da de alta vinilos) |
@@ -238,9 +256,10 @@ Verificación tras los fixes: OPS 44/44, LOGS 40/40, lint y build en verde en am
 
 ## 4. Riesgos abiertos
 
-- Las escrituras siguen saliendo del navegador con anon key hasta activar RLS (requiere migrar a Supabase Auth; script preparado).
-- El ledger persistente aún usa fingerprints inestables (fase 2 lo sustituye).
-- El guardado en bloque de logística sigue vigente (fase 4).
-- El fallback local silencioso sigue activo (fase 6).
+- ~~Escrituras con anon key sin identidad~~ → RESUELTO: Supabase Auth + RLS activa (v9_1/v9_2).
+- ~~Guardado en bloque de logística~~ → RESUELTO: retirado (C2, v8_7 + OPS Logística solo consulta).
+- ~~Fallback local silencioso~~ → RESUELTO: modo degradado + retirada del guardado en bloque.
+- Refinado de RLS por rol/provincia pendiente (hoy: cualquier usuario autenticado accede a todas las tablas).
+- A5 (importación ISDIN por pipeline transaccional) y A8 (cierre/envío LOGS por RPC) siguen abiertos.
 
 La tarifa por visita fallida **sigue siendo 8,56 €** en todo el sistema.

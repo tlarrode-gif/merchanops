@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileDown, Info, MapPin, MessageCircle, Package, Pencil, Plus, Upload, Users } from "lucide-react";
-import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
-import { createCampaignLogisticsRequest } from "@/lib/logistics-sync";
 import { parseImportFile } from "@/lib/csv-parser";
 import { supabase } from "@/lib/supabase";
 import { CampanaBadgeEstado, IncidenciaBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
@@ -264,17 +262,18 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     setSaving(true);
     setError("");
     try {
-      const loaded = await loadLogisticsState();
-      if (loaded.error) { setError(`Logística no disponible: ${loaded.error}`); return; }
-      const request = createCampaignLogisticsRequest(
-        loaded.state,
-        campana,
-        matPara,
-        { name: matForm.name.trim(), quantity: Math.max(1, Number(matForm.cantidad) || 1), notes: matForm.notas.trim() || null },
-        session?.display_name || "Operaciones"
-      );
-      await saveLogisticsState(loaded.state, loaded.remote);
-      flash(`Solicitud ${request.code} enviada a Logística (${matPara.length} punto${matPara.length > 1 ? "s" : ""})`);
+      if (!supabase) { setError("Logística no disponible en modo local"); return; }
+      const dateOk = (x?: string | null) => (x && /^\d{4}-\d{2}-\d{2}/.test(x) ? x.slice(0, 10) : null);
+      // C2: comando transaccional en la base (sin guardado en bloque).
+      const { data, error: rpcError } = await supabase.rpc("create_logistics_request_campaign", {
+        p_campana: { id: campana.id, nombre: campana.nombre, cliente_marca: campana.cliente_marca || null },
+        p_puntos: matPara.map(p => ({ id: p.id, nombre_comercial: p.nombre_comercial, direccion: p.direccion || null, provincia: p.provincia || null, instalador_id: p.instalador_id || null, instalador_nombre: p.instalador_nombre || null, fecha_visita: dateOk(p.fecha_visita) })),
+        p_material: { name: matForm.name.trim(), quantity: Math.max(1, Number(matForm.cantidad) || 1), notes: matForm.notas.trim() || null },
+        p_actor: session?.display_name || "Operaciones"
+      });
+      if (rpcError) throw new Error(rpcError.message);
+      const request = data as { code?: string } | null;
+      flash(`Solicitud ${request?.code || ""} enviada a Logística (${matPara.length} punto${matPara.length > 1 ? "s" : ""})`);
       setMatPara(null);
       await refresh(true);
     } catch (err) {

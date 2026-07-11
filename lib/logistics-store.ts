@@ -359,38 +359,18 @@ export async function loadLogisticsState(): Promise<{ state: LogisticsState; rem
   };
 }
 
-export async function saveLogisticsState(state: LogisticsState, remote: boolean) {
-  const normalized = normalizeLogisticsState(state);
-  if (!remote || !isSupabaseConfigured || !supabase) {
-    // MODO DEGRADADO (auditoría fase 6): si Supabase está configurado pero la
-    // carga vino degradada (remote=false), la app es de SOLO LECTURA. No se
-    // acepta la operación en localStorage ni se anuncia como guardada.
-    if (isSupabaseConfigured) {
-      throw new Error(
-        "Supabase no está disponible: la aplicación está en modo de solo lectura y el cambio NO se ha guardado. Reintenta cuando vuelva la conexión."
-      );
-    }
-    saveLogistics(normalized);
-    return;
-  }
-
-  await upsertMany("logistics_materials", normalized.materials.map(materialForDb));
-  await upsertMany("logistics_stock", normalized.stock.map(stockForDb));
-  await insertNewMovements(normalized.movements.map(row => stripUndefined(row as unknown as Db)));
-  await upsertMany("logistics_entries", normalized.entries.map(entryForDb));
-  await replaceChildren("logistics_entry_lines", "entrada_id", normalized.entries.map(x => x.id), normalized.entries.flatMap(entry => entry.lineas.map(line => entryLineForDb(line, entry.id))));
-  await upsertMany("logistics_pickings", normalized.pickings.map(pickingForDb));
-  await replaceChildren("logistics_picking_lines", "picking_id", normalized.pickings.map(x => x.id), normalized.pickings.flatMap(picking => picking.lineas.map(line => pickingLineForDb(line, picking.id))));
-  await upsertMany("logistics_shipments", normalized.shipments.map(row => stripUndefined(row as unknown as Db)));
-  await upsertMany("logistics_incidents", normalized.incidents.map(row => stripUndefined(row as unknown as Db)));
-  await upsertMany("logistics_pending_arrivals", normalized.pendings.map(row => stripUndefined(row as unknown as Db)));
-  await upsertMany("logistics_material_requirements", normalized.requirements.map(row => stripUndefined(row as unknown as Db)));
-  await upsertMany("logistics_requests", normalized.requests.map(requestForDb));
-  await replaceChildren("logistics_request_lines", "request_id", normalized.requests.map(x => x.id), normalized.requests.flatMap(request => request.lines.map(line => requestLineForDb(line, request.id))));
-  await upsertMany("integration_events", normalized.events.map(eventForDb));
-  await upsertMany("logistics_audit_log", normalized.audit.map(auditForDb));
-  await upsertMany("logistics_notifications", normalized.notifications.map(notificationForDb));
-  await upsertMany("logistics_vins", normalized.vins.map(vinForDb));
-  await syncLogisticsBackToSources(normalized);
-  await upsertMany("sync_logs", normalized.syncLogs.map(row => stripUndefined(row as unknown as Db)));
+/**
+ * RETIRADO (C2, 2026-07-11). El guardado en bloque reescribía 16 tablas sin
+ * transacción y pisaba escrituras concurrentes de MerchanLOGS. Ya no existe:
+ *  - Las peticiones de material (Servicios/Campañas/ISDIN) usan los comandos
+ *    RPC transaccionales de v8_7 (create_logistics_request_*, sync_*).
+ *  - El módulo Logística de OPS es de SOLO CONSULTA; la operación vive en
+ *    MerchanLOGS con comandos atómicos (v8_2).
+ * Esta función se conserva únicamente para que cualquier regresión falle en
+ * alto y claro en lugar de volver a escribir en bloque.
+ */
+export async function saveLogisticsState(_state: LogisticsState, _remote: boolean): Promise<never> {
+  throw new Error(
+    "saveLogisticsState está retirado (C2): el guardado en bloque ya no existe y el cambio NO se ha guardado. Usa los comandos RPC de v8_7 o MerchanLOGS."
+  );
 }

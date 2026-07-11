@@ -5,7 +5,7 @@ import { ArrowLeft, CheckCircle2, FileDown, RefreshCw, Search, Send, XCircle } f
 import { EstadoLogistico } from "@/components/logistics/estado-logistico";
 import { LogisticsState, RequestStatus, available, createPickingFromRequest, logisticsKpis, logisticsStatusLabel, materialName, rejectLogisticsRequest, seedLogistics } from "@/lib/logistics";
 import { cancelLogisticsRequest, updateLogisticsRequest } from "@/lib/logistics-actions";
-import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
+import { loadLogisticsState } from "@/lib/logistics-store";
 import { acceptRequestAndReserve, materialDisplay, sourceHref } from "@/lib/logistics-sync";
 import { AppSession, canAccessModule, getCurrentAppSession, merchanopsSessionChangeEvent } from "@/lib/access-control";
 
@@ -59,21 +59,14 @@ export function SolicitudesLogisticaClient({ detailId }: { detailId?: string }) 
     setLoading(false);
   }
 
-  async function commit(mutator: (draft: LogisticsState) => void, message: string) {
-    try {
-      setSaving(true);
-      const draft = structuredClone(state) as LogisticsState;
-      mutator(draft);
-      await saveLogisticsState(draft, remote);
-      setState(draft);
-      setNotice(message);
-      setError("");
-      setTimeout(() => setNotice(""), 1500);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo completar la operación");
-    } finally {
-      setSaving(false);
-    }
+  // C2: pantalla de SOLO CONSULTA. El guardado en bloque está retirado; las
+  // acciones sobre peticiones (aceptar, reservar, picking, rechazar) se hacen
+  // en MerchanLOGS. Los botones abren la pantalla equivalente de LOGS.
+  const logsPeticionesUrl = `${process.env.NEXT_PUBLIC_MERCHANLOGS_URL || "https://merchanlogs.vercel.app"}/peticiones`;
+  async function commit(_mutator: (draft: LogisticsState) => void, _message: string) {
+    window.open(logsPeticionesUrl, "_blank", "noopener");
+    setNotice("Las acciones sobre peticiones se realizan en MerchanLOGS: se ha abierto Peticiones.");
+    setTimeout(() => setNotice(""), 3500);
   }
 
   const rows = useMemo(() => state.requests.filter(request => {
