@@ -31,7 +31,7 @@ concurrencia, comunicación entre apps y preparación de backend/RLS.
 | Fase | Contenido | Archivos/migraciones clave | Estado |
 |---|---|---|---|
 | **1** | **Motor único de dominio de pagos + pruebas** (este commit) | `lib/payments/{money,constants,types,engine}.ts`, `tests/payments-engine.test.ts`, vitest en OPS; consumidores usan la constante/motor único | ✅ |
-| 2 | Ledger idempotente persistente: tabla `payment_obligations` (clave estable, `currency`, céntimos, estados `calculado→revisado→cerrado/anulado` con CHECK de transición y trigger anti-reapertura), ajustes/anulaciones enlazados | `supabase/v8_0_payment_obligations.sql`, `lib/payments/ledger.ts` | pendiente |
+| 2 | Ledger idempotente persistente: tabla `payment_obligations` (clave estable, `currency`, céntimos, estados `calculado→revisado→cerrado/anulado` con CHECK de transición y trigger anti-reapertura), ajustes/anulaciones enlazados | `supabase/v8_0_payment_obligations.sql`, `lib/payments/ledger.ts` | ✅ |
 | 3 | Backend transaccional (Route Handlers/Server Actions + funciones SQL `SECURITY DEFINER`): importar CSV (staging+confirm en transacción, hash de archivo, huella por fila), recalcular obligaciones, revisar/cerrar periodo | `app/api/payments/*`, `supabase/v8_1_import_runs.sql` | pendiente |
 | 4 | Comandos logísticos atómicos y concurrencia: funciones SQL (`reserve_stock`, `release_reservation`, `close_picking`, `create_shipment`…) con `SELECT … FOR UPDATE`, columna `version`, movimiento+saldo en la misma transacción; retirar el guardado en bloque | `supabase/v8_2_logistics_commands.sql`, cambios en `logistics-store` y adapter LOGS | pendiente |
 | 5 | Inbox/outbox durable entre apps: `outbox_events`/`inbox_processed` con idempotency key, intentos, backoff, dead-letter; consumo con claim seguro | `supabase/v8_3_outbox.sql` | pendiente |
@@ -57,6 +57,35 @@ concurrencia, comunicación entre apps y preparación de backend/RLS.
 - Fecha de evento ausente → la obligación se genera **bloqueada**
   (`missing_event_date`), nunca se sustituye por `today()`.
 - Servicios sin `validated_at` → no pagables (motivo explícito).
+
+## 3b. Fase 2 — resultado (aplicada el 2026-07-10)
+
+Migración `v8_0_payment_obligations` aplicada al proyecto compartido. Crea:
+
+- `payment_obligations`: clave única estable, importes `bigint` en céntimos,
+  `currency='EUR'` forzado por CHECK, `event_date` opcional (NULL bloquea:
+  jamás fecha inventada), `period` generado, estados con transiciones
+  vigiladas por trigger (`cerrado` inmutable salvo anulación con motivo;
+  `anulado` intocable; DELETE prohibido; `version` autoincremental para
+  control optimista), ajustes/anulaciones con `kind` propio, importes
+  negativos SOLO en ajustes, y enlace obligatorio a la obligación original.
+- `payment_obligations_audit`: inmutable (trigger bloquea UPDATE/DELETE),
+  registra actor, acción, valor anterior/nuevo, motivo, correlation/event id.
+- RPCs transaccionales: `sync_payment_obligations` (upsert idempotente que
+  NUNCA toca líneas revisadas/cerradas: devuelve divergencias de
+  conciliación), `change_payment_obligation_status` (transiciones + versión
+  esperada → error claro de concurrencia) y `create_payment_adjustment`.
+
+**Verificado EN VIVO contra la base real** (transacción revertida, sin
+rastro): 2ª pasada idéntica = 0 inserciones; subir 2→3 visitas = 1 inserción
+exacta; reabrir una cerrada → bloqueado; recalcular con otro importe sobre
+cerrada → intacta + divergencia; DELETE → bloqueado; versión obsoleta →
+conflicto de concurrencia; ajuste negativo enlazado → ok; anular sin motivo
+→ bloqueado; auditoría con 6 entradas e inmutable.
+
+Cliente TS: `lib/payments/ledger.ts` (solo RPCs, jamás escritura directa ni
+estado completo; errores clasificados validation/concurrency/transient/
+permanent; sin conexión → error transitorio, nunca "guardado" simulado).
 
 ## 4. Riesgos abiertos (hasta completar fases 2-7)
 
