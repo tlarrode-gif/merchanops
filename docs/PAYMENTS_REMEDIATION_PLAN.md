@@ -35,8 +35,8 @@ concurrencia, comunicación entre apps y preparación de backend/RLS.
 | 3 | Backend transaccional: importar CSV (previsualización + confirmación atómica en RPC, hash de archivo, huella por fila), recalcular obligaciones (`syncObligations`), revisar/cerrar (`changeObligationStatus`) | `supabase/v8_1_import_runs.sql`, `lib/payments/import.ts` | ✅ (UI de importación pendiente de conectar) |
 | 4 | Comandos logísticos atómicos y concurrencia: funciones SQL con `FOR UPDATE`, columna `version` en `logistics_stock`, movimiento+saldo en la misma transacción; reservas de LOGS cableadas al RPC | `supabase/v8_2_logistics_commands.sql`, `merchanlogs/services/atomic-commands.ts` | ✅ (cierre/envío de picking y retirada del guardado en bloque: pendientes con pruebas de equivalencia) |
 | 5 | Inbox/outbox durable entre apps: `outbox_events`/`inbox_processed` con idempotency key, intentos, backoff, dead-letter; consumo con claim seguro (SKIP LOCKED) | `supabase/v8_3_outbox.sql`, `lib/outbox.ts` | ✅ (handlers de consumo por conectar) |
-| 6 | Autenticación real (Supabase Auth) + migración RLS documentada SIN activar; modo degradado solo-lectura al fallar Supabase | `supabase/v9_0_rls_prepared.sql` (no aplicada) | pendiente |
-| 7 | Conciliación histórica: herramienta dry-run que detecta revisitas omitidas, "Resuelto" con importe original cobrado, finalizados con 1 sola visita; crea SOLO las obligaciones faltantes con trazabilidad | `scripts/reconcile-payments.ts` | pendiente |
+| 6 | Modo degradado solo-lectura + sin mezcla de semilla con datos reales + migración RLS documentada SIN activar (credenciales por defecto ya eliminadas y contraseñas hasheadas en la fase de seguridad previa) | `supabase/v9_0_rls_prepared.sql` (NO aplicada), `lib/logistics-store.ts` | ✅ (migración a Supabase Auth: pendiente) |
+| 7 | Conciliación histórica dry-run: detecta revisitas omitidas, "Resuelto" con original cobrado y divergencias de importe; `apply` reutiliza el RPC idempotente (solo crea lo faltante, jamás toca cerradas) | `lib/payments/reconcile.ts` | ✅ |
 
 ## 3. Reglas de negocio codificadas en el motor (fase 1)
 
@@ -163,9 +163,30 @@ completa antes de aplicar efectos; sin conexión → error, no simulación).
 Pendiente: conectar los handlers concretos de cada app (espejos y
 sincronizaciones actuales) al consumidor.
 
-## 4. Riesgos abiertos (hasta completar fases 2-7)
+## 3f. Fases 6 y 7 — resultado (2026-07-10)
 
-- Las escrituras siguen saliendo del navegador con anon key y sin RLS.
+**Fase 6.** `saveLogisticsState` lanza error claro en modo degradado (Supabase
+configurado pero caído): la app queda de SOLO LECTURA y jamás anuncia como
+guardado lo que fue a localStorage (test escenario 15). La carga remota ya no
+mezcla datos semilla con tablas reales vacías. `supabase/v9_0_rls_prepared.sql`
+documenta la RLS por tabla, el orden de activación, el rollback y la
+exposición actual — NO se aplica hasta migrar a Supabase Auth (las
+credenciales por defecto y las contraseñas en claro se eliminaron en la fase
+de seguridad previa: hashing scrypt + rate limiting).
+
+**Fase 7.** `lib/payments/reconcile.ts`: informe dry-run que compara el
+ledger con el motor (revisitas omitidas, "Resuelto" con original cobrado,
+divergencias sobre cerradas → ajuste/anulación, nunca edición) y `apply` vía
+`sync_payment_obligations` (solo crea lo faltante). **Dry-run EN VIVO sobre
+los 471 vinilos reales**: 43 obligaciones de visita fallida esperadas
+(368,08 € a 8,56 €), 447 instalaciones esperadas, ledger aún vacío (la
+población inicial es exactamente lo que creará `apply`), 3 "Resuelto -
+Pendiente colocador" activos vigilados, 0 con revisit_count>1 declarado —
+coherente con el bug corregido (nadie incrementaba el contador).
+
+## 4. Riesgos abiertos
+
+- Las escrituras siguen saliendo del navegador con anon key hasta activar RLS (requiere migrar a Supabase Auth; script preparado).
 - El ledger persistente aún usa fingerprints inestables (fase 2 lo sustituye).
 - El guardado en bloque de logística sigue vigente (fase 4).
 - El fallback local silencioso sigue activo (fase 6).

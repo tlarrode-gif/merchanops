@@ -1,0 +1,48 @@
+-- v9_0: RLS PREPARADA — ⚠️ NO APLICAR AUTOMÁTICAMENTE ⚠️ (fase 6).
+--
+-- Este script queda documentado y versionado pero NO se ejecuta todavía:
+-- activarlo hoy bloquearía ambas apps, que aún operan con la anon key.
+-- ORDEN DE ACTIVACIÓN (cuando exista Supabase Auth en ambas apps):
+--   1. Migrar los usuarios de app_users a Supabase Auth (email+password).
+--   2. Sustituir la sesión localStorage por supabase.auth en OPS y LOGS.
+--   3. Ejecutar este script en una ventana de mantenimiento.
+--   4. Verificar cada módulo con un usuario real antes de dar acceso general.
+-- ROLLBACK: alter table <t> disable row level security; (por tabla).
+--
+-- EXPOSICIÓN ACTUAL DOCUMENTADA (hasta activar esta migración):
+-- todas las tablas siguientes aceptan lectura/escritura con la anon key
+-- desde cualquier cliente que conozca la URL del proyecto. Mitigaciones ya
+-- en vigor: triggers de inmutabilidad (ledger, auditoría, importaciones),
+-- CHECK constraints, comandos atómicos y guardas de transición. La
+-- protección por identidad llega con este script.
+
+-- === Plantilla de política (aplicar por tabla al activar) ===
+-- alter table payment_obligations enable row level security;
+-- create policy "authenticated read" on payment_obligations
+--   for select using (auth.role() = 'authenticated');
+-- create policy "authenticated write" on payment_obligations
+--   for insert with check (auth.role() = 'authenticated');
+-- create policy "authenticated update" on payment_obligations
+--   for update using (auth.role() = 'authenticated');
+-- (sin política de DELETE: el borrado queda prohibido también por RLS)
+
+-- Tablas financieras (solo escritura vía RPC en el futuro: revocar además
+-- INSERT/UPDATE directos al rol authenticated y conceder EXECUTE a los RPC):
+--   payment_obligations, payment_obligations_audit, import_runs,
+--   import_run_rows, outbox_events, inbox_processed
+-- Tablas de operaciones:
+--   services, points, workers, clients, app_users (solo lectura para no-admin)
+-- Grandes campañas:
+--   big_campaigns, big_campaign_points, campanas, puntos_venta_campana,
+--   campana_gestores, campana_columnas, incidencias_campana
+-- ISDIN:
+--   isdin_vinyls, isdin_calls, isdin_billing_settings, isdin_billing_adjustments
+-- Logística (compartida con MerchanLOGS):
+--   logistics_materials, logistics_stock, logistics_stock_movements,
+--   logistics_vins, logistics_entries, logistics_entry_lines,
+--   logistics_requests, logistics_request_lines, logistics_pickings,
+--   logistics_picking_lines, logistics_shipments, logistics_incidents,
+--   logistics_material_requirements, logistics_pending_arrivals,
+--   logistics_notifications, logistics_audit_log, integration_events, sync_logs
+
+select 'v9_0 es una migración PREPARADA: no ejecuta cambios.' as aviso;

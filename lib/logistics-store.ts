@@ -307,11 +307,10 @@ export async function loadLogisticsState(): Promise<{ state: LogisticsState; rem
   const failed = [materials, entries, entryLines, stock, movements, pickings, pickingLines, shipments, incidents, pendings, requirements, requests, requestLines, events, audit, notifications, vins, syncLogs].find(result => result.error);
   if (failed?.error) return { state: loadLogistics(), remote: false, error: failed.error.message };
 
-  const seed = seedLogistics();
-  const dbMaterials = (materials.data || []) as Material[];
-  const mergedMaterials = dbMaterials.length ? dbMaterials : seed.materials;
-  const dbStock = (stock.data || []) as Stock[];
-  const mergedStock = dbStock.length ? dbStock : seed.stock;
+  // Con Supabase configurado JAMÁS se mezclan datos semilla con datos reales:
+  // una tabla vacía es una tabla vacía (auditoría fase 6: sin seed sobre reales).
+  const mergedMaterials = (materials.data || []) as Material[];
+  const mergedStock = (stock.data || []) as Stock[];
 
   const entryRows = ((entries.data || []) as Entry[]).map(entry => ({
     ...entry,
@@ -363,6 +362,14 @@ export async function loadLogisticsState(): Promise<{ state: LogisticsState; rem
 export async function saveLogisticsState(state: LogisticsState, remote: boolean) {
   const normalized = normalizeLogisticsState(state);
   if (!remote || !isSupabaseConfigured || !supabase) {
+    // MODO DEGRADADO (auditoría fase 6): si Supabase está configurado pero la
+    // carga vino degradada (remote=false), la app es de SOLO LECTURA. No se
+    // acepta la operación en localStorage ni se anuncia como guardada.
+    if (isSupabaseConfigured) {
+      throw new Error(
+        "Supabase no está disponible: la aplicación está en modo de solo lectura y el cambio NO se ha guardado. Reintenta cuando vuelva la conexión."
+      );
+    }
     saveLogistics(normalized);
     return;
   }
