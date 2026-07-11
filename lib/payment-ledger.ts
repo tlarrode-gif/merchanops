@@ -108,6 +108,7 @@ export function fingerprint(parts: Array<string | number | null | undefined>) {
   return parts.map(part => String(part ?? "")).join("|").toLowerCase();
 }
 
+/** @deprecated C3: usar lib/payments/lines (motor único, identidad estable). Congelado; no añadir consumidores. */
 export function buildServicePaymentLines(services: AnyRow[], points: AnyRow[]) {
   return services.flatMap(service => {
     if (service.status !== "Validado" && service.status !== "Pagado") return [];
@@ -138,6 +139,7 @@ export function buildServicePaymentLines(services: AnyRow[], points: AnyRow[]) {
   });
 }
 
+/** @deprecated C3: usar lib/payments/lines (motor único, identidad estable). Congelado; no añadir consumidores. */
 export function buildBigCampaignPaymentLines(campaigns: AnyRow[], points: AnyRow[]) {
   const byCampaign = new Map(campaigns.map(campaign => [campaign.id, campaign]));
   return points.flatMap(point => {
