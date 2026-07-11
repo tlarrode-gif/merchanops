@@ -33,7 +33,7 @@ concurrencia, comunicación entre apps y preparación de backend/RLS.
 | **1** | **Motor único de dominio de pagos + pruebas** (este commit) | `lib/payments/{money,constants,types,engine}.ts`, `tests/payments-engine.test.ts`, vitest en OPS; consumidores usan la constante/motor único | ✅ |
 | 2 | Ledger idempotente persistente: tabla `payment_obligations` (clave estable, `currency`, céntimos, estados `calculado→revisado→cerrado/anulado` con CHECK de transición y trigger anti-reapertura), ajustes/anulaciones enlazados | `supabase/v8_0_payment_obligations.sql`, `lib/payments/ledger.ts` | ✅ |
 | 3 | Backend transaccional: importar CSV (previsualización + confirmación atómica en RPC, hash de archivo, huella por fila), recalcular obligaciones (`syncObligations`), revisar/cerrar (`changeObligationStatus`) | `supabase/v8_1_import_runs.sql`, `lib/payments/import.ts` | ✅ (UI de importación pendiente de conectar) |
-| 4 | Comandos logísticos atómicos y concurrencia: funciones SQL (`reserve_stock`, `release_reservation`, `close_picking`, `create_shipment`…) con `SELECT … FOR UPDATE`, columna `version`, movimiento+saldo en la misma transacción; retirar el guardado en bloque | `supabase/v8_2_logistics_commands.sql`, cambios en `logistics-store` y adapter LOGS | pendiente |
+| 4 | Comandos logísticos atómicos y concurrencia: funciones SQL con `FOR UPDATE`, columna `version` en `logistics_stock`, movimiento+saldo en la misma transacción; reservas de LOGS cableadas al RPC | `supabase/v8_2_logistics_commands.sql`, `merchanlogs/services/atomic-commands.ts` | ✅ (cierre/envío de picking y retirada del guardado en bloque: pendientes con pruebas de equivalencia) |
 | 5 | Inbox/outbox durable entre apps: `outbox_events`/`inbox_processed` con idempotency key, intentos, backoff, dead-letter; consumo con claim seguro | `supabase/v8_3_outbox.sql` | pendiente |
 | 6 | Autenticación real (Supabase Auth) + migración RLS documentada SIN activar; modo degradado solo-lectura al fallar Supabase | `supabase/v9_0_rls_prepared.sql` (no aplicada) | pendiente |
 | 7 | Conciliación histórica: herramienta dry-run que detecta revisitas omitidas, "Resuelto" con importe original cobrado, finalizados con 1 sola visita; crea SOLO las obligaciones faltantes con trazabilidad | `scripts/reconcile-payments.ts` | pendiente |
@@ -112,6 +112,31 @@ incluido en pagos conforme a las reglas (fechas ausentes → bloqueado).
 
 Pendiente de fase 3: conectar la pantalla de importación ISDIN al nuevo
 pipeline (hoy sigue el flujo legado en paralelo).
+
+## 3d. Fase 4 — resultado (aplicada el 2026-07-10)
+
+Migración `v8_2_logistics_commands` aplicada: columna `version` en
+`logistics_stock` (trigger autoincremental) y seis comandos atómicos con
+`SELECT … FOR UPDATE`: `logistics_reserve_stock` (valida cantidad finita
+>0, disponibilidad y versión esperada; movimiento+saldo en la misma
+transacción), `logistics_release_reservation`, `logistics_close_picking`
+(prohíbe cerrar con líneas pendientes; descuenta lo preparado y libera
+reservas), `logistics_ship_picking` (solo pickings preparados, un envío por
+picking), `logistics_confirm_delivery` (update condicional: la segunda
+confirmación falla) y `logistics_reject_request` (motivo obligatorio,
+libera reservas y cierra pickings activos).
+
+**Verificado en vivo** (transacción revertida): sobre-reserva bloqueada
+(escenario 12: la serialización FOR UPDATE hace imposible el stock
+negativo), cantidad 0 rechazada, conflicto de versión detectado, cierre con
+pendientes bloqueado, envío prematuro bloqueado, cierre descuenta 10→6 y
+libera reserva, doble entrega bloqueada, rechazo libera reserva y marca
+rechazada (escenario 13).
+
+Cableado en LOGS: `reserveStock`/`releaseReservation` usan los RPC en modo
+Supabase (`merchanlogs/services/atomic-commands.ts`). Pendiente de fase 4:
+migrar cierre/envío de picking de LOGS y el guardado en bloque de OPS a los
+comandos (requiere pruebas de equivalencia del flujo completo).
 
 ## 4. Riesgos abiertos (hasta completar fases 2-7)
 
