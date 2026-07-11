@@ -32,7 +32,7 @@ concurrencia, comunicación entre apps y preparación de backend/RLS.
 |---|---|---|---|
 | **1** | **Motor único de dominio de pagos + pruebas** (este commit) | `lib/payments/{money,constants,types,engine}.ts`, `tests/payments-engine.test.ts`, vitest en OPS; consumidores usan la constante/motor único | ✅ |
 | 2 | Ledger idempotente persistente: tabla `payment_obligations` (clave estable, `currency`, céntimos, estados `calculado→revisado→cerrado/anulado` con CHECK de transición y trigger anti-reapertura), ajustes/anulaciones enlazados | `supabase/v8_0_payment_obligations.sql`, `lib/payments/ledger.ts` | ✅ |
-| 3 | Backend transaccional (Route Handlers/Server Actions + funciones SQL `SECURITY DEFINER`): importar CSV (staging+confirm en transacción, hash de archivo, huella por fila), recalcular obligaciones, revisar/cerrar periodo | `app/api/payments/*`, `supabase/v8_1_import_runs.sql` | pendiente |
+| 3 | Backend transaccional: importar CSV (previsualización + confirmación atómica en RPC, hash de archivo, huella por fila), recalcular obligaciones (`syncObligations`), revisar/cerrar (`changeObligationStatus`) | `supabase/v8_1_import_runs.sql`, `lib/payments/import.ts` | ✅ (UI de importación pendiente de conectar) |
 | 4 | Comandos logísticos atómicos y concurrencia: funciones SQL (`reserve_stock`, `release_reservation`, `close_picking`, `create_shipment`…) con `SELECT … FOR UPDATE`, columna `version`, movimiento+saldo en la misma transacción; retirar el guardado en bloque | `supabase/v8_2_logistics_commands.sql`, cambios en `logistics-store` y adapter LOGS | pendiente |
 | 5 | Inbox/outbox durable entre apps: `outbox_events`/`inbox_processed` con idempotency key, intentos, backoff, dead-letter; consumo con claim seguro | `supabase/v8_3_outbox.sql` | pendiente |
 | 6 | Autenticación real (Supabase Auth) + migración RLS documentada SIN activar; modo degradado solo-lectura al fallar Supabase | `supabase/v9_0_rls_prepared.sql` (no aplicada) | pendiente |
@@ -86,6 +86,32 @@ conflicto de concurrencia; ajuste negativo enlazado → ok; anular sin motivo
 Cliente TS: `lib/payments/ledger.ts` (solo RPCs, jamás escritura directa ni
 estado completo; errores clasificados validation/concurrency/transient/
 permanent; sin conexión → error transitorio, nunca "guardado" simulado).
+
+## 3c. Fase 3 — resultado (aplicada el 2026-07-10)
+
+Migración `v8_1_import_runs` aplicada. Crea `import_runs` (usuario, fecha,
+archivo, hash SHA-256 con UNIQUE por origen, filas correctas/rechazadas,
+errores, obligaciones creadas/actualizadas, divergencias, correlation id) e
+`import_run_rows` (huella estable por fila = identidad natural, UNIQUE por
+ejecución) — ambas INMUTABLES por trigger — y el RPC atómico
+`confirm_import_run`: sincroniza el ledger y registra la ejecución EN LA
+MISMA transacción.
+
+**Verificado en vivo** (transacción revertida): confirmación ok; reimportar
+el mismo hash → `duplicada` sin re-aplicar; un fallo intermedio (obligación
+inválida en el lote) revierte TODO — cero runs y cero obligaciones parciales
+(escenario 11); registro de importaciones inmutable.
+
+Capa TS `lib/payments/import.ts`: previsualización sin tocar la base
+(columnas obligatorias, estados del vocabulario, importes vía parser
+estricto — inválido = fila rechazada, jamás 0; sin inventar nombres/fechas/
+estados; VIN duplicado en archivo detectado; payload minimizado sin
+teléfonos ni comentarios), huellas SHA-256 de archivo y de fila (identidad,
+no importe), y confirmación vía RPC. Un Finalizado con importe queda
+incluido en pagos conforme a las reglas (fechas ausentes → bloqueado).
+
+Pendiente de fase 3: conectar la pantalla de importación ISDIN al nuevo
+pipeline (hoy sigue el flujo legado en paralelo).
 
 ## 4. Riesgos abiertos (hasta completar fases 2-7)
 
