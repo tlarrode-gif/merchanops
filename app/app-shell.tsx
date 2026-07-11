@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { ChevronDown, LogOut, Menu, X } from "lucide-react";
-import { AppSession, canAccessModule, getCurrentAppSession, isAdminSession, logoutAppUser, merchanopsSessionChangeEvent, sessionProvinceLabel, type AppPermissionKey } from "@/lib/access-control";
+import { AppSession, canAccessModule, ensureAuthSession, getCurrentAppSession, isAdminSession, logoutAppUser, merchanopsSessionChangeEvent, sessionProvinceLabel, type AppPermissionKey } from "@/lib/access-control";
 
 // Navegación global de MerchanOps (auditoría, bloque 7): UNA sola sidebar con
 // todas las secciones y una top bar con breadcrumb + usuario. Sustituye a la
@@ -93,6 +93,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const syncSession = () => setSession(getCurrentAppSession());
     syncSession();
     setReady(true);
+    // C1: si la sesión local no tiene detrás una sesión real de Supabase Auth
+    // (caducada o anterior a la migración), se cierra y se vuelve al login.
+    void ensureAuthSession().then(ok => { if (!ok) syncSession(); });
     window.addEventListener(merchanopsSessionChangeEvent, syncSession);
     window.addEventListener("storage", syncSession);
     return () => {
