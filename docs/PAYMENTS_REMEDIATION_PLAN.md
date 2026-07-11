@@ -184,6 +184,40 @@ población inicial es exactamente lo que creará `apply`), 3 "Resuelto -
 Pendiente colocador" activos vigilados, 0 con revisit_count>1 declarado —
 coherente con el bug corregido (nadie incrementaba el contador).
 
+## 3g. Validación post-revisión (2026-07-10): guardado en bloque — HALLAZGO ABIERTO
+
+El revisor exigió comprobar qué rutas de producción siguen invocando
+`saveLogisticsState` (reescritura del agregado completo en múltiples tablas).
+Inventario verificado por grep — **7 rutas de producción siguen usando el
+mecanismo antiguo**, por lo que el hallazgo de concurrencia NO puede darse
+por resuelto aunque exista la alternativa atómica:
+
+| Ruta de producción | Uso |
+|---|---|
+| `app/logistica/logistics-client.tsx:68` | **Toda acción del módulo Logística de OPS** (mutación genérica load→mutate→save). La más crítica: reescribe todas las tablas en cada acción |
+| `app/logistica/solicitudes/solicitudes-logistica-client.tsx:67` | Gestión de solicitudes (aceptar/reservar) |
+| `app/page.tsx` `requestMaterial` | Botón "Solicitar material" de Servicios |
+| `app/page.tsx` `updateService` | Cambio de instalador (sync a logística) |
+| `app/grandes-campanas/[id]/page.tsx:276` | Solicitud de material de campaña |
+| `app/grandes-campanas/isdin/page.tsx` `syncLogisticsVinyls` | Auto-sync de vinilos ISDIN |
+| `app/grandes-campanas/isdin/llamadas/page.tsx:129` | Sync de llamadas |
+
+Mitigaciones vigentes que ACOTAN (no eliminan) el riesgo: cada ruta recarga
+el estado justo antes de guardar (ventana de milisegundos); las reservas de
+stock de LOGS ya van por RPC atómico; el modo degradado impide el fallback
+silencioso; los movimientos usan insert-only. El riesgo residual real es la
+pisada de líneas de picking/petición si un usuario de LOGS escribe entre la
+carga y el guardado de OPS.
+
+Plan de retirada (siguiente iteración, con pruebas de equivalencia):
+1. `logistics-client.tsx` y `solicitudes-logistica-client.tsx`: sustituir la
+   mutación genérica por comandos específicos (aceptar+reservar ya existe
+   como `logistics_reserve_stock`; faltan RPC para el resto de acciones).
+2. `requestMaterial`/campañas/ISDIN: crear RPC `create_logistics_request`
+   (necesidad+petición+líneas en una transacción) y publicar el evento
+   outbox en la misma.
+3. Retirar `saveLogisticsState` y dejar `loadLogisticsState` solo-lectura.
+
 ## 4. Riesgos abiertos
 
 - Las escrituras siguen saliendo del navegador con anon key hasta activar RLS (requiere migrar a Supabase Auth; script preparado).
