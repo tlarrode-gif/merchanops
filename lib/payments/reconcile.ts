@@ -20,7 +20,7 @@ import { IsdinVinylInput, ObligationDraft } from "@/lib/payments/types";
 
 export interface ReconcileFinding {
   vin: string;
-  kind: "missing_failed_visit" | "missing_installation" | "resuelto_con_original_cobrado" | "amount_divergence";
+  kind: "missing_failed_visit" | "missing_installation" | "resuelto_con_original_cobrado" | "amount_divergence" | "obsolete_obligation";
   detail: string;
   obligationKey?: string;
 }
@@ -80,6 +80,26 @@ export function buildReconcileReport(vinyls: IsdinVinylInput[], ledger: LedgerRo
     }
   }
 
+  // Sobrantes: claves activas del ledger para los VIN analizados que el motor
+  // ya no produce (ej. revisit_count reducido): requieren anulación explícita.
+  const expectedKeys = new Set<string>();
+  for (const v of vinyls) {
+    for (const o of computeIsdinObligations(v).obligations) expectedKeys.add(o.key);
+  }
+  const analyzedVins = new Set(vinyls.map((v) => v.vin));
+  for (const rowItem of ledger) {
+    if (rowItem.kind !== "pago" || rowItem.status === "anulado") continue;
+    if (!analyzedVins.has(rowItem.source_id)) continue;
+    if (!expectedKeys.has(rowItem.obligation_key)) {
+      findings.push({
+        vin: rowItem.source_id,
+        kind: "obsolete_obligation",
+        detail: `${rowItem.obligation_key} existe en el ledger (${(rowItem.amount_cents / 100).toFixed(2)} €, ${rowItem.status}) pero el recálculo ya no la produce: anular con motivo si procede.`,
+        obligationKey: rowItem.obligation_key
+      });
+    }
+  }
+
   return {
     analyzedVinyls: vinyls.length,
     expectedObligations: expected,
@@ -104,6 +124,9 @@ export async function reconcileIsdin(
   }
 
   // apply: el RPC solo inserta lo que falta; lo revisado/cerrado es intocable.
-  const applied = await syncObligations(report.missing, actor, `reconcile:${new Date().toISOString().slice(0, 10)}`);
+  const applied = await syncObligations(report.missing, actor, `reconcile:${new Date().toISOString().slice(0, 10)}`, {
+    origin: "isdin",
+    sourceIds: vinyls.map((v) => v.vin)
+  });
   return { ...report, dryRun: false, applied };
 }

@@ -50,6 +50,25 @@ type ImportedMaterial = {
   medidas_vin?: string | null;
 };
 
+
+/**
+ * Redacción de payloads para logs técnicos (auditoría M11): los sync_logs no
+ * deben almacenar teléfonos, direcciones ni comentarios operativos. Se
+ * conservan solo identificadores y campos de control; el resto se elimina.
+ */
+const REDACTED_KEYS = ["phone", "phone_number", "pharmacy_phone", "telefono", "address", "direccion", "street", "street_number", "postal_code", "comments", "comentarios", "client_observations", "observations", "observaciones", "notes", "notas", "call_comment", "incident_comment", "point_comment", "materiales"];
+export function redactLogPayload(payload: unknown): Record<string, unknown> {
+  if (!payload || typeof payload !== "object") return {};
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+    if (REDACTED_KEYS.includes(key)) { out[key] = "[redactado]"; continue; }
+    if (value && typeof value === "object" && !Array.isArray(value)) { out[key] = redactLogPayload(value); continue; }
+    if (Array.isArray(value)) { out[key] = `[array:${value.length}]`; continue; }
+    out[key] = value;
+  }
+  return out;
+}
+
 export function createDomainEvent<T extends Record<string, unknown>>(name: DomainEventName, originModule: DomainEvent["originModule"], payload: T, entityId?: string | null, userId?: string | null): DomainEvent<T> {
   return { id: uid("dom"), name, originModule, entityId, userId, payload, createdAt: new Date().toISOString() };
 }
@@ -66,7 +85,7 @@ export function publishDomainEvent(state: LogisticsState, event: DomainEvent) {
     }
   } catch (error) {
     failEvent(state, integration.id, error);
-    addSyncLog(state, { evento: event.name, origen_modulo: event.originModule, destino_modulo: "logistica", entidad_id: event.entityId || null, usuario_id: event.userId || null, payload: event.payload, resultado: "error", error_message: error instanceof Error ? error.message : String(error) });
+    addSyncLog(state, { evento: event.name, origen_modulo: event.originModule, destino_modulo: "logistica", entidad_id: event.entityId || null, usuario_id: event.userId || null, payload: redactLogPayload(event.payload), resultado: "error", error_message: error instanceof Error ? error.message : String(error) });
     throw error;
   }
 }
@@ -97,11 +116,11 @@ export function retryFailedIntegrationEvents(state: LogisticsState) {
       integration.status = "completado";
       integration.processed_at = new Date().toISOString();
       integration.last_error = null;
-      addSyncLog(state, { evento: integration.event_type, origen_modulo: integration.source_type, destino_modulo: "logistica", entidad_id: integration.source_id, payload: integration.payload, resultado: "ok" });
+      addSyncLog(state, { evento: integration.event_type, origen_modulo: integration.source_type, destino_modulo: "logistica", entidad_id: integration.source_id, payload: redactLogPayload(integration.payload), resultado: "ok" });
     } catch (error) {
       integration.status = "error";
       integration.last_error = error instanceof Error ? error.message : String(error);
-      addSyncLog(state, { evento: integration.event_type, origen_modulo: integration.source_type, destino_modulo: "logistica", entidad_id: integration.source_id, payload: integration.payload, resultado: "error", error_message: integration.last_error });
+      addSyncLog(state, { evento: integration.event_type, origen_modulo: integration.source_type, destino_modulo: "logistica", entidad_id: integration.source_id, payload: redactLogPayload(integration.payload), resultado: "error", error_message: integration.last_error });
     }
   });
   return failed.length;

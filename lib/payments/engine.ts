@@ -187,14 +187,18 @@ export function isdinExpectedTotalEur(v: IsdinVinylInput): number {
 
 const PAYABLE_SERVICE_STATUSES = ["Validado", "Pagado"];
 
-function servicePointPayCents(point: ServiceInput["points"][number], issues: EngineIssue[], serviceId: string): number {
+function servicePointPayCents(
+  point: ServiceInput["points"][number],
+  issues: EngineIssue[],
+  serviceId: string
+): { cents: number; blocked: BlockReason[] } {
   const status = point.pointStatus || "Pendiente";
   const failed = status === "Incidencia" || status === "Pospuesto";
   const resolved = point.incidentStatus === "Resuelta" || Boolean(point.incidentResolvedAt);
   const blocked: BlockReason[] = [];
   const incidentCents = point.incidentFeeEur != null ? centsOrBlock(point.incidentFeeEur, blocked) : FAILED_VISIT_FEE_CENTS;
-  if (status === "Pendiente recepción post-incidencia") return 0;
-  if (failed && !resolved) return incidentCents;
+  if (status === "Pendiente recepción post-incidencia") return { cents: 0, blocked };
+  if (failed && !resolved) return { cents: incidentCents, blocked };
   if (resolved) {
     if (point.originalFeeEur == null) {
       issues.push({
@@ -204,9 +208,9 @@ function servicePointPayCents(point: ServiceInput["points"][number], issues: Eng
         description: `Punto ${point.id} resuelto sin original_fee guardado.`
       });
     }
-    return centsOrBlock(point.originalFeeEur ?? point.feeEur, blocked) + incidentCents;
+    return { cents: centsOrBlock(point.originalFeeEur ?? point.feeEur, blocked) + incidentCents, blocked };
   }
-  return centsOrBlock(point.feeEur ?? 0, blocked);
+  return { cents: centsOrBlock(point.feeEur ?? 0, blocked), blocked };
 }
 
 export function computeServiceObligations(service: ServiceInput): EngineResult {
@@ -233,7 +237,22 @@ export function computeServiceObligations(service: ServiceInput): EngineResult {
   const wantsHours = service.paymentType === "Horas" || service.paymentType === "Mixto";
 
   if (wantsPoints) {
-    const amountCents = service.points.reduce((sum, p) => sum + servicePointPayCents(p, issues, service.id), 0);
+    // Un importe inválido en CUALQUIER punto bloquea la obligación completa:
+    // jamás se convierte en 0 silencioso dentro de un total pagable.
+    const pointBlocked: BlockReason[] = [];
+    const amountCents = service.points.reduce((sum, p) => {
+      const result = servicePointPayCents(p, issues, service.id);
+      pointBlocked.push(...result.blocked);
+      return sum + result.cents;
+    }, 0);
+    if (pointBlocked.length) {
+      issues.push({
+        severity: "alto",
+        origin: "servicio",
+        entityId: service.id,
+        description: `Servicio ${service.id}: importes inválidos en puntos — obligación bloqueada, no se paga un total incompleto.`
+      });
+    }
     if (amountCents > 0 || service.points.length > 0) {
       obligations.push(
         draft({
@@ -246,7 +265,7 @@ export function computeServiceObligations(service: ServiceInput): EngineResult {
           workerId: service.workerId,
           workerName: service.workerName,
           concept: "Servicio por puntos",
-          blockedReasons: [...blocked]
+          blockedReasons: [...blocked, ...pointBlocked]
         })
       );
     }

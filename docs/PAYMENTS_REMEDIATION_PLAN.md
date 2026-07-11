@@ -218,6 +218,24 @@ Plan de retirada (siguiente iteración, con pruebas de equivalencia):
    outbox en la misma.
 3. Retirar `saveLogisticsState` y dejar `loadLogisticsState` solo-lectura.
 
+## 3h. Segunda revisión externa (2026-07-10): estado de los 11 hallazgos
+
+| # | Hallazgo | Estado |
+|---|---|---|
+| C1 | Autenticación eludible (rol en localStorage, hashes al navegador, LOGS arranca admin) | 🟠 PARCIAL: LOGS ya arranca con el MENOR privilegio (almacén→gestor), nunca admin. La autorización real exige Supabase Auth + RLS (v9_0 preparada): sin eso, cualquier sesión simulada o llamada directa sigue teniendo acceso. ABIERTO como riesgo principal |
+| C2 | Guardado logístico global activo (7 rutas) | 🔴 ABIERTO (inventario y plan de retirada en §3g; requiere RPCs adicionales + pruebas de equivalencia) |
+| C3 | Historial económico sigue en payment-ledger legado / dos registros paralelos | 🔴 ABIERTO: economic_events convive con payment_obligations. Plan: recalcular Historial económico desde el motor único y congelar payment-ledger como solo-lectura |
+| A4 | Bajar revisit_count no generaba divergencia | ✅ RESUELTO: `sync_payment_obligations` acepta ámbito y devuelve `missing_in_recalc` (v8_4, verificado en vivo); la conciliación también detecta sobrantes (`obsolete_obligation`, test) |
+| A5 | Importación transaccional sin conectar a UI | 🔴 ABIERTO (pipeline listo; falta sustituir el flujo de la pantalla ISDIN que además da de alta vinilos) |
+| A6 | Outbox sin consumidores, sin lease, efectos antes de inbox | 🟠 PARCIAL: lease vencido recuperable (v8_4, verificado en vivo, sin robar leases vigentes y respetando max_attempts) + pre-chequeo de inbox antes de ejecutar efectos en processOutbox. ABIERTO: no hay consumidores conectados aún; los handlers deben ser idempotentes (efectos+inbox no comparten transacción) |
+| A7 | Facturación ISDIN: UI optimista, errores ignorados, borrado físico de regularizaciones | 🔴 ABIERTO |
+| A8 | LOGS: cierre/envío/entrega multi-operación en cliente | 🔴 ABIERTO (RPCs y wrappers listos; el cierre de dominio hace más cosas — VIN, petición — y el cableado sin doble descuento requiere pruebas de equivalencia) |
+| A9 | LOGS arranca en modo local sin advertencia | ✅ RESUELTO: banner rojo bloqueante permanente cuando NEXT_PUBLIC_DATA_SOURCE ≠ supabase |
+| M10 | Motor silencia importes inválidos en puntos | ✅ RESUELTO: blockedReasons de cada punto se propagan a la obligación (bloqueada, no pagable) + tests |
+| M11 | Payloads completos a sync_logs | ✅ RESUELTO: `redactLogPayload` en domain-events (teléfonos, direcciones, comentarios → redactados; arrays resumidos) |
+
+Verificación tras los fixes: OPS 44/44, LOGS 40/40, lint y build en verde en ambos; A4/A6 verificados en vivo contra la base real (transacción revertida).
+
 ## 4. Riesgos abiertos
 
 - Las escrituras siguen saliendo del navegador con anon key hasta activar RLS (requiere migrar a Supabase Auth; script preparado).
