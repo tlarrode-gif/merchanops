@@ -70,13 +70,19 @@ export interface SyncResult {
 export async function syncObligations(
   drafts: ObligationDraft[],
   actor: string,
-  correlationId?: string
+  correlationId?: string,
+  scope?: { origin: string; sourceIds: string[] }
 ): Promise<SyncResult> {
   const client = requireClient();
   const { data, error } = await client.rpc("sync_payment_obligations", {
     p_obligations: drafts.map(toRpcPayload),
     p_actor: actor,
-    p_correlation_id: correlationId ?? null
+    p_correlation_id: correlationId ?? null,
+    // Ámbito del recálculo: las obligaciones activas del ámbito que ya no
+    // aparecen en el payload vuelven como divergencia 'missing_in_recalc'
+    // (ej. bajar revisit_count) para anulación explícita, jamás automática.
+    p_scope_origin: scope?.origin ?? null,
+    p_scope_source_ids: scope?.sourceIds ?? null
   });
   if (error) throw classify(error.message);
   return data as SyncResult;

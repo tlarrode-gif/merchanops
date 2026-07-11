@@ -87,6 +87,21 @@ export async function processOutbox(
 
   for (const event of claimed) {
     try {
+      // Efectivamente-una-vez: si el inbox ya registró este evento para este
+      // consumidor (ej. caída entre efectos e inbox en un intento anterior no
+      // aplica aquí porque el inbox se escribe tras efectos, pero un reintento
+      // tras completar sí), NO se repiten los efectos.
+      const { data: seen } = await supabase
+        .from("inbox_processed")
+        .select("event_id")
+        .eq("event_id", event.event_id)
+        .eq("consumer", consumer)
+        .maybeSingle();
+      if (seen) {
+        await supabase.rpc("outbox_complete", { p_event_id: event.event_id, p_consumer: consumer, p_result: {} });
+        result.duplicates += 1;
+        continue;
+      }
       const spec = handlers[event.event_type];
       if (!spec) throw new Error(`Sin handler para el tipo de evento "${event.event_type}"`);
       if (event.schema_version !== spec.schemaVersion) {

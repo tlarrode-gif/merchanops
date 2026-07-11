@@ -1,0 +1,11 @@
+-- v8_4: (A4) sync_payment_obligations acepta ámbito (p_scope_origin +
+-- p_scope_source_ids) y devuelve como divergencia 'missing_in_recalc' las
+-- obligaciones activas del ámbito que el recálculo ya no produce (ej. bajar
+-- revisit_count de 3 a 2 deja failed_visit:3): se señalan para anulación
+-- explícita, JAMÁS se borran/anulan automáticamente. Se elimina el overload
+-- antiguo de 3 parámetros (v8_4b).
+-- (A6) outbox_claim recupera eventos atascados en 'procesando' con lease
+-- vencido (>10 min) sin robar leases vigentes y respetando max_attempts.
+-- Aplicada el 2026-07-10 y verificada en vivo (transacción revertida).
+-- El cuerpo completo está en el historial de migraciones del proyecto
+-- (v8_4_sync_scope_and_outbox_lease, v8_4b_drop_old_sync_overload).

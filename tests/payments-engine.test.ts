@@ -248,3 +248,42 @@ describe("Grandes campañas: visita fallida separada del pago original", () => {
     expect(installation.blockedReasons).toContain("missing_event_date");
   });
 });
+
+describe("M10: importes inválidos en puntos bloquean la obligación del servicio", () => {
+  it("un punto con importe NaN no se convierte en 0 pagable", () => {
+    const service = {
+      id: "srvM10",
+      status: "Validado",
+      paymentType: "Puntos" as const,
+      validatedAt: "2026-07-01",
+      hourlyRateEur: null,
+      hoursWorked: null,
+      workerId: "w1",
+      workerName: "Ana",
+      points: [
+        { id: "p1", feeEur: 30, originalFeeEur: null, incidentFeeEur: null, pointStatus: "Finalizado", incidentStatus: null, incidentResolvedAt: null },
+        { id: "p2", feeEur: Number.NaN, originalFeeEur: null, incidentFeeEur: null, pointStatus: "Finalizado", incidentStatus: null, incidentResolvedAt: null }
+      ]
+    };
+    const { obligations, issues } = computeServiceObligations(service);
+    expect(obligations[0].payable).toBe(false);
+    expect(obligations[0].blockedReasons).toContain("invalid_amount");
+    expect(issues.some((i) => i.description.includes("importes inválidos"))).toBe(true);
+  });
+
+  it("un punto con importe negativo bloquea igualmente", () => {
+    const service = {
+      id: "srvM10b",
+      status: "Validado",
+      paymentType: "Puntos" as const,
+      validatedAt: "2026-07-01",
+      hourlyRateEur: null,
+      hoursWorked: null,
+      workerId: "w1",
+      workerName: "Ana",
+      points: [{ id: "p1", feeEur: -5, originalFeeEur: null, incidentFeeEur: null, pointStatus: "Finalizado", incidentStatus: null, incidentResolvedAt: null }]
+    };
+    const { obligations } = computeServiceObligations(service);
+    expect(obligations[0].payable).toBe(false);
+  });
+});

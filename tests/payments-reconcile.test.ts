@@ -91,3 +91,18 @@ describe("conciliación histórica ISDIN", () => {
     expect(report.expectedObligations).toBe(4);
   });
 });
+
+describe("A4: obligaciones sobrantes (contador reducido) se detectan", () => {
+  it("bajar revisit_count de 3 a 2 señala failed_visit:3 como obsoleta, sin borrarla", () => {
+    const ledger = [
+      row("isdin:VIN-R1:failed_visit:1", 856),
+      row("isdin:VIN-R1:failed_visit:2", 856),
+      row("isdin:VIN-R1:failed_visit:3", 856),
+      row("isdin:VIN-R1:installation", 4000)
+    ];
+    const report = buildReconcileReport([vinyl({ revisitCount: 2 })], ledger);
+    const obsolete = report.findings.filter((f) => f.kind === "obsolete_obligation");
+    expect(obsolete.map((f) => f.obligationKey)).toEqual(["isdin:VIN-R1:failed_visit:3"]);
+    expect(report.missing).toHaveLength(0);
+  });
+});
