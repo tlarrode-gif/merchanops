@@ -19,26 +19,30 @@ revoke all on auth_login_attempts from anon, authenticated;
 
 -- PBKDF2-SHA256 (mismo algoritmo y formato que lib/password.ts del cliente).
 -- Verificado contra un vector generado con WebCrypto: coincide byte a byte.
+-- v9_1c: XOR nativo de bit(256) por iteración (~0,45s en 150.000 iteraciones);
+-- la versión inicial con subconsulta por iteración superaba el
+-- statement_timeout de 3s del rol anon y el login fallaba por timeout.
 create or replace function merchan_pbkdf2_sha256(p_password text, p_salt bytea, p_iterations int)
 returns bytea
 language plpgsql immutable
 set search_path = ''
 as $$
 declare
+  key bytea := convert_to(p_password,'utf8');
   u bytea;
-  acc bytea;
+  acc bit(256);
   i int;
 begin
-  u := extensions.hmac(p_salt || decode('00000001','hex'), convert_to(p_password,'utf8'), 'sha256');
-  acc := u;
+  u := extensions.hmac(p_salt || decode('00000001','hex'), key, 'sha256');
+  acc := ('x' || encode(u,'hex'))::bit(256);
   for i in 2..p_iterations loop
-    u := extensions.hmac(u, convert_to(p_password,'utf8'), 'sha256');
-    acc := (
-      select decode(string_agg(lpad(to_hex(get_byte(acc, n) # get_byte(u, n)), 2, '0'), ''), 'hex')
-      from generate_series(0, 31) n
-    );
+    u := extensions.hmac(u, key, 'sha256');
+    acc := acc # ('x' || encode(u,'hex'))::bit(256);
   end loop;
-  return acc;
+  return decode((
+    select string_agg(lpad(to_hex(substring(acc from n*32+1 for 32)::int), 8, '0'), '' order by n)
+    from generate_series(0, 7) n
+  ), 'hex');
 end $$;
 
 -- Verifica una contraseña contra el formato almacenado "pbkdf2:<iter>:<salt_hex>:<hash_hex>"
