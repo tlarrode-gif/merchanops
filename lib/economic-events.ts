@@ -165,6 +165,8 @@ export function facturacionEventsFromIsdin(lines: IsdinBillingLine[], adjustment
       payload: { vin: line.vin, semana: line.week, tarifa: line.tarifa, extra: line.extra }
     }));
   for (const adj of adjustments) {
+    // v8_5 (A7): las regularizaciones anuladas no generan facturación.
+    if (adj.annulled_at) continue;
     if (!Number(adj.amount || 0)) continue;
     eventos.push({
       fingerprint: fingerprint(["evt", "fact", "isdin_adj", adj.id]),
