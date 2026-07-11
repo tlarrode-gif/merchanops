@@ -1,4 +1,7 @@
-export const INCIDENT_FEE = 8.56;
+import { FAILED_VISIT_FEE_EUR } from "@/lib/payments/constants";
+
+/** @deprecated usar lib/payments/constants — alias del valor único. */
+export const INCIDENT_FEE = FAILED_VISIT_FEE_EUR;
 
 export type AuditPoint = {
   id: string;
