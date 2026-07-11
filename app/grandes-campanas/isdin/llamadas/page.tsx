@@ -4,8 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { FileDown } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { AppSession, canAccessModule, filterBySessionProvince, getCurrentAppSession } from "@/lib/access-control";
-import { createDomainEvent, publishDomainEvent } from "@/lib/domain-events";
-import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
 import {
   IsdinCall,
   IsdinCallStatus,
@@ -86,47 +84,51 @@ function baseChanged(a: IsdinCall, b: IsdinCall) {
   ].some(key => (a as Record<string, unknown>)[key] !== (b as Record<string, unknown>)[key]);
 }
 
+// C2: comandos transaccionales en la base en vez del guardado en bloque.
 async function syncCallLogisticsImpact(call: IsdinCall) {
-  if (!call.requires_logistics_action) return;
-  const loaded = await loadLogisticsState();
-  const logistics = loaded.state;
-  const payload = {
-    id: call.isdin_vinyl_id || call.vin,
-    source_type: "isdin_vinyl",
-    vinyl_id: call.isdin_vinyl_id || call.vin,
-    vinyl: call.vin,
-    vin: call.vin,
-    vin_id: call.vin,
-    pharmacy_name: call.pharmacy_name,
-    vinyl_campaign: call.vinyl_campaign,
-    campana_id: call.vinyl_campaign,
-    height: call.height,
-    width: call.width,
-    desired_installation_date: call.logistics_required_date || call.next_visit_date || call.desired_installation_date,
-    desired_installation_week: call.next_visit_week || call.desired_installation_week,
-    province: call.province,
-    city: call.city,
-    street: call.street,
-    street_number: call.street_number,
-    postal_code: call.postal_code,
-    installer_name: call.installer_name || call.worker_name,
-    client_observations: call.client_observations,
-    comments: [call.call_comment, call.logistics_comment].filter(Boolean).join("\n"),
-    material_name: call.logistics_need_type || "Actuación logística desde llamada",
-    material_type: "vinilo_medida"
-  };
-  publishDomainEvent(logistics, createDomainEvent("servicio.material_asignado", "isdin", payload, call.vin));
+  if (!call.requires_logistics_action || !supabase) return;
+  const fecha = dateOnly(call.logistics_required_date || call.next_visit_date || call.desired_installation_date) || null;
+  const dateOk = fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha) ? fecha : null;
+  const version = `call:${call.call_status || ""}:${dateOk || ""}:${call.logistics_need_type || ""}:${call.installer_name || call.worker_name || ""}`;
+  const { error } = await supabase.rpc("sync_isdin_vinyl_requests", {
+    p_vinyls: [{
+      id: call.isdin_vinyl_id || call.vin,
+      vin: call.vin,
+      version,
+      pharmacy_name: call.pharmacy_name,
+      campaign: call.vinyl_campaign || null,
+      record_type: "Vinilo a medida",
+      width: call.width ?? null,
+      height: call.height ?? null,
+      installation_date: dateOk,
+      installation_week: call.next_visit_week || call.desired_installation_week || null,
+      province: call.province || null,
+      city: call.city || null,
+      address: [call.street, call.street_number, call.postal_code].filter(Boolean).join(" ") || null,
+      installer_name: call.installer_name || call.worker_name || null,
+      observations: call.client_observations || null,
+      material_name: call.logistics_need_type || "Actuación logística desde llamada"
+    }],
+    p_actor: "Backoffice ISDIN"
+  });
+  if (error) throw new Error(`Sincronización logística fallida: ${error.message}`);
   if (cleanCallStatus(call.call_status) === "Incidencia en llamada") {
     // Incidencia en llamada es preventiva y no genera pago de visita fallida.
-    publishDomainEvent(logistics, createDomainEvent("servicio.incidencia_creada", "isdin", {
-      ...payload,
-      tipo: call.logistics_need_type === "cambio_medidas" ? "medidas_incorrectas" : "material_no_recibido",
-      descripcion: call.logistics_comment || call.call_comment || "Incidencia de llamada con impacto logístico.",
-      impacto: "Backoffice solicita actuación logística preventiva.",
-      fecha_limite: dateOnly(call.logistics_required_date || call.next_visit_date || call.desired_installation_date)
-    }, call.vin));
+    const { error: incError } = await supabase.rpc("create_logistics_incident_ops", {
+      p: {
+        tipo: call.logistics_need_type === "cambio_medidas" ? "medidas_incorrectas" : "material_no_recibido",
+        vin_id: call.vin,
+        campana_id: call.vinyl_campaign || null,
+        descripcion: call.logistics_comment || call.call_comment || "Incidencia de llamada con impacto logístico.",
+        impacto: "Backoffice solicita actuación logística preventiva.",
+        fecha_limite: dateOk,
+        source_type: "isdin_vinyl",
+        source_id: call.isdin_vinyl_id || call.vin
+      },
+      p_actor: "Backoffice ISDIN"
+    });
+    if (incError) throw new Error(`Incidencia logística no creada: ${incError.message}`);
   }
-  await saveLogisticsState(logistics, loaded.remote);
 }
 
 function errorMessage(error: unknown, fallback: string) {

@@ -6,7 +6,7 @@ import { CrearIncidenciaModal } from "@/components/logistics/crear-incidencia-mo
 import { EstadoLogistico } from "@/components/logistics/estado-logistico";
 import { createDomainEvent, publishDomainEvent, retryFailedIntegrationEvents } from "@/lib/domain-events";
 import { LogisticsState, StockMovement, available, cancelLogisticsIncident, closePicking, confirmInstallerDelivery, createIncident, createMovement, createPickingFromPendingArrival, createPickingFromRequest, generateShipping, logisticsAlerts, logisticsKpis, logisticsStatusLabel, materialName, preparePickingLine, receiveEntry, receivePendingArrival, rejectLogisticsRequest, resolveLogisticsIncident, seedLogistics, setLogisticsIncidentStatus, today, uid, upsertLogisticsVin, upsertMaterialCatalog } from "@/lib/logistics";
-import { loadLogisticsState, saveLogisticsState } from "@/lib/logistics-store";
+import { loadLogisticsState } from "@/lib/logistics-store";
 import { acceptRequestAndReserve, detectLogisticsSyncIssues, materialDisplay, sourceHref } from "@/lib/logistics-sync";
 import { AppSession, canAccessModule, getCurrentAppSession, merchanopsSessionChangeEvent } from "@/lib/access-control";
 
@@ -22,6 +22,23 @@ const modules = [
   ["sincronizacion", "Sincronización"]
 ] as const;
 type Section = typeof modules[number][0];
+
+// C2: la operación logística vive en MerchanLOGS; aquí solo se consulta.
+const LOGS_BASE = process.env.NEXT_PUBLIC_MERCHANLOGS_URL || "https://merchanlogs.vercel.app";
+const logsSectionPath: Record<Section, string> = {
+  panel: "/",
+  solicitudes: "/peticiones",
+  entradas: "/entradas",
+  stock: "/materiales",
+  picking: "/picking",
+  envios: "/envios",
+  incidencias: "/incidencias",
+  pendientes: "/entradas",
+  sincronizacion: "/"
+};
+function logsUrl(section: Section) {
+  return `${LOGS_BASE}${logsSectionPath[section] ?? "/"}`;
+}
 
 export function LogisticsClient({ section, detailId }: { section: string; detailId?: string }) {
   const active = modules.some(([key]) => key === section) ? section as Section : "panel";
@@ -60,21 +77,13 @@ export function LogisticsClient({ section, detailId }: { section: string; detail
     setLoading(false);
   }
 
-  async function commit(mutator: (draft: LogisticsState) => void, message = "Guardado") {
-    try {
-      setSaving(true);
-      const draft = structuredClone(state) as LogisticsState;
-      mutator(draft);
-      await saveLogisticsState(draft, remote);
-      setState(draft);
-      setError("");
-      setNotice(message);
-      setTimeout(() => setNotice(""), 1400);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo completar la operación");
-    } finally {
-      setSaving(false);
-    }
+  // C2: este módulo es de SOLO CONSULTA. El guardado en bloque (saveLogisticsState)
+  // está retirado: las acciones logísticas se ejecutan en MerchanLOGS con comandos
+  // atómicos. Cualquier botón de acción abre la pantalla equivalente de LOGS.
+  async function commit(_mutator: (draft: LogisticsState) => void, _message = "Guardado") {
+    window.open(logsUrl(active), "_blank", "noopener");
+    setNotice("Las acciones logísticas se realizan en MerchanLOGS: se ha abierto la pantalla equivalente.");
+    setTimeout(() => setNotice(""), 3500);
   }
 
   const syncIssues = useMemo(() => detectLogisticsSyncIssues(state), [state]);
@@ -95,10 +104,14 @@ export function LogisticsClient({ section, detailId }: { section: string; detail
           <header className="rounded-2xl border bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div><p className="text-sm text-slate-500">Logística / {modules.find(([key]) => key === active)?.[1]}</p><h2 className="text-3xl font-bold">{modules.find(([key]) => key === active)?.[1]}</h2></div>
-              <div className="flex flex-wrap gap-2"><span className={remote ? "rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800" : "rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800"}>{remote ? "Supabase activo" : "Modo local"}</span><button disabled={saving} onClick={() => refresh()} className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold disabled:opacity-50"><RefreshCw className="mr-1 inline h-4 w-4" />Actualizar</button><a href="/grandes-campanas" className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold">Campañas</a></div>
+              <div className="flex flex-wrap gap-2"><span className={remote ? "rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800" : "rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800"}>{remote ? "Supabase activo" : "Modo local"}</span><button disabled={saving} onClick={() => refresh()} className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold disabled:opacity-50"><RefreshCw className="mr-1 inline h-4 w-4" />Actualizar</button><a href="/grandes-campanas" className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold">Campañas</a><a href={logsUrl(active)} target="_blank" rel="noopener" className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white">Operar en MerchanLOGS →</a></div>
             </div>
             <label className="mt-3 flex items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2"><Search className="h-4 w-4 text-slate-400" /><input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar material, VIN, campaña, albarán, tracking..." className="w-full bg-transparent text-sm outline-none" /></label>
           </header>
+          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+            <b>Solo consulta.</b> Este módulo muestra la logística en tiempo real; las acciones (aceptar peticiones, picking, envíos, entradas, incidencias) se realizan en{" "}
+            <a href={logsUrl(active)} target="_blank" rel="noopener" className="font-semibold underline">MerchanLOGS</a>.
+          </div>
           {notice && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
           {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
           {loading && <div className="rounded-2xl border bg-white p-4 text-sm text-slate-500">Cargando logística...</div>}
