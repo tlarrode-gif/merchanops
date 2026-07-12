@@ -171,17 +171,23 @@ export async function saveInternalUsers(users: AppUser[]) {
   const normalized = await hashUserPasswords(users.map(normalizeUser));
   saveLocalUsers(isSupabaseConfigured ? normalized.map(user => ({ ...user, password: "" })) : normalized);
   if (isSupabaseConfigured && supabase) {
-    // Dos lotes con columnas homogéneas: solo los usuarios con contraseña nueva
-    // escriben la columna password (el resto conserva su hash en la base).
-    const withPassword = normalized.filter(user => user.password);
-    const withoutPassword = normalized.filter(user => !user.password);
-    if (withPassword.length) {
-      const { error } = await supabase.from("app_users").upsert(withPassword.map(user => userForDb(user, true)));
-      if (error) throw error;
-    }
-    if (withoutPassword.length) {
-      const { error } = await supabase.from("app_users").upsert(withoutPassword.map(user => userForDb(user, false)));
-      if (error) throw error;
+    // v9_3 dejó la columna password ilegible por REST y es NOT NULL, así que el
+    // upsert masivo es imposible (ON CONFLICT necesita leerla y las filas sin
+    // contraseña violan NOT NULL). Se escribe POR USUARIO: UPDATE si existe
+    // (password solo si se ha fijado una nueva) e INSERT si es nuevo (con
+    // contraseña obligatoria). Cualquier fallo se lanza: jamás éxito silencioso.
+    const { data: existingRows, error: readError } = await supabase.from("app_users").select("id");
+    if (readError) throw new Error(`No se pudo leer la lista de usuarios: ${readError.message}`);
+    const existing = new Set((existingRows ?? []).map(row => String((row as { id: string }).id)));
+    for (const user of normalized) {
+      if (existing.has(user.id)) {
+        const { error } = await supabase.from("app_users").update(userForDb(user, Boolean(user.password))).eq("id", user.id);
+        if (error) throw new Error(`No se pudo actualizar "${user.username}": ${error.message}`);
+      } else {
+        if (!user.password) throw new Error(`El usuario nuevo "${user.username}" necesita una contraseña.`);
+        const { error } = await supabase.from("app_users").insert(userForDb(user, true));
+        if (error) throw new Error(`No se pudo crear "${user.username}": ${error.message}`);
+      }
     }
   }
   return normalized;
