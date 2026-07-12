@@ -5,7 +5,7 @@ import { checkLoginAllowed, clearLoginAttempts, recordLoginFailure } from "@/lib
 import { sanitizeIdentifier } from "@/lib/sanitize";
 
 export type AppPermissionKey = "servicios" | "isdin" | "calendario" | "pagos" | "logistica" | "usuarios";
-export type AppRole = "admin" | "manager";
+export type AppRole = "admin" | "manager" | "almacen";
 
 export type AppUser = {
   id: string;
@@ -54,9 +54,19 @@ export function uid(prefix = "usr") {
   return `${prefix}_${random}`;
 }
 
+// Almacén (picking móvil de MerchanLOGS): sin módulos de OPS ni provincias.
+export const almacenPermissions: Record<AppPermissionKey, boolean> = {
+  servicios: false,
+  isdin: false,
+  calendario: false,
+  pagos: false,
+  logistica: false,
+  usuarios: false
+};
+
 export function normalizeUser(row: Partial<AppUser>): AppUser {
-  const role = row.role === "admin" ? "admin" : "manager";
-  const permissions = role === "admin" ? adminPermissions : { ...defaultPermissions, ...(row.permissions || {}), usuarios: false };
+  const role = row.role === "admin" ? "admin" : row.role === "almacen" ? "almacen" : "manager";
+  const permissions = role === "admin" ? adminPermissions : role === "almacen" ? almacenPermissions : { ...defaultPermissions, ...(row.permissions || {}), usuarios: false };
   return {
     id: row.id || uid(),
     username: sanitizeIdentifier(row.username),
