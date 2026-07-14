@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Users } from "lucide-react";
+import { Plus, Sparkles, Users } from "lucide-react";
 import { GestorAvatar } from "@/components/grandes-campanas/gestor-avatars";
 import { AppSession, AppUser, isAdminSession } from "@/lib/access-control";
 import { CampanaEstado } from "@/lib/campanas";
-import { spanishProvinces } from "@/lib/provinces";
+import { normalizeProvince, spanishProvinces } from "@/lib/provinces";
 
 export type CampanaFormState = {
   nombre: string;
@@ -65,6 +65,13 @@ export function CampanaForm({
 
   function toggleGestor(gestorId: string) {
     patch({ gestorIds: value.gestorIds.includes(gestorId) ? value.gestorIds.filter(id => id !== gestorId) : [...value.gestorIds, gestorId] });
+  }
+
+  // 4A: propone (añade) los gestores cuyas provincias solapan con las de la campaña.
+  function sugerirGestores() {
+    const provNorm = value.provincias.map(normalizeProvince);
+    const propuestos = gestores.filter(gestor => (gestor.provinces || []).some(provincia => provNorm.includes(normalizeProvince(provincia)))).map(gestor => gestor.id);
+    if (propuestos.length) patch({ gestorIds: Array.from(new Set([...value.gestorIds, ...propuestos])) });
   }
 
   const gestoresSeleccionados = gestores.filter(gestor => value.gestorIds.includes(gestor.id));
@@ -158,6 +165,10 @@ export function CampanaForm({
               <button type="button" className="gc-btn-outline" onClick={() => setEquipoAbierto(open => !open)}>
                 <Users className="h-4 w-4" />
                 {equipoAbierto ? "Cerrar equipo" : "Gestionar equipo"}
+              </button>
+              <button type="button" className="gc-btn-outline" onClick={sugerirGestores} disabled={!value.provincias.length} title="Proponer gestores según las provincias de la campaña">
+                <Sparkles className="h-4 w-4" />
+                Sugerir gestor
               </button>
             </div>
             {equipoAbierto && (

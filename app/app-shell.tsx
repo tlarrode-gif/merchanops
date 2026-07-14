@@ -25,7 +25,8 @@ const groups: NavGroup[] = [
       { href: "/?tab=servicios", label: "Servicios", module: "servicios", tab: "servicios" },
       { href: "/?tab=calendario", label: "Calendario", module: "calendario", tab: "calendario" },
       { href: "/?tab=pagos", label: "Pagos", module: "pagos", tab: "pagos" },
-      { href: "/grandes-campanas", label: "Grandes Campañas", module: "servicios", excludePrefix: "/grandes-campanas/isdin" }
+      { href: "/grandes-campanas", label: "Grandes Campañas", module: "servicios", excludePrefix: "/grandes-campanas/isdin" },
+      { href: "/grandes-campanas/mi-zona", label: "Mi zona", module: "servicios" }
     ]
   },
   {
@@ -67,6 +68,7 @@ const crumbLabels: Record<string, string> = {
   nueva: "Nueva campaña",
   editar: "Editar",
   asignacion: "Asignación rápida",
+  "mi-zona": "Mi zona",
   logistica: "Logística",
   solicitudes: "Solicitudes",
   "historial-economico": "Historial económico",
