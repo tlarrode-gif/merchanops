@@ -17,6 +17,7 @@ export type CampanaFormState = {
   presupuesto: string;
   provincias: string[];
   gestorIds: string[];
+  solicitarDireccionEnvio: boolean;
 };
 
 export const emptyCampanaForm: CampanaFormState = {
@@ -28,7 +29,8 @@ export const emptyCampanaForm: CampanaFormState = {
   fecha_fin: "",
   presupuesto: "",
   provincias: [],
-  gestorIds: []
+  gestorIds: [],
+  solicitarDireccionEnvio: false
 };
 
 type ClientOption = { id: string; name: string };
@@ -171,6 +173,15 @@ export function CampanaForm({
                 {!gestores.length && <p className="text-sm" style={{ color: "var(--gc-muted)" }}>No hay usuarios activos para asignar.</p>}
               </div>
             )}
+          </div>
+          {/* Feature 2: anadido opcional — pedir a los gestores la direccion de envio de los trabajadores. */}
+          <div>
+            <span className="gc-label">Añadido opcional</span>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={value.solicitarDireccionEnvio} onChange={event => patch({ solicitarDireccionEnvio: event.target.checked })} />
+              Solicitar a los gestores la dirección de envío de los trabajadores
+            </label>
+            <p className="text-xs" style={{ color: "var(--gc-muted)" }}>Si se activa, cada gestor podrá indicar la dirección de envío del material de sus trabajadores. Se usará como destino en Logística (con prioridad sobre la dirección del punto).</p>
           </div>
         </div>
       </section>

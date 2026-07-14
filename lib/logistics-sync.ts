@@ -320,7 +320,7 @@ export function createServiceLogisticsRequest(state: LogisticsState, service: So
 export function createCampaignLogisticsRequest(
   state: LogisticsState,
   campana: { id: string; nombre: string; cliente_marca?: string | null },
-  puntos: Array<{ id: string; nombre_comercial: string; direccion?: string | null; provincia?: string | null; instalador_id?: string | null; instalador_nombre?: string | null; fecha_visita?: string | null }>,
+  puntos: Array<{ id: string; nombre_comercial: string; direccion?: string | null; direccion_envio?: string | null; provincia?: string | null; instalador_id?: string | null; instalador_nombre?: string | null; fecha_visita?: string | null }>,
   material: { name: string; quantity: number; notes?: string | null },
   actor = "Operaciones"
 ) {
@@ -345,7 +345,8 @@ export function createCampaignLogisticsRequest(
         campaign: campana.nombre,
         pharmacy_name: punto.nombre_comercial,
         province: punto.provincia || null,
-        address: punto.direccion || null,
+        // Feature 2: la direccion de envio del trabajador tiene prioridad como destino.
+        address: punto.direccion_envio || punto.direccion || null,
         installer_id: punto.instalador_id || null,
         installer_name: punto.instalador_nombre || null,
         deadline: punto.fecha_visita || null,

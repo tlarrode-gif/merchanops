@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, FileDown, Package, Printer, Search, Trash2 } from "lucide-react";
 import { PuntoBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
 import { GestorAvatar } from "@/components/grandes-campanas/gestor-avatars";
 import { CampanaColumna, columnasExtraVisibles, formatearValorColumna } from "@/lib/campana-columnas";
 import { IncidenciaCampana, PuntoEstado, PuntoVenta, dateOnly, downloadCsv, downloadXlsx, eur, formatDate, puntoEstadoLabels, puntoEstados, puntosCsvRows } from "@/lib/campanas";
+import { WorkerAddress, listWorkerAddresses, formatDireccionEnvio } from "@/lib/direcciones-envio";
 
 const PAGE_SIZE = 25;
 
@@ -36,6 +37,52 @@ function LogisticaPill({ info }: { info?: { request_id: string | null; status: s
   );
 }
 
+// Feature 2: selector de la direccion de envio del instalador para un punto.
+// Carga las direcciones guardadas del instalador y permite fijar una como
+// destino logistico (opcionalmente para todos los puntos de ese instalador).
+function PuntoDireccionEnvio({ punto, saving, onSet }: {
+  punto: PuntoVenta;
+  saving: boolean;
+  onSet: (punto: PuntoVenta, direccionEnvio: string | null, direccionEnvioId: string | null, aplicarTodos: boolean) => Promise<void>;
+}) {
+  const [addresses, setAddresses] = useState<WorkerAddress[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [aplicarTodos, setAplicarTodos] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (!punto.instalador_id) { setAddresses([]); return; }
+    setLoading(true);
+    listWorkerAddresses(punto.instalador_id).then(result => { if (alive) { setAddresses(result.data); setLoading(false); } });
+    return () => { alive = false; };
+  }, [punto.instalador_id]);
+
+  if (!punto.instalador_id) return <p style={{ color: "var(--gc-muted)" }}>Asigna un instalador para elegir su dirección de envío.</p>;
+  return (
+    <div className="space-y-1">
+      <p><b>Actual:</b> {punto.direccion_envio || <span style={{ color: "var(--gc-muted)" }}>Dirección del punto (por defecto)</span>}</p>
+      {loading ? <p style={{ color: "var(--gc-muted)" }}>Cargando direcciones...</p> : addresses.length ? (
+        <>
+          <select
+            className="gc-select"
+            disabled={saving}
+            value={punto.direccion_envio_id || ""}
+            onChange={event => {
+              const addr = addresses.find(a => a.id === event.target.value);
+              onSet(punto, addr ? formatDireccionEnvio(addr) : null, addr?.id || null, aplicarTodos);
+            }}
+          >
+            <option value="">Dirección del punto (por defecto)</option>
+            {addresses.map(addr => <option key={addr.id} value={addr.id}>{(addr.etiqueta ? `${addr.etiqueta} · ` : "") + formatDireccionEnvio(addr)}</option>)}
+          </select>
+          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={aplicarTodos} onChange={event => setAplicarTodos(event.target.checked)} />Aplicar a todos los puntos de este instalador</label>
+        </>
+      ) : (
+        <p style={{ color: "var(--gc-muted)" }}>Sin direcciones de envío. Añádelas en la ficha del trabajador (Catálogos → Trabajadores).</p>
+      )}
+    </div>
+  );
+}
+
 export function PuntosTabla({
   puntos,
   incidencias,
@@ -47,7 +94,9 @@ export function PuntosTabla({
   onSolicitarMaterial,
   onUpdatePunto,
   onDeletePunto,
-  onRegistrarIncidencia
+  onRegistrarIncidencia,
+  solicitarDireccionEnvio = false,
+  onSetDireccionEnvio
 }: {
   puntos: PuntoVenta[];
   incidencias: IncidenciaCampana[];
@@ -61,6 +110,9 @@ export function PuntosTabla({
   onUpdatePunto: (punto: PuntoVenta, patch: Partial<PuntoVenta>) => Promise<void>;
   onDeletePunto: (punto: PuntoVenta) => Promise<void>;
   onRegistrarIncidencia: (punto: PuntoVenta, descripcion: string) => Promise<void>;
+  /** Feature 2: la campaña pide dirección de envío del trabajador. */
+  solicitarDireccionEnvio?: boolean;
+  onSetDireccionEnvio?: (punto: PuntoVenta, direccionEnvio: string | null, direccionEnvioId: string | null, aplicarTodos: boolean) => Promise<void>;
 }) {
   const [filtros, setFiltros] = useState<PuntosFiltros>(emptyFiltros);
   const [masFiltros, setMasFiltros] = useState(false);
@@ -256,6 +308,12 @@ export function PuntosTabla({
                             <p><b>Instalador:</b> {punto.instalador_nombre || "Sin asignar"}</p>
                             <p><b>Fecha visita:</b> {formatDate(punto.fecha_visita)}</p>
                             <p><b>Importe:</b> {punto.importe != null ? eur(punto.importe) : "—"}</p>
+                            {solicitarDireccionEnvio && onSetDireccionEnvio && (
+                              <div className="mt-2 border-t pt-2 gc-no-print">
+                                <p className="mb-1 text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>Dirección de envío (Logística)</p>
+                                <PuntoDireccionEnvio punto={punto} saving={saving} onSet={onSetDireccionEnvio} />
+                              </div>
+                            )}
                           </div>
                           <div className="space-y-1 text-sm">
                             <p className="text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>Datos del archivo importado</p>

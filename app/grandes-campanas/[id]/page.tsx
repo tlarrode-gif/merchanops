@@ -34,6 +34,7 @@ import {
   puntosCsvRows,
   setIncidenciaEstado,
   syncPuntoCompletadoConLogistica,
+  bulkSetDireccionEnvio,
   updatePunto,
   updatePuntosPorCodigo,
   deletePunto as deletePuntoDb
@@ -187,6 +188,19 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     setSaving(false);
   }
 
+  // Feature 2: fija la direccion de envio del instalador en el punto (o en todos
+  // los puntos del mismo instalador). Se vuelca a Logistica como destino.
+  async function handleSetDireccionEnvio(punto: PuntoVenta, direccionEnvio: string | null, direccionEnvioId: string | null, aplicarTodos: boolean) {
+    setSaving(true);
+    const result = aplicarTodos && punto.instalador_id
+      ? await bulkSetDireccionEnvio(params.id, punto.instalador_id, direccionEnvio, direccionEnvioId)
+      : await updatePunto(punto.id, { direccion_envio: direccionEnvio, direccion_envio_id: direccionEnvioId });
+    if (result.error) setError(result.error);
+    else flash(aplicarTodos ? "Dirección de envío aplicada a los puntos del instalador" : "Dirección de envío actualizada");
+    await refresh(true);
+    setSaving(false);
+  }
+
   async function handleDeletePunto(punto: PuntoVenta) {
     if (!confirm(`¿Borrar el punto ${punto.nombre_comercial}?`)) return;
     setSaving(true);
@@ -267,7 +281,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
       // C2: comando transaccional en la base (sin guardado en bloque).
       const { data, error: rpcError } = await supabase.rpc("create_logistics_request_campaign", {
         p_campana: { id: campana.id, nombre: campana.nombre, cliente_marca: campana.cliente_marca || null },
-        p_puntos: matPara.map(p => ({ id: p.id, nombre_comercial: p.nombre_comercial, direccion: p.direccion || null, provincia: p.provincia || null, instalador_id: p.instalador_id || null, instalador_nombre: p.instalador_nombre || null, fecha_visita: dateOk(p.fecha_visita) })),
+        p_puntos: matPara.map(p => ({ id: p.id, nombre_comercial: p.nombre_comercial, direccion: p.direccion || null, direccion_envio: p.direccion_envio || null, provincia: p.provincia || null, instalador_id: p.instalador_id || null, instalador_nombre: p.instalador_nombre || null, fecha_visita: dateOk(p.fecha_visita) })),
         p_material: { name: matForm.name.trim(), quantity: Math.max(1, Number(matForm.cantidad) || 1), notes: matForm.notas.trim() || null },
         p_actor: session?.display_name || "Operaciones"
       });
@@ -465,6 +479,8 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
               onUpdatePunto={handleUpdatePunto}
               onDeletePunto={handleDeletePunto}
               onRegistrarIncidencia={handleRegistrarIncidencia}
+              solicitarDireccionEnvio={!!campana?.solicitar_direccion_envio}
+              onSetDireccionEnvio={handleSetDireccionEnvio}
             />
           </>
         )}

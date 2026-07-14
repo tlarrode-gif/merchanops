@@ -52,7 +52,8 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
         fecha_fin: dateOnly(campana.fecha_fin),
         presupuesto: campana.presupuesto != null ? String(campana.presupuesto) : "",
         provincias: campana.provincias || [],
-        gestorIds: gestoresResult.data.map(gestor => gestor.gestor_id).filter(Boolean) as string[]
+        gestorIds: gestoresResult.data.map(gestor => gestor.gestor_id).filter(Boolean) as string[],
+        solicitarDireccionEnvio: !!campana.solicitar_direccion_envio
       });
       setLoading(false);
     }
@@ -71,7 +72,8 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
       fecha_inicio: form.fecha_inicio || null,
       fecha_fin: form.fecha_fin || null,
       provincias: form.provincias,
-      presupuesto: form.presupuesto ? Number(form.presupuesto) : null
+      presupuesto: form.presupuesto ? Number(form.presupuesto) : null,
+      solicitar_direccion_envio: form.solicitarDireccionEnvio
     });
     if (result.error) { setError(result.error); setSaving(false); return; }
     const seleccionados = gestores.filter(gestor => form.gestorIds.includes(gestor.id));

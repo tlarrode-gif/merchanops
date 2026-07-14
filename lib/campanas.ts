@@ -18,6 +18,8 @@ export type Campana = {
   fecha_fin?: string | null;
   provincias: string[];
   presupuesto?: number | null;
+  // Feature 2: la campana pide a los gestores la direccion de envio del trabajador.
+  solicitar_direccion_envio?: boolean | null;
   created_by?: string | null;
   created_by_name?: string | null;
   archived_at?: string | null;
@@ -62,6 +64,10 @@ export type PuntoVenta = {
   codigo?: string | null;
   nombre_comercial: string;
   direccion?: string | null;
+  // Feature 2: direccion de envio del trabajador elegida para este punto.
+  // Es el destino logistico preferente (prioridad sobre `direccion`).
+  direccion_envio?: string | null;
+  direccion_envio_id?: string | null;
   provincia?: string | null;
   tipo?: string | null;
   estado: PuntoEstado;
@@ -282,6 +288,7 @@ export type CampanaInput = {
   fecha_fin?: string | null;
   provincias: string[];
   presupuesto?: number | null;
+  solicitar_direccion_envio?: boolean | null;
 };
 
 export async function insertCampana(input: CampanaInput, session: AppSession | null): Promise<Result<Campana | null>> {
@@ -619,6 +626,19 @@ export async function updatePunto(id: string, patch: Partial<PuntoVenta>): Promi
   return { data: true };
 }
 
+// Feature 2: fija la direccion de envio (snapshot + referencia) en todos los puntos
+// de un instalador dentro de una campana, para no teclearla punto a punto.
+export async function bulkSetDireccionEnvio(campanaId: string, instaladorId: string, direccionEnvio: string | null, direccionEnvioId: string | null): Promise<Result<number>> {
+  if (!supabase) return { data: 0, error: "Supabase no está configurado." };
+  const bloqueada = await assertCampanaEditable(campanaId);
+  if (bloqueada) return { data: 0, error: bloqueada };
+  const { data, error } = await supabase.from("puntos_venta_campana")
+    .update({ direccion_envio: direccionEnvio || null, direccion_envio_id: direccionEnvioId || null, updated_at: new Date().toISOString() })
+    .eq("campana_id", campanaId).eq("instalador_id", instaladorId).select("id");
+  if (error) return { data: 0, error: error.message };
+  return { data: (data || []).length };
+}
+
 export async function deletePunto(id: string): Promise<Result<boolean>> {
   if (!supabase) return { data: false, error: "Supabase no está configurado." };
   const punto = await campanaIdDePunto(id);
@@ -727,6 +747,7 @@ export function puntosCsvRows(puntos: PuntoVenta[]): CampanaExportRow[] {
     Codigo: punto.codigo || "",
     "Nombre comercial": punto.nombre_comercial,
     Direccion: punto.direccion || "",
+    "Direccion envio": punto.direccion_envio || "",
     Provincia: punto.provincia || "",
     Tipo: punto.tipo || "",
     Gestor: punto.gestor_nombre || "",

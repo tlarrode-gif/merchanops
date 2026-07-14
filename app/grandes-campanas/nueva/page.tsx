@@ -67,7 +67,8 @@ export default function NuevaCampanaPage() {
         fecha_inicio: form.fecha_inicio || null,
         fecha_fin: form.fecha_fin || null,
         provincias: form.provincias,
-        presupuesto: form.presupuesto ? Number(form.presupuesto) : null
+        presupuesto: form.presupuesto ? Number(form.presupuesto) : null,
+        solicitar_direccion_envio: form.solicitarDireccionEnvio
       }, session);
       if (created.error || !created.data) { setFormError(created.error || "No se pudo crear la campaña."); return; }
       const campanaId = created.data.id;
