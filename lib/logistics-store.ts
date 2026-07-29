@@ -261,6 +261,9 @@ async function updateSourceMirrorByColumn(state: LogisticsState, table: string, 
   });
 }
 
+/** Nº de filas que se traen de las tablas de histórico (ver loadLogisticsState). */
+const HISTORY_LIMIT = 500;
+
 export async function loadLogisticsState(): Promise<{ state: LogisticsState; remote: boolean; error?: string }> {
   if (!isSupabaseConfigured || !supabase) return { state: loadLogistics(), remote: false };
 
@@ -297,11 +300,15 @@ export async function loadLogisticsState(): Promise<{ state: LogisticsState; rem
     supabase.from("logistics_material_requirements").select("*").order("updated_at", { ascending: false }),
     supabase.from("logistics_requests").select("*").order("updated_at", { ascending: false }),
     supabase.from("logistics_request_lines").select("*"),
-    supabase.from("integration_events").select("*").order("created_at", { ascending: false }),
-    supabase.from("logistics_audit_log").select("*").order("created_at", { ascending: false }),
-    supabase.from("logistics_notifications").select("*").order("created_at", { ascending: false }),
+    // Tablas de HISTÓRICO: crecen sin techo y la UI solo muestra las últimas
+    // entradas (trazas, avisos y logs de sincronización). Sin límite, cada
+    // carga del módulo se iba haciendo más lenta indefinidamente conforme se
+    // acumulaban eventos. Se traen las más recientes, que es lo que se pinta.
+    supabase.from("integration_events").select("*").order("created_at", { ascending: false }).limit(HISTORY_LIMIT),
+    supabase.from("logistics_audit_log").select("*").order("created_at", { ascending: false }).limit(HISTORY_LIMIT),
+    supabase.from("logistics_notifications").select("*").order("created_at", { ascending: false }).limit(HISTORY_LIMIT),
     supabase.from("logistics_vins").select("*").order("updated_at", { ascending: false }),
-    supabase.from("sync_logs").select("*").order("created_at", { ascending: false })
+    supabase.from("sync_logs").select("*").order("created_at", { ascending: false }).limit(HISTORY_LIMIT)
   ]);
 
   const failed = [materials, entries, entryLines, stock, movements, pickings, pickingLines, shipments, incidents, pendings, requirements, requests, requestLines, events, audit, notifications, vins, syncLogs].find(result => result.error);

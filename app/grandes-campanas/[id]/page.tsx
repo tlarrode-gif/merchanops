@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileDown, Info, MapPin, MessageCircle, Package, Pencil, Plus, Upload, Users } from "lucide-react";
 import { parseImportFile } from "@/lib/csv-parser";
@@ -351,7 +353,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   }
 
   if (!campana) {
-    return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl"><b>Campaña no encontrada.</b> <a className="underline" href="/grandes-campanas">Volver al listado</a>.{error ? ` (${error})` : ""}</section></main>;
+    return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl"><b>Campaña no encontrada.</b> <Link className="underline" href="/grandes-campanas">Volver al listado</Link>.{error ? ` (${error})` : ""}</section></main>;
   }
 
   return (
@@ -362,7 +364,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
 
         <div>
           <nav className="text-sm" style={{ color: "var(--gc-muted)" }}>
-            <a href="/grandes-campanas" className="font-semibold hover:underline">Grandes Campañas</a>
+            <Link href="/grandes-campanas" className="font-semibold hover:underline">Grandes Campañas</Link>
             <span> / </span>
             <span className="font-semibold" style={{ color: "var(--gc-text)" }}>{campana.nombre}</span>
           </nav>
@@ -380,8 +382,8 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
             <div className="flex flex-wrap gap-2 gc-no-print">
               <button className="gc-btn-outline" onClick={() => downloadXlsx(`campana_${campana.nombre.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}.xlsx`, puntosCsvRows(puntos))}><FileDown className="h-4 w-4" />Exportar</button>
               <button className="gc-btn-outline" onClick={abrirWhatsApp}><MessageCircle className="h-4 w-4" />WhatsApp</button>
-              <a href={`/grandes-campanas/${campana.id}/asignacion`} className="gc-btn-outline"><Users className="h-4 w-4" />Asignación rápida</a>
-              {canManageCampaigns(session) && <a href={`/grandes-campanas/${campana.id}/editar`} className="gc-btn-outline"><Pencil className="h-4 w-4" />Editar</a>}
+              <Link href={`/grandes-campanas/${campana.id}/asignacion`} className="gc-btn-outline"><Users className="h-4 w-4" />Asignación rápida</Link>
+              {canManageCampaigns(session) && <Link href={`/grandes-campanas/${campana.id}/editar`} className="gc-btn-outline"><Pencil className="h-4 w-4" />Editar</Link>}
               {canManageCampaigns(session) && (
                 <>
                   <input ref={updateFileRef} type="file" accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={event => handleUpdateFromExcel(event.target.files?.[0])} />
@@ -578,7 +580,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
                       ))}
                     </tbody>
                   </table>
-                  <div className="gc-table-foot"><span>Una línea por trabajador con el importe actualizado según los puntos completados. El detalle contable definitivo vive en <a className="underline" href="/historial-economico">Historial económico</a> (sincroniza allí para exportar pagos).</span></div>
+                  <div className="gc-table-foot"><span>Una línea por trabajador con el importe actualizado según los puntos completados. El detalle contable definitivo vive en <Link className="underline" href="/historial-economico">Historial económico</Link> (sincroniza allí para exportar pagos).</span></div>
                 </div>
               </div>
             )

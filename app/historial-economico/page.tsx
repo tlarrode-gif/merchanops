@@ -69,14 +69,42 @@ export default function HistorialEconomicoPage() {
 
   useEffect(() => { load(); }, [mes, tipo, origen, worker, provincia]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Sincronización automática de la gestora, una sola vez al abrir la pantalla.
+  // No hay botón para ella: entra y sus pagos ya están al día. Es idempotente
+  // (repetirla no duplica eventos), así que abrir la pantalla varias veces no
+  // tiene efectos. Administración sigue sincronizando a mano, porque su alcance
+  // incluye la facturación a cliente.
+  useEffect(() => {
+    const current = getCurrentAppSession();
+    if (!current?.active || isAdminSession(current)) return;
+    if (!canAccessModule(current, "pagos") || !(current.provinces || []).length) return;
+    void sync(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Sincroniza el registro de eventos con el estado actual de los orígenes.
   // Idempotente: repetir la sincronización no duplica eventos ya contabilizados.
-  async function sync() {
+  /**
+   * `silencioso` = sincronización automática de una gestora al abrir la pantalla.
+   * No hay botón para ella: sus pagos se sincronizan solos y punto. Solo se le
+   * habla si algo falla; el resumen de altas/sustituciones es ruido para quien
+   * no ha pedido nada.
+   *
+   * Administración conserva el botón explícito, porque su sincronización abarca
+   * también la facturación a cliente y los extras.
+   *
+   * `syncEconomicEvents` filtra por tipo y provincia, y la RLS (v9_11) lo vuelve
+   * a comprobar en la base: esto es comodidad, no la defensa.
+   */
+  async function sync(silencioso = false) {
     const current = getCurrentAppSession();
-    if (!isSupabaseConfigured || !supabase) { setMessage("La sincronización requiere Supabase activo."); return; }
-    if (!isAdminSession(current)) { setMessage("Solo administración puede sincronizar eventos."); return; }
+    if (!isSupabaseConfigured || !supabase) {
+      if (!silencioso) setMessage("La sincronización requiere Supabase activo.");
+      return;
+    }
+    if (!current?.active || !canAccessModule(current, "pagos")) return;
     setSyncing(true);
-    setMessage("");
+    if (!silencioso) setMessage("");
     try {
       const [servicesR, pointsR, bigCampaignsR, bigPointsR, vinylsR, settingsR, adjustmentsR, campanasR, puntosR] = await Promise.all([
         supabase.from("services").select("*"),
@@ -109,13 +137,17 @@ export default function HistorialEconomicoPage() {
         ...facturacionEventsFromIsdin(billingLines, adjustments as any[])
       ];
       const result = await syncEconomicEvents(nuevos, current);
-      if (result.error) setMessage(`Error al sincronizar: ${result.error}`);
-      else {
-        const { nuevos: altas, sustituidos, retenidos } = result.data;
+      if (result.error) {
+        // Un fallo SÍ se dice siempre, aunque la sincronización fuera automática:
+        // que los pagos no se hayan registrado no puede pasar desapercibido.
+        setMessage(`Error al sincronizar: ${result.error}`);
+      } else if (!silencioso) {
+        const { nuevos: altas, sustituidos, retenidos, omitidos } = result.data;
         const partes = [
           altas ? `${altas} eventos nuevos` : "",
           sustituidos ? `${sustituidos} sustituidos (el origen cambió: reverso automático + evento nuevo)` : "",
-          retenidos ? `${retenidos} retenidos en revisión (sin beneficiario)` : ""
+          retenidos ? `${retenidos} retenidos en revisión (sin beneficiario)` : "",
+          omitidos ? `${omitidos} fuera de tus provincias o de facturación a cliente (los sincroniza administración)` : ""
         ].filter(Boolean);
         setMessage(partes.length ? partes.join(" · ") + "." : "Sin cambios: el historial ya estaba al día.");
       }
@@ -220,7 +252,11 @@ export default function HistorialEconomicoPage() {
             <button onClick={() => load()} className="self-end rounded-2xl border bg-white px-4 py-2">Actualizar</button>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {admin && <button onClick={sync} disabled={syncing} className="rounded-2xl bg-slate-900 px-4 py-2 text-white">{syncing ? "Sincronizando..." : "Sincronizar eventos"}</button>}
+            {/* La gestora no pulsa nada: sus pagos se sincronizan solos al abrir
+                la pantalla (ver el efecto de arriba). El botón queda solo para
+                administración, cuya sincronización abarca además la facturación
+                a cliente y los extras. */}
+            {admin && <button onClick={() => sync()} disabled={syncing} className="rounded-2xl bg-slate-900 px-4 py-2 text-white">{syncing ? "Sincronizando..." : "Sincronizar eventos"}</button>}
             <button onClick={() => exportar("pagos")} className="rounded-2xl border bg-white px-4 py-2">Exportar pagos del mes</button>
             <button onClick={exportarPagosAgrupados} className="rounded-2xl border bg-white px-4 py-2" title="Una línea por campaña y trabajador con el importe neto acumulado">Exportar pagos agrupados</button>
             {admin && <button onClick={() => exportar("facturacion")} className="rounded-2xl border bg-white px-4 py-2">Exportar facturación del mes</button>}

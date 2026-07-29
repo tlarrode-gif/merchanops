@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CheckCircle2, FileDown, RefreshCw, Search, Send, XCircle } from "lucide-react";
 import { EstadoLogistico } from "@/components/logistics/estado-logistico";
@@ -100,7 +102,7 @@ export function SolicitudesLogisticaClient({ detailId }: { detailId?: string }) 
         <aside className="sticky top-20 hidden h-[calc(100vh-6rem)] w-64 shrink-0 rounded-2xl border bg-white p-3 shadow-sm lg:block">
           <div className="px-3 py-2"><p className="text-xs font-semibold uppercase text-slate-500">MerchanOps</p><h1 className="text-2xl font-bold">Logística</h1></div>
           <nav className="mt-3 space-y-1">
-            {modules.map(([key, label]) => <a key={key} href={`/logistica${key ? `/${key}` : ""}`} className={key === "solicitudes" ? "block rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white" : "block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"}>{label}</a>)}
+            {modules.map(([key, label]) => <Link key={key} href={`/logistica${key ? `/${key}` : ""}`} className={key === "solicitudes" ? "block rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white" : "block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"}>{label}</Link>)}
           </nav>
         </aside>
 
@@ -108,14 +110,14 @@ export function SolicitudesLogisticaClient({ detailId }: { detailId?: string }) 
           <header className="rounded-2xl border bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <a href="/logistica" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="h-4 w-4" /> Panel logístico</a>
+                <Link href="/logistica" className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="h-4 w-4" /> Panel logístico</Link>
                 <h2 className="mt-1 text-3xl font-bold">Peticiones de material</h2>
                 <p className="text-sm text-slate-500">Vista operativa con campaña, cliente/CECO, VIN/farmacia, material y destino.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <span className={remote ? "rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800" : "rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800"}>{remote ? "Supabase activo" : "Modo local"}</span>
                 <button disabled={saving} onClick={refresh} className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold disabled:opacity-50"><RefreshCw className="mr-1 inline h-4 w-4" />Actualizar</button>
-                <a href="/?tab=servicios" className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">Crear desde Servicios</a>
+                <Link href="/?tab=servicios" className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white">Crear desde Servicios</Link>
               </div>
             </div>
             <label className="mt-3 flex items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2">
@@ -155,7 +157,7 @@ export function SolicitudesLogisticaClient({ detailId }: { detailId?: string }) 
                     <Read label="Código" value={selected.code} />
                     <Read label="Campaña" value={firstText(selected.campaign_id, selectedRequirements[0]?.campaign_id, selectedRequirements[0]?.installation_week) || "Sin campaña"} />
                     <Read label="Cliente / CECO" value={firstText(selected.client_id, selectedRequirements[0]?.client_id) || "Sin cliente/CECO"} />
-                    <Read label="Origen" value={<a className="font-semibold underline-offset-2 hover:underline" href={sourceHref(selectedRequirements[0] || { source_type: selected.source_type, source_id: selected.source_id } as Requirement)}>Abrir origen -&gt;</a>} />
+                    <Read label="Origen" value={<Link className="font-semibold underline-offset-2 hover:underline" href={sourceHref(selectedRequirements[0] || { source_type: selected.source_type, source_id: selected.source_id } as Requirement)}>Abrir origen -&gt;</Link>} />
                     <Read label="Estado visible en origen" value={logisticsStatusLabel(selectedRequirements[0]?.status)} />
                     <Read label="Instalador / dirección" value={`${selected.installer_name || selectedRequirements[0]?.installer_name || "Sin instalador"} · ${selected.delivery_address || selectedRequirements[0]?.delivery_address || "Sin dirección"}`} />
                     <Read label="Comentario logística" value={selected.logistics_comment || "Sin comentario"} />
@@ -174,8 +176,8 @@ export function SolicitudesLogisticaClient({ detailId }: { detailId?: string }) 
                       <button onClick={() => rejectSelected(selected)} disabled={saving || !["borrador", "enviada", "pendiente_revision", "pendiente_material"].includes(selected.status)} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-40"><XCircle className="mr-1 inline h-4 w-4" />Rechazar petición</button>
                       <button onClick={() => cancelSelected(selected)} disabled={saving || !!selected.picking_id || ["entregada", "cerrada", "cancelada", "rechazada"].includes(selected.status)} className="w-full rounded-xl border px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-40">Archivar / cancelar</button>
                     </div>
-                    {selected.picking_id && <a className="block rounded-xl border p-3 text-sm font-semibold" href={`/logistica/picking?id=${selected.picking_id}`}>Ver picking -&gt;</a>}
-                    {selected.shipment_id && <a className="block rounded-xl border p-3 text-sm font-semibold" href={`/logistica/envios?id=${selected.shipment_id}`}>Ver envío -&gt;</a>}
+                    {selected.picking_id && <Link className="block rounded-xl border p-3 text-sm font-semibold" href={`/logistica/picking?id=${selected.picking_id}`}>Ver picking -&gt;</Link>}
+                    {selected.shipment_id && <Link className="block rounded-xl border p-3 text-sm font-semibold" href={`/logistica/envios?id=${selected.shipment_id}`}>Ver envío -&gt;</Link>}
                     <EstadoLogistico state={state} sourceType={selected.source_type} sourceId={selected.source_id} />
                   </div>
                 ) : <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Selecciona una petición para ver el detalle.</p>}
@@ -254,7 +256,7 @@ function AccessGate({ text }: { text: string }) {
       <section className="mx-auto max-w-3xl rounded-3xl border bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-bold">Logística</h1>
         <p className="mt-2 text-sm text-slate-600">{text}</p>
-        <a href="/" className="mt-4 inline-flex rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Ir al inicio</a>
+        <Link href="/" className="mt-4 inline-flex rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Ir al inicio</Link>
       </section>
     </main>
   );
