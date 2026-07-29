@@ -221,12 +221,41 @@ export function newCallFromVinyl(vinyl: IsdinVinylBase): IsdinCall {
   };
 }
 
+/**
+ * M-05: clave canónica de un VIN. La deduplicación y el emparejamiento
+ * llamada↔vinilo se hacían sobre la cadena en crudo, así que un " vin-31552 "
+ * importado con espacios o en minúsculas habría creado un registro paralelo en
+ * vez de casar con el existente. Los datos actuales están limpios (0 filas con
+ * espacios sobrantes y 0 en minúsculas en ninguna de las dos tablas), de modo
+ * que normalizar aquí no cambia ningún emparejamiento de hoy: cierra la puerta
+ * a que un import futuro los rompa.
+ */
+export function normalizeVin(value?: string | null) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+/**
+ * IMPORTANTE — un VIN puede tener VARIAS filas en `isdin_vinyls`, y es CORRECTO:
+ * así se representa que el mismo vinilo se visitó en fechas distintas. Ejemplo
+ * real en producción: VIN-31552 tiene dos filas «Finalizado», una de la semana
+ * del 11 de mayo y otra de la del 8 de junio. NO se debe crear un índice único
+ * sobre `isdin_vinyls.vinyl`: rompería el modelo de negocio.
+ *
+ * Consecuencia de la que hay que ser consciente: `isdin_calls.vin` SÍ tiene
+ * índice único (`idx_isdin_calls_vin_unique`) y los upsert usan
+ * `onConflict:"vin"`, así que N visitas de un mismo vinilo colapsan en UNA sola
+ * llamada. Esta función refleja esa realidad quedándose con la fila más reciente
+ * del listado (viene ordenado por semana ascendente). Si el negocio necesita una
+ * llamada por visita, el cambio no es aquí: hay que reclavar `isdin_calls` sobre
+ * el `id` de la fila de vinilo en vez de sobre el VIN.
+ */
 export function mergeCallsWithVinyls(calls: IsdinCall[], vinyls: IsdinVinylBase[]) {
-  const byVin = new Map(calls.map(c => [c.vin, c]));
-  // Un vinilo duplicado por VIN rompería el upsert onConflict:"vin" de todo el lote,
-  // así que se deduplica quedándose con la última fila (la más reciente del listado).
-  const uniqueVinyls = Array.from(new Map(vinyls.filter(v => v.vinyl).map(v => [v.vinyl, v])).values());
-  return uniqueVinyls.map(v => byVin.has(v.vinyl) ? mergeCallBase(byVin.get(v.vinyl) as IsdinCall, v) : newCallFromVinyl(v));
+  const byVin = new Map(calls.map(c => [normalizeVin(c.vin), c]));
+  const uniqueVinyls = Array.from(new Map(vinyls.filter(v => normalizeVin(v.vinyl)).map(v => [normalizeVin(v.vinyl), v])).values());
+  return uniqueVinyls.map(v => {
+    const key = normalizeVin(v.vinyl);
+    return byVin.has(key) ? mergeCallBase(byVin.get(key) as IsdinCall, v) : newCallFromVinyl(v);
+  });
 }
 
 export function callForDb(call: IsdinCall) {

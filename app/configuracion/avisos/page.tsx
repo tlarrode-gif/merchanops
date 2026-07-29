@@ -26,6 +26,7 @@ export default function AvisosPage() {
   const [outbox, setOutbox] = useState<Row[]>([]);
   const [blocked, setBlocked] = useState<Row[]>([]);
   const [imports, setImports] = useState<Row[]>([]);
+  const [sinObligacion, setSinObligacion] = useState<Row[]>([]);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -34,16 +35,22 @@ export default function AvisosPage() {
   async function refresh() {
     if (!isSupabaseConfigured || !supabase) { setLoading(false); return; }
     setLoading(true);
-    const [ob, bl, im] = await Promise.all([
+    const [ob, bl, im, fin, obl] = await Promise.all([
       supabase.from("outbox_events").select("id,event_id,event_type,status,attempts,max_attempts,last_error,created_at,next_attempt_at").in("status", ["error", "dead_letter"]).order("created_at", { ascending: false }).limit(50),
       supabase.from("payment_obligations").select("obligation_key,origin,type,amount_cents,blocked_reasons,concept,status").eq("payable", false).eq("status", "calculado").order("obligation_key").limit(100),
-      supabase.from("import_runs").select("id,source,file_name,actor,status,total_rows,valid_rows,rejected_rows,created_at").order("created_at", { ascending: false }).limit(10)
+      supabase.from("import_runs").select("id,source,file_name,actor,status,total_rows,valid_rows,rejected_rows,created_at").order("created_at", { ascending: false }).limit(10),
+      // Punto ciego que faltaba: las obligaciones que NUNCA llegaron a crearse.
+      // El bloque de arriba solo ve las que existen y están bloqueadas.
+      supabase.from("isdin_vinyls").select("vinyl,base_payment,installer_name,province,status_changed_at").eq("status", "Finalizado"),
+      supabase.from("payment_obligations").select("source_id").eq("type", "installation")
     ]);
-    const problems = [ob.error, bl.error, im.error].filter(Boolean) as { message: string }[];
+    const problems = [ob.error, bl.error, im.error, fin.error, obl.error].filter(Boolean) as { message: string }[];
     setError(problems.length ? `Error cargando avisos: ${problems.map(e => e.message).join(" · ")}` : "");
     setOutbox((ob.data || []) as Row[]);
     setBlocked((bl.data || []) as Row[]);
     setImports((im.data || []) as Row[]);
+    const conObligacion = new Set(((obl.data || []) as Row[]).map(row => String(row.source_id)));
+    setSinObligacion(((fin.data || []) as Row[]).filter(row => !conObligacion.has(String(row.vinyl))));
     setLoading(false);
   }
   useEffect(() => { refresh(); }, []);
@@ -105,6 +112,26 @@ export default function AvisosPage() {
                 <p className="text-xs text-red-700">Bloqueada por: {(Array.isArray(row.blocked_reasons) ? row.blocked_reasons : []).join(", ") || "motivo no registrado"}</p>
               </div>
               <span className="font-semibold">{eur(row.amount_cents)}</span>
+            </div>
+          ))}
+        </Card>
+
+        <Card title={`Instalaciones terminadas sin obligación de pago (${sinObligacion.length})`} tone={sinObligacion.length ? "warn" : "ok"}>
+          {sinObligacion.length === 0 && <Empty text="Todo el trabajo terminado tiene su obligación de pago registrada." />}
+          {sinObligacion.length > 0 && (
+            <p className="border-t pt-3 text-xs text-red-700">
+              Estos vinilos están en «Finalizado» pero NO tienen obligación de instalación: es trabajo hecho que
+              nadie va a cobrar. Se corrige entrando en el vinilo y guardando cualquier cambio (el volcado es
+              automático), o desde «Volcar pagos pendientes» en la pantalla de Vinilos ISDIN.
+            </p>
+          )}
+          {sinObligacion.map(row => (
+            <div key={row.vinyl} className="flex flex-wrap items-center justify-between gap-2 border-t py-3 text-sm">
+              <div>
+                <p className="font-semibold">{row.installer_name || "Sin instalador"} <span className="font-mono text-xs text-slate-500">{row.vinyl}</span></p>
+                <p className="text-xs text-slate-500">{row.province || "Sin provincia"} · terminado {when(row.status_changed_at)}</p>
+              </div>
+              <span className="font-semibold">{eur(Math.round(Number(row.base_payment || 0) * 100))}</span>
             </div>
           ))}
         </Card>

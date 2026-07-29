@@ -271,7 +271,16 @@ export default function IsdinCallsPage() {
       call_next_visit_week: call.next_visit_week || null,
       requires_operations_review: Boolean(call.requires_operations_review)
     };
-    const { error } = await supabase.from("isdin_vinyls").update(mirror).eq("vinyl", call.vin);
+    // A-02: el espejo apuntaba a `.eq("vinyl", call.vin)`. Un mismo VIN puede tener
+    // varias filas en `isdin_vinyls` —es correcto: representan visitas en fechas
+    // distintas, p. ej. VIN-31552 en mayo y en junio—, así que esa consulta escribía
+    // el estado de la llamada en TODAS las visitas de ese vinilo. Se direcciona por
+    // clave primaria cuando se conoce, que es siempre que la llamada se creó desde
+    // un vinilo (callBaseFromVinyl fija isdin_vinyl_id); solo se recurre al VIN para
+    // filas legadas sin ese vínculo.
+    const vinylId = call.isdin_vinyl_id || call.vinyl_id || null;
+    const query = supabase.from("isdin_vinyls").update(mirror);
+    const { error } = vinylId ? await query.eq("id", vinylId) : await query.eq("vinyl", call.vin);
     return error?.message || "";
   }
 
