@@ -3,7 +3,10 @@
 **Fecha:** 29 de julio de 2026
 **Alcance:** repositorio completo (`31d1475`) + base de datos Supabase `MerchanOPS` (`dptmswhwmqimijpfyndn`, PG 17.6) verificada en vivo, en modo solo lectura.
 **Método:** lectura de las 128 fuentes versionadas, consulta directa del catálogo de PostgreSQL (`pg_policies`, `pg_class`, `pg_proc`, `information_schema`), *advisors* de seguridad de Supabase, y ejecución de `tsc --noEmit`, `next lint`, `vitest`, `madge`, `depcheck` y `ts-prune`.
-**Ninguna modificación aplicada.** Este documento solo describe.
+> **⚠️ Este documento tiene una adenda.** La §7 (al final) recoge qué se ha
+> remediado, qué se ha descartado y **cuatro hallazgos de este informe que
+> resultaron ser incorrectos o estar sobredimensionados** al ir a implementarlos.
+> En caso de conflicto, manda la §7.
 
 ---
 
@@ -201,3 +204,93 @@ Leyenda: **✅ correcto** (UI y RLS coherentes) · **🟠 solo UI** (la UI restr
 - **P-6.** El duplicado **`VIN-31552`**: ¿son dos farmacias distintas con el mismo código o una fila repetida? Determina si se fusiona o se renumera.
 - **P-7.** ¿`/ui-preview` es una herramienta que el equipo usa, o resto de una migración visual?
 - **P-8.** ¿Quieres que la Ola 1 se implemente en este mismo branch, o prefieres un branch por ola?
+
+---
+
+## 7. Adenda — remediación aplicada y correcciones al informe
+
+*29 de julio de 2026, misma sesión. Esta sección prevalece sobre lo anterior.*
+
+### 7.1 Decisión de negocio recibida
+
+Se pidió expresamente **no tocar los 364 puntos sin provincia**. Se respeta: no
+se ha modificado ni una fila. El `UPDATE` de datos y el `NOT NULL` propuestos en
+la Ola 1 quedan **cancelados**, no aplazados.
+
+### 7.2 Investigación de los 364 puntos (cierra P-2)
+
+Son **residuo histórico**, no un flujo vivo. El corte es limpio al día:
+
+| Mes | Sin provincia | Con provincia |
+|---|---|---|
+| 2026-05 | 241 | 0 |
+| 2026-06 | 123 | 0 |
+| 2026-07 | 0 | 99 |
+
+Último punto sin provincia: `2026-06-26 11:32`. Primero con provincia:
+`2026-07-02 07:11`. Causa raíz identificada en git: el commit **`fae7516`
+(2026-06-30)** añadió `province` al tipo `Point` de `app/page.tsx` —antes el
+campo no existía en la aplicación, aunque la columna sí estaba en la base— y
+creó `addServiceScoped`, que propaga la provincia del servicio al punto. El
+flujo lleva arreglado desde entonces.
+
+Reparto por estado del servicio padre: **Validado 223 pts / 6.559,90 €**
+(validados pero *no pagados*), Pagado 140 / 6.891,76 €, Asignado 1 / 15,00 €.
+Recuperabilidad: **364/364** desde el servicio padre; 0 huérfanos, 0 provincias
+no normalizables.
+
+### 7.3 C-01 — RESUELTO sin tocar datos
+
+Migración **`supabase/v9_8_rls_points_via_service.sql`**, aplicada a producción.
+La policy `points.province_scope_all` ya no lee `points.province`: deriva la
+provincia del **servicio padre** mediante `EXISTS` explícito.
+
+Verificado gestor a gestor **antes** de aplicar. La partición territorial real
+hace que toda la actividad caiga hoy en la zona de un solo gestor:
+
+| Gestor | Servicios visibles | Puntos en la app | Puntos por API (antes → después) |
+|---|---|---|---|
+| Kilian, Lara, Lidia, Marc, Yima | 0 | 0 | **364 → 0** |
+| Mai | 252 | 463 | 463 → 463 |
+
+Como `app/page.tsx:59` solo carga puntos de servicios ya visibles
+(`.in("service_id", serviceIds)`), **la UI es idéntica antes y después**: lo
+único que cambia es lo que devuelve una llamada directa a `/rest/v1/points`.
+Post-aplicación: 463 filas, 364 sin provincia, suma de `fee` sin alterar.
+
+### 7.4 Correcciones a hallazgos de este mismo informe
+
+Cuatro afirmaciones de las §2–§4 no resistieron la implementación:
+
+| ID | Qué decía el informe | Qué es cierto |
+|---|---|---|
+| **M-02** | «La UI restringe `/historial-economico` a admin mientras `economic_events` solo exige `pagos`» | **Incorrecto.** El guard real es `canAccessModule(session, "pagos")` (`app/historial-economico/page.tsx:196`), que coincide exactamente con la RLS. Solo la acción de *sincronizar* es admin (`:77`). **UI y servidor están alineados; no había nada que arreglar.** El único caso genuino que queda es `/configuracion/avisos` (admin en UI) sobre `outbox_events` y `payment_obligations`, y **no debe tocarse**: `outbox_events` lo necesitará MerchanLOGS, y `payment_obligations` lo lee la página ISDIN (`lib/payments/import.ts` ← `app/grandes-campanas/isdin/page.tsx`, guard `isdin`). |
+| **M-01** | «Restringir `app_users` a `admin OR self`» | **Inaplicable tal como se propuso.** `/grandes-campanas/[id]/asignacion` —abierta a cualquier gestor con permiso `servicios`— llama a `loadInternalUsers()` y necesita `id`, `display_name`, `active` y `provinces` **de otros gestores** para poblar el desplegable de asignación (`asignacion/page.tsx:57,64-67`). La restricción dejaría ese desplegable con un solo nombre. **No aplicada.** La vía correcta es una vista `v_app_users_basic` con solo esas cuatro columnas y migrar la página a ella. Queda pendiente. |
+| **B-01** | «`lib/payments/reconcile.ts` sin importadores → seguro eliminar» | **Falso.** `tests/payments-reconcile.test.ts:8` importa `buildReconcileReport`. `ts-prune` solo marcaba `reconcileIsdin`, que sí está sin usar. **El fichero se conserva.** Lección: `ts-prune` reporta por *export*, no por fichero. |
+| **A-04** | «Los totales de Pagos no se revalidan tras una mutación» | **Sobredimensionado.** Las líneas de servicio derivan del prop `services`, que sí es reactivo; solo el bloque de grandes campañas se carga una vez (`useEffect(...,[])`). Como ese bloque lee las tablas vacías de A-03 y se ha decidido dejar A-03 como está, el efecto práctico hoy es **nulo**. No se toca. |
+
+### 7.5 Cambios de código aplicados
+
+| ID | Cambio | Fichero |
+|---|---|---|
+| **A-01** | Las 9 mutaciones que descartaban `error` ahora lo capturan, **revierten el estado optimista** y muestran el fallo. Ya no se anuncia «Guardado» sobre una escritura rechazada. | `app/page.tsx` — `updateClient`, `delClient`, `updateWorker`, `delWorker`, `updateService`, `updateServiceFull`, `updatePoint`, `delPoint`, `delService` |
+| **A-02** | El espejo llamada→vinilo se direcciona por clave primaria (`isdin_vinyl_id`) en vez de por `vinyl`, con respaldo al VIN solo para filas legadas sin vínculo. Deja de escribir en las dos filas del duplicado `VIN-31552`. | `app/grandes-campanas/isdin/llamadas/page.tsx` |
+| **M-05** | Nueva `normalizeVin()`; la deduplicación y el emparejamiento llamada↔vinilo usan la clave canónica (`trim` + mayúsculas). No cambia ningún emparejamiento actual: cierra la puerta a que un import futuro los rompa. | `lib/isdin-calls.ts` |
+| **M-06** | Lista blanca de secciones y `notFound()` para el resto. | `app/logistica/[section]/page.tsx` |
+| **B-04** | `NEXT_PUBLIC_MERCHANLOGS_URL` declarada, con aviso del *fallback* a producción. Aviso añadido sobre `NEXT_PUBLIC_INITIAL_ADMIN_PASSWORD` (queda incrustada en el bundle). | `.env.example` |
+| **B-01/B-05** | Eliminados: `lib/payment-audit.ts`, `public/isdin-operational-view.js`, `canViewGlobalDashboards`, `provinciasParaSesion`, `normalizeProvincia`, `CURRENCY`. | varios |
+
+**Verificación:** `tsc --noEmit` → 0 errores. `vitest` → 51/51. `next lint` → los
+mismos 2 *warnings* preexistentes. `next build` → las 20 rutas compilan.
+
+### 7.6 Pendiente
+
+- **A-02 (índice único).** `CREATE UNIQUE INDEX` sobre `isdin_vinyls.vinyl` **no
+  se ha aplicado**: fallaría con el duplicado `VIN-31552` presente, y resolverlo
+  implica borrar o fusionar una fila. Bloqueado por **P-6**. El arreglo de código
+  ya protege del efecto principal, pero nada impide que aparezcan más duplicados.
+- **M-01.** Vista `v_app_users_basic` + migrar la página de asignación.
+- **B-07.** *Leaked password protection* — ajuste del panel de Supabase Auth, no
+  hay SQL que lo haga.
+- **A-03, M-08, M-03, M-07** y la **Ola 4** completa siguen abiertos.
+- **P-3 respondida:** se deja `big_campaigns` como está (deuda documentada).

@@ -713,15 +713,6 @@ export function filterPuntosBySession(puntos: PuntoVenta[], session: AppSession 
   return puntos.filter(punto => sessionCanSeePunto(session, punto));
 }
 
-export function provinciasParaSesion(session: AppSession | null) {
-  if (isAdminSession(session)) return null;
-  return provinceScopeValues(session?.provinces || []);
-}
-
-export function normalizeProvincia(value?: string | null) {
-  return normalizeProvince(value);
-}
-
 export type CampanaExportRow = Record<string, string | number>;
 
 // El presupuesto solo se incluye en exportaciones de administrador.

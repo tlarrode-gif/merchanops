@@ -221,12 +221,31 @@ export function newCallFromVinyl(vinyl: IsdinVinylBase): IsdinCall {
   };
 }
 
+/**
+ * M-05: clave canónica de un VIN. La deduplicación y el emparejamiento
+ * llamada↔vinilo se hacían sobre la cadena en crudo, así que un " vin-31552 "
+ * importado con espacios o en minúsculas habría creado un registro paralelo en
+ * vez de casar con el existente. Los datos actuales están limpios (0 filas con
+ * espacios sobrantes y 0 en minúsculas en ninguna de las dos tablas), de modo
+ * que normalizar aquí no cambia ningún emparejamiento de hoy: cierra la puerta
+ * a que un import futuro los rompa.
+ */
+export function normalizeVin(value?: string | null) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
 export function mergeCallsWithVinyls(calls: IsdinCall[], vinyls: IsdinVinylBase[]) {
-  const byVin = new Map(calls.map(c => [c.vin, c]));
+  const byVin = new Map(calls.map(c => [normalizeVin(c.vin), c]));
   // Un vinilo duplicado por VIN rompería el upsert onConflict:"vin" de todo el lote,
   // así que se deduplica quedándose con la última fila (la más reciente del listado).
-  const uniqueVinyls = Array.from(new Map(vinyls.filter(v => v.vinyl).map(v => [v.vinyl, v])).values());
-  return uniqueVinyls.map(v => byVin.has(v.vinyl) ? mergeCallBase(byVin.get(v.vinyl) as IsdinCall, v) : newCallFromVinyl(v));
+  // OJO: `isdin_vinyls.vinyl` NO tiene índice único en base, así que los duplicados
+  // son posibles y de hecho existe uno en producción (VIN-31552). Mientras siga sin
+  // constraint, esta deduplicación es lo único que evita que reviente el lote entero.
+  const uniqueVinyls = Array.from(new Map(vinyls.filter(v => normalizeVin(v.vinyl)).map(v => [normalizeVin(v.vinyl), v])).values());
+  return uniqueVinyls.map(v => {
+    const key = normalizeVin(v.vinyl);
+    return byVin.has(key) ? mergeCallBase(byVin.get(key) as IsdinCall, v) : newCallFromVinyl(v);
+  });
 }
 
 export function callForDb(call: IsdinCall) {

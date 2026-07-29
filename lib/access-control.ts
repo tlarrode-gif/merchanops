@@ -319,10 +319,6 @@ export function canViewFinancials(session?: AppSession | null) {
   return Boolean(session?.active) && isAdminSession(session);
 }
 
-export function canViewGlobalDashboards(session?: AppSession | null) {
-  return Boolean(session?.active) && isAdminSession(session);
-}
-
 export function canManageCampaigns(session?: AppSession | null) {
   return Boolean(session?.active) && isAdminSession(session);
 }
