@@ -794,3 +794,66 @@ notificación duplicada (25, las mismas).
    consumidor. Si algún día MerchanLOGS consume la familia `logistics.*`, hay que
    pasar el estado a por-consumidor **antes**; con el diseño actual, que
    db-notifier las complete impide que otro las reciba (**P-15**).
+
+---
+
+## 7.13 Adenda 8 — P-15 resuelto; P-14 y B-07 cerrados por decisión
+
+### P-14 — cerrada por decisión de negocio
+
+Las 74 referencias huérfanas de `isdin_vinyls.logistics_request_id` **se dejan
+como están**. La policy de `v9_9` cubre las dos vías de enlace precisamente para
+no depender de esa limpieza, así que el rol `almacen` funciona igual. Queda
+documentado como deuda conocida, no como pendiente.
+
+### B-07 — en manos del equipo
+
+Se activará esta semana junto con el cambio de contraseñas de los 8 usuarios,
+que es el orden correcto: contraseñas fuertes primero, toggle después.
+
+### P-15 — `v10_1`, el outbox pasa a ser multi-consumidor de verdad
+
+**El problema.** `inbox_processed` está diseñada por consumidor, pero
+`outbox_complete` marcaba `status='completado'` en la fila del evento en cuanto
+CUALQUIER consumidor terminaba, y `outbox_claim` solo reclama `pendiente`/`error`.
+El primer consumidor que acabase cerraba el evento para todos los demás.
+
+Hoy no se nota —solo existe `db-notifier`— pero es una trampa puesta justo en el
+camino de Merchan Core: el día que MerchanLOGS se registrase como segundo
+consumidor **empezaría a perder eventos en silencio**, sin error y sin
+dead-letter. La misma clase de fallo silencioso que ha aparecido una y otra vez
+en esta auditoría.
+
+**La solución.** Registro explícito `outbox_consumers`. Un evento solo se da por
+`completado` cuando **todos los consumidores habilitados** lo han procesado. Con
+un único consumidor registrado, «todos» equivale a «él», así que **el
+comportamiento de hoy no cambia**.
+
+De paso se corrige un defecto latente de `outbox_claim`: reclamaba eventos que el
+propio consumidor ya había procesado, **gastando un intento cada vez**. Con un
+consumidor nunca se dio; con dos habría agotado `max_attempts` y dejado eventos
+atascados en `pendiente`, invisibles.
+
+**Probado de extremo a extremo contra la base real**, con datos marcados y
+eliminados después:
+
+| Escenario | Resultado |
+|---|---|
+| 1 consumidor, 1 ciclo | `completado`, `attempts=1` — **idéntico a antes** |
+| 2 consumidores, solo procesa db-notifier | `pendiente` — el evento sigue vivo para el otro |
+| 3 ciclos más de db-notifier | `attempts` sigue en **1** — no re-reclama |
+| El 2.º consumidor procesa | `completado` |
+
+Limpieza verificada: 0 filas de prueba en `outbox_events`, `inbox_processed` y
+`outbox_consumers`. Estado final: 11 completados, 11 en inbox, 1 consumidor
+registrado, 25 notificaciones (las mismas).
+
+**Cómo registrar MerchanLOGS cuando llegue el momento:**
+
+```sql
+insert into outbox_consumers (consumer, descripcion)
+values ('merchanlogs', 'Consumidor de MerchanLOGS');
+```
+
+Regístralo **antes** de que empiece a consumir. Si se registra y no consume, los
+eventos se quedan en `pendiente` a propósito —visibles— en vez de perderse.
