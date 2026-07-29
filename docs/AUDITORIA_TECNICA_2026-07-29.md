@@ -551,3 +551,80 @@ Desglose: 12 obligaciones de instalación más una de visita fallida para
   casos históricos o cargas masivas.
 - **M-09 revisado.** Las 502 obligaciones siguen todas en `calculado`: ninguna
   ha avanzado a aprobada/pagada. Eso es un flujo aparte, todavía sin usar.
+
+---
+
+## 7.10 Adenda 5 — cabos atados
+
+### 1. El punto ciego de avisos, cubierto
+
+`/configuracion/avisos` tenía un hueco: mostraba las obligaciones **bloqueadas**
+(las que existen pero les falta un dato) y no las que **nunca llegaron a
+crearse**, que es justo como se perdieron los 309,56 €.
+
+Nueva tarjeta **«Instalaciones terminadas sin obligación de pago»**: cruza
+`isdin_vinyls` en estado `Finalizado` contra las obligaciones de tipo
+`installation` y lista lo que falta, con instalador, provincia, fecha de
+finalización e importe. Si sale a cero, dice explícitamente que todo el trabajo
+terminado tiene su pago registrado.
+
+### 2. `reconcileIsdin` conectado — botón «Volcar pagos pendientes»
+
+En la pantalla de Vinilos ISDIN, junto a los exportadores. Recalcula y vuelca
+las obligaciones de **todos los vinilos visibles**; como la RLS ya limita lo
+visible al ámbito provincial, cada gestor concilia su zona y nada más.
+
+Cubre lo que el volcado por edición no alcanza: históricos anteriores a este
+cambio y cargas masivas. **Disponible para gestores, no solo administración.**
+Informa del resultado real (`N nuevas, N actualizadas, N divergencias`) y, si no
+faltaba nada, lo dice en vez de fingir que hizo algo.
+
+### 3. Por qué ninguna obligación sale de `calculado` — diagnóstico
+
+**La máquina de estados está completa y el flujo de aprobación no existe.**
+
+Todo lo de abajo está construido:
+
+| Pieza | Dónde | Estado |
+|---|---|---|
+| Transiciones `calculado → revisado → cerrado` (+ `anulado`) | `lib/payments/types.ts:16` | definida |
+| RPC `change_payment_obligation_status` | base de datos | existe |
+| RPC `create_payment_adjustment` | base de datos | existe |
+| Cliente `changeObligationStatus()` | `lib/payments/ledger.ts:92` | **0 llamadas** |
+| Cliente `createAdjustment()` | `lib/payments/ledger.ts` | **0 llamadas** |
+
+No hay ninguna pantalla que liste obligaciones y permita moverlas de estado. El
+ledger calcula lo que se debe y ahí se acaba el rastro: las **502 obligaciones
+seguirán en `calculado` para siempre** porque nunca se construyó la pantalla que
+las aprueba.
+
+Esto **no es un defecto que se arregle**: es funcionalidad sin terminar, y
+completarla exige decisiones de negocio que no me corresponden —quién aprueba,
+qué significa operativamente «cerrado», si genera una remesa o un fichero de
+pago, y si un gestor puede aprobar los pagos de su propia zona o hace falta un
+segundo par de ojos—. Queda documentado con el alcance exacto (**P-13**).
+
+### Estado final de los hallazgos
+
+| ID | Estado |
+|---|---|
+| **C-01** CRÍTICO | ✅ Resuelto sin tocar datos (policy vía servicio padre) |
+| **A-01** ALTO | ✅ Resuelto — 9 mutaciones + `updateItem` de ISDIN |
+| **A-02** ALTO | ⚠️ Recomendación retirada (era errónea); espejo por PK corregido |
+| **A-03** ALTO | ⏸️ Se deja como está, por decisión |
+| **A-04** ALTO | ↓ Sobredimensionado, sin efecto práctico |
+| **A-05** ALTO | ❌ Retirado — error mío, el motor era correcto |
+| **A-06** ALTO | ✅ Rediagnosticado y resuelto — 309,56 € recuperados + volcado automático |
+| **M-01** MEDIO | ⏸️ No aplicable como se propuso; requiere vista `v_app_users_basic` |
+| **M-02** MEDIO | ❌ Incorrecto — UI y RLS ya alineadas |
+| **M-05, M-06** | ✅ Resueltos |
+| **M-08** MEDIO | ⏸️ 1 evento en dead-letter, sin tocar |
+| **M-09** MEDIO | 🔍 Diagnosticado — falta el flujo de aprobación (P-13) |
+| **M-03, M-04, M-07** | ⏸️ Abiertos (deuda de calidad) |
+| **B-01, B-04, B-05** | ✅ Limpieza aplicada |
+| **B-07** | ⏸️ Ajuste del panel de Supabase, sin SQL posible |
+| **Ola 4 (Merchan Core)** | ⏸️ Abierta |
+
+**P-13 (nueva).** El flujo de aprobación de pagos: ¿se construye? Y si sí,
+¿puede un gestor aprobar los pagos de su propia zona, o hace falta validación de
+administración?
