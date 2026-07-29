@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import Link from "next/link";
 import { Archive, ArchiveRestore, Copy, Eye, FileDown, MoreVertical, Pencil, Trash2, Users } from "lucide-react";
 import { AppSession, canDeleteCampaigns, canManageCampaigns } from "@/lib/access-control";
 import {
@@ -33,18 +35,57 @@ export function CampanaAcciones({
 }) {
   const [abierto, setAbierto] = useState(false);
   const [modal, setModal] = useState<ModalAbierto>(null);
+  // El menú se pinta en un PORTAL con posición fija en vez de en un absolute
+  // dentro de la fila: .gc-table-wrap tiene overflow:auto y recortaba el
+  // desplegable, así que las últimas opciones quedaban invisibles.
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const botonRef = useRef<HTMLButtonElement>(null);
   const gestiona = canManageCampaigns(session);
   const archivada = row.estado === "archivada";
+
+  const ANCHO = 210;
+  const ALTO_ESTIMADO = 300;
+
+  const colocar = useCallback(() => {
+    const caja = botonRef.current?.getBoundingClientRect();
+    if (!caja) return;
+    // Alineado a la derecha del botón, sin salirse de la ventana.
+    const left = Math.max(8, Math.min(caja.right - ANCHO, window.innerWidth - ANCHO - 8));
+    const hueco = window.innerHeight - caja.bottom;
+    // Si no cabe debajo pero sí encima, se despliega hacia arriba.
+    if (hueco < ALTO_ESTIMADO && caja.top > hueco) setPos({ left, bottom: window.innerHeight - caja.top + 4 });
+    else setPos({ left, top: caja.bottom + 4 });
+  }, []);
+
+  function alternar() {
+    if (abierto) { setAbierto(false); return; }
+    colocar();
+    setAbierto(true);
+  }
 
   useEffect(() => {
     if (!abierto) return;
     const cerrar = (event: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) setAbierto(false);
+      const destino = event.target as Node;
+      if (menuRef.current?.contains(destino) || wrapRef.current?.contains(destino)) return;
+      setAbierto(false);
     };
+    const conTecla = (event: KeyboardEvent) => { if (event.key === "Escape") setAbierto(false); };
+    // Al hacer scroll (de la página o de la propia tabla) el botón se mueve:
+    // se recoloca el menú para que siga pegado a él.
     document.addEventListener("mousedown", cerrar);
-    return () => document.removeEventListener("mousedown", cerrar);
-  }, [abierto]);
+    document.addEventListener("keydown", conTecla);
+    window.addEventListener("scroll", colocar, true);
+    window.addEventListener("resize", colocar);
+    return () => {
+      document.removeEventListener("mousedown", cerrar);
+      document.removeEventListener("keydown", conTecla);
+      window.removeEventListener("scroll", colocar, true);
+      window.removeEventListener("resize", colocar);
+    };
+  }, [abierto, colocar]);
 
   async function archivar() {
     setAbierto(false);
@@ -63,18 +104,18 @@ export function CampanaAcciones({
 
   return (
     <div ref={wrapRef} className="gc-menu-wrap" onClick={event => event.stopPropagation()}>
-      <button title="Acciones" className="rounded-lg border p-1.5 hover:bg-slate-50" style={{ borderColor: "var(--gc-border)" }} onClick={() => setAbierto(open => !open)}>
+      <button ref={botonRef} title="Acciones" aria-haspopup="menu" aria-expanded={abierto} className="rounded-lg border p-1.5 hover:bg-slate-50" style={{ borderColor: "var(--gc-border)" }} onClick={alternar}>
         <MoreVertical className="h-4 w-4" />
       </button>
-      {abierto && (
-        <div className="gc-menu">
-          <a href={`/grandes-campanas/${row.id}`}><Eye className="h-4 w-4" />Ver detalle</a>
-          <a href={`/grandes-campanas/${row.id}/asignacion`}><Users className="h-4 w-4" />Asignación rápida</a>
+      {abierto && pos && typeof document !== "undefined" && createPortal(
+        <div ref={menuRef} role="menu" className="gc-menu" style={{ left: pos.left, top: pos.top, bottom: pos.bottom }}>
+          <Link href={`/grandes-campanas/${row.id}`} onClick={() => setAbierto(false)}><Eye className="h-4 w-4" />Ver detalle</Link>
+          <Link href={`/grandes-campanas/${row.id}/asignacion`} onClick={() => setAbierto(false)}><Users className="h-4 w-4" />Asignación rápida</Link>
           <button onClick={() => { setAbierto(false); onExport(row); }}><FileDown className="h-4 w-4" />Exportar CSV</button>
           {gestiona && (
             <>
               <div className="gc-menu-sep" />
-              <a href={`/grandes-campanas/${row.id}/editar`}><Pencil className="h-4 w-4" />Editar campaña</a>
+              <Link href={`/grandes-campanas/${row.id}/editar`} onClick={() => setAbierto(false)}><Pencil className="h-4 w-4" />Editar campaña</Link>
               <button onClick={() => { setAbierto(false); setModal("duplicar"); }}><Copy className="h-4 w-4" />Duplicar…</button>
               {archivada
                 ? <button onClick={restaurar}><ArchiveRestore className="h-4 w-4" />Restaurar</button>
@@ -84,7 +125,8 @@ export function CampanaAcciones({
               )}
             </>
           )}
-        </div>
+        </div>,
+        document.body
       )}
       {modal === "duplicar" && <DuplicarModal row={row} session={session} onClose={() => setModal(null)} onDone={onDone} onError={onError} />}
       {modal === "borrar" && <BorrarModal row={row} session={session} onClose={() => setModal(null)} onDone={onDone} onError={onError} onArchivar={archivar} />}

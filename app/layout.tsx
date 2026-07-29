@@ -8,6 +8,7 @@ import "./forms-visual.css";
 import "./campaigns-visual.css";
 import "./isdin-refined-table.css";
 import "./grandes-campanas-visual.css";
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { DM_Mono, DM_Sans, Inter } from "next/font/google";
 import { AppShell } from "./app-shell";
@@ -41,7 +42,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="es">
       <body className={`${dmSans.variable} ${dmMono.variable} ${inter.variable}`}>
-        <AppShell>{children}</AppShell>
+        {/* AppShell lee la query (?tab=) con useSearchParams para marcar el
+            enlace activo tras una navegación client-side; eso exige Suspense. */}
+        <Suspense fallback={null}>
+          <AppShell>{children}</AppShell>
+        </Suspense>
       </body>
     </html>
   );

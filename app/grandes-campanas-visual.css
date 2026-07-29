@@ -211,8 +211,12 @@
 
 /* Menú de acciones por campaña */
 .gc-menu-wrap { position: relative; display: inline-block; }
+/* El menú se monta en un portal sobre <body> con posición FIJA. Antes era
+   absolute dentro de la fila, y .gc-table-wrap (overflow:auto) lo recortaba:
+   las últimas opciones quedaban fuera de la vista. Al vivir fuera de la tabla
+   ya no lo recorta nada. Las coordenadas las calcula campana-acciones.tsx. */
 .gc-menu {
-  position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; min-width: 210px;
+  position: fixed; z-index: 1000; width: 210px; max-height: min(300px, 70vh); overflow-y: auto;
   background: #fff; border: 1px solid var(--gc-border); border-radius: 12px; padding: 6px;
   box-shadow: 0 12px 32px rgba(26,26,46,.14); text-align: left;
 }

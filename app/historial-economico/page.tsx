@@ -111,11 +111,12 @@ export default function HistorialEconomicoPage() {
       const result = await syncEconomicEvents(nuevos, current);
       if (result.error) setMessage(`Error al sincronizar: ${result.error}`);
       else {
-        const { nuevos: altas, sustituidos, retenidos } = result.data;
+        const { nuevos: altas, sustituidos, retenidos, omitidos } = result.data;
         const partes = [
           altas ? `${altas} eventos nuevos` : "",
           sustituidos ? `${sustituidos} sustituidos (el origen cambió: reverso automático + evento nuevo)` : "",
-          retenidos ? `${retenidos} retenidos en revisión (sin beneficiario)` : ""
+          retenidos ? `${retenidos} retenidos en revisión (sin beneficiario)` : "",
+          omitidos ? `${omitidos} fuera de tus provincias o de facturación a cliente (los sincroniza administración)` : ""
         ].filter(Boolean);
         setMessage(partes.length ? partes.join(" · ") + "." : "Sin cambios: el historial ya estaba al día.");
       }
@@ -220,7 +221,11 @@ export default function HistorialEconomicoPage() {
             <button onClick={() => load()} className="self-end rounded-2xl border bg-white px-4 py-2">Actualizar</button>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {admin && <button onClick={sync} disabled={syncing} className="rounded-2xl bg-slate-900 px-4 py-2 text-white">{syncing ? "Sincronizando..." : "Sincronizar eventos"}</button>}
+            {/* La gestora sincroniza los pagos a trabajador de sus provincias:
+                cierra el pago de sus campañas sin depender de administración.
+                syncEconomicEvents filtra por tipo y provincia, y el RLS lo
+                vuelve a comprobar en la base. */}
+            <button onClick={sync} disabled={syncing} className="rounded-2xl bg-slate-900 px-4 py-2 text-white">{syncing ? "Sincronizando..." : admin ? "Sincronizar eventos" : "Sincronizar mis pagos"}</button>
             <button onClick={() => exportar("pagos")} className="rounded-2xl border bg-white px-4 py-2">Exportar pagos del mes</button>
             <button onClick={exportarPagosAgrupados} className="rounded-2xl border bg-white px-4 py-2" title="Una línea por campaña y trabajador con el importe neto acumulado">Exportar pagos agrupados</button>
             {admin && <button onClick={() => exportar("facturacion")} className="rounded-2xl border bg-white px-4 py-2">Exportar facturación del mes</button>}
@@ -257,7 +262,7 @@ export default function HistorialEconomicoPage() {
 
         <div className="rounded-3xl border bg-white p-5 shadow-sm">
           <h2 className="mb-3 text-lg font-semibold">Eventos del periodo</h2>
-          {loading ? <p>Cargando...</p> : eventos.length === 0 ? <p className="text-sm text-slate-500">Sin eventos con los filtros actuales.{admin ? " Usa «Sincronizar eventos» para generar el historial desde los datos vivos." : ""}</p> : (
+          {loading ? <p>Cargando...</p> : eventos.length === 0 ? <p className="text-sm text-slate-500">Sin eventos con los filtros actuales. Usa «{admin ? "Sincronizar eventos" : "Sincronizar mis pagos"}» para generar el historial desde los datos vivos.</p> : (
             <div className="overflow-auto">
               <table className="w-full min-w-[1100px] text-sm">
                 <thead><tr className="bg-slate-50"><th className="p-2 text-left">Mes</th><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Trabajador</th><th>Cliente</th><th>Campaña</th><th>Provincia</th><th>Concepto</th><th className="text-right">Importe</th><th>Estado</th>{admin && <th></th>}</tr></thead>

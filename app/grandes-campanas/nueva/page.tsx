@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Plus } from "lucide-react";
 import { CampanaForm, CampanaFormState, emptyCampanaForm } from "@/components/grandes-campanas/campana-form";
@@ -115,7 +117,7 @@ export default function NuevaCampanaPage() {
     return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl">No tienes permiso para crear grandes campañas.</section></main>;
   }
   if (!canManageCampaigns(session)) {
-    return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl">La creación de grandes campañas está reservada a administración. <a className="underline" href="/grandes-campanas">Volver al listado</a>.</section></main>;
+    return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl">La creación de grandes campañas está reservada a administración. <Link className="underline" href="/grandes-campanas">Volver al listado</Link>.</section></main>;
   }
 
   return (
@@ -123,7 +125,7 @@ export default function NuevaCampanaPage() {
       <section className="mx-auto max-w-[1100px] space-y-4 p-4">
         <div>
           <nav className="text-sm" style={{ color: "var(--gc-muted)" }}>
-            <a href="/grandes-campanas" className="font-semibold hover:underline">← Grandes Campañas</a>
+            <Link href="/grandes-campanas" className="font-semibold hover:underline">← Grandes Campañas</Link>
           </nav>
           <h1 className="mt-1 text-2xl font-extrabold">Crear / Importar nueva campaña nacional</h1>
         </div>
@@ -160,7 +162,7 @@ export default function NuevaCampanaPage() {
         {formError && <div className="gc-note"><b>Revisa antes de continuar:</b> {formError}</div>}
 
         <footer className="flex flex-wrap items-center justify-between gap-3 pb-8">
-          <a href="/grandes-campanas" className="text-sm font-semibold hover:underline" style={{ color: "var(--gc-muted)" }}>Cancelar</a>
+          <Link href="/grandes-campanas" className="text-sm font-semibold hover:underline" style={{ color: "var(--gc-muted)" }}>Cancelar</Link>
           <div className="flex flex-wrap gap-2">
             <button className="gc-btn-outline" disabled={saving} onClick={() => guardar("borrador")}>Guardar borrador</button>
             <button className="gc-btn-dark" disabled={saving} onClick={() => guardar("crear")}>

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useState } from "react";
 import { Save } from "lucide-react";
 import { CampanaForm, CampanaFormState, emptyCampanaForm } from "@/components/grandes-campanas/campana-form";
@@ -93,13 +95,13 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
     return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl">No tienes permiso para editar Grandes Campañas.</section></main>;
   }
   if (!canManageCampaigns(session)) {
-    return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl">La edición de detalles de campaña está reservada a administración. <a className="underline" href={`/grandes-campanas/${params.id}`}>Volver al detalle</a>.</section></main>;
+    return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl">La edición de detalles de campaña está reservada a administración. <Link className="underline" href={`/grandes-campanas/${params.id}`}>Volver al detalle</Link>.</section></main>;
   }
   if (loading) {
     return <main className="gc-module"><section className="mx-auto max-w-[1100px] space-y-3 p-4"><div className="gc-skeleton h-16" /><div className="gc-skeleton h-72" /></section></main>;
   }
   if (notFound) {
-    return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl"><b>Campaña no encontrada.</b> <a className="underline" href="/grandes-campanas">Volver al listado</a>.</section></main>;
+    return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl"><b>Campaña no encontrada.</b> <Link className="underline" href="/grandes-campanas">Volver al listado</Link>.</section></main>;
   }
 
   return (
@@ -107,9 +109,9 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
       <section className="mx-auto max-w-[1100px] space-y-4 p-4">
         <div>
           <nav className="text-sm" style={{ color: "var(--gc-muted)" }}>
-            <a href="/grandes-campanas" className="font-semibold hover:underline">Grandes Campañas</a>
+            <Link href="/grandes-campanas" className="font-semibold hover:underline">Grandes Campañas</Link>
             <span> / </span>
-            <a href={`/grandes-campanas/${params.id}`} className="font-semibold hover:underline">{nombreCampana}</a>
+            <Link href={`/grandes-campanas/${params.id}`} className="font-semibold hover:underline">{nombreCampana}</Link>
             <span> / Editar</span>
           </nav>
           <h1 className="mt-1 text-2xl font-extrabold">Editar campaña</h1>
@@ -142,7 +144,7 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
         {error && <div className="gc-note"><b>Error:</b> {error}</div>}
 
         <footer className="flex flex-wrap items-center justify-between gap-3 pb-8">
-          <a href={`/grandes-campanas/${params.id}`} className="text-sm font-semibold hover:underline" style={{ color: "var(--gc-muted)" }}>Cancelar</a>
+          <Link href={`/grandes-campanas/${params.id}`} className="text-sm font-semibold hover:underline" style={{ color: "var(--gc-muted)" }}>Cancelar</Link>
           <button className="gc-btn-dark" disabled={saving} onClick={guardar}><Save className="h-4 w-4" />{saving ? "Guardando..." : "Guardar cambios"}</button>
         </footer>
       </section>

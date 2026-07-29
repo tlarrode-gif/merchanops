@@ -1,4 +1,4 @@
-import { AppSession, isAdminSession } from "@/lib/access-control";
+import { AppSession, isAdminSession, userCanSeeProvince } from "@/lib/access-control";
 import { IsdinBillingAdjustment, IsdinBillingLine, ISDIN_CECO, ISDIN_CLIENT } from "@/lib/isdin-billing";
 import { PaymentLine, dateOnly, fingerprint } from "@/lib/payment-ledger";
 import { normalizeProvince, provinceScopeValues } from "@/lib/provinces";
@@ -195,7 +195,7 @@ export function facturacionEventsFromIsdin(lines: IsdinBillingLine[], adjustment
 
 type Result<T> = { data: T; error: string | null };
 
-export type SyncResumen = { nuevos: number; sustituidos: number; retenidos: number };
+export type SyncResumen = { nuevos: number; sustituidos: number; retenidos: number; omitidos: number };
 
 function sinBeneficiario(evento: EconomicEventInput) {
   if (evento.tipo !== "pago_trabajador") return false;
@@ -245,10 +245,26 @@ export async function reabrirMes(mes: string, actor: AppSession | null): Promise
 //  4. Eventos cuyo mes contable esté cerrado se contabilizan en el mes actual,
 //     guardando el mes de origen en payload.mes_origen. Lo cerrado no se toca.
 export async function syncEconomicEvents(eventos: EconomicEventInput[], actor?: AppSession | null): Promise<Result<SyncResumen>> {
-  const vacio: SyncResumen = { nuevos: 0, sustituidos: 0, retenidos: 0 };
+  const vacio: SyncResumen = { nuevos: 0, sustituidos: 0, retenidos: 0, omitidos: 0 };
   if (!supabase) return { data: vacio, error: "Supabase no está configurado." };
-  if (!isAdminSession(actor)) return { data: vacio, error: "Solo administración puede sincronizar eventos." };
-  if (!eventos.length) return { data: vacio, error: null };
+
+  // Una gestora cierra el pago de SUS campañas y servicios sin depender de
+  // administración: sincroniza los pagos a trabajador de sus provincias. La
+  // facturación al cliente y los extras siguen siendo solo de administración,
+  // igual que en la lectura (fetchEconomicEvents). La base lo vuelve a
+  // comprobar por RLS (v9_11), así que esto es el filtro amable, no la defensa:
+  // un evento fuera de su alcance sería rechazado por la política igualmente.
+  let omitidos = 0;
+  if (!isAdminSession(actor)) {
+    if (!actor?.active) return { data: vacio, error: "Sesión no válida." };
+    if (!actor.permissions?.pagos) return { data: vacio, error: "No tienes permiso de pagos para sincronizar." };
+    if (!(actor.provinces || []).length) return { data: vacio, error: "No tienes provincias asignadas." };
+    const total = eventos.length;
+    eventos = eventos.filter(evento => evento.tipo === "pago_trabajador" && userCanSeeProvince(actor, evento.provincia));
+    omitidos = total - eventos.length;
+  }
+
+  if (!eventos.length) return { data: { ...vacio, omitidos }, error: null };
 
   const [existentesR, cerradosR] = await Promise.all([
     supabase.from("economic_events").select("fingerprint").in("fingerprint", eventos.map(evento => evento.fingerprint)),
@@ -262,7 +278,7 @@ export async function syncEconomicEvents(eventos: EconomicEventInput[], actor?: 
   if (cerrados.has(mesActual)) return { data: vacio, error: `El mes actual (${mesActual}) está cerrado; reábrelo para sincronizar.` };
 
   const candidatos = eventos.filter(evento => !conocidos.has(evento.fingerprint));
-  if (!candidatos.length) return { data: vacio, error: null };
+  if (!candidatos.length) return { data: { ...vacio, omitidos }, error: null };
 
   // Eventos vigentes de las mismas líneas, para reconciliar.
   const sourceIds = Array.from(new Set(candidatos.map(evento => evento.source_id).filter(Boolean))) as string[];
@@ -275,7 +291,7 @@ export async function syncEconomicEvents(eventos: EconomicEventInput[], actor?: 
   const vigentesPorClave = new Map<string, EconomicEvent>();
   for (const vigente of (vigentesData || []) as EconomicEvent[]) vigentesPorClave.set(claveDeLinea(vigente), vigente);
 
-  const resumen: SyncResumen = { nuevos: 0, sustituidos: 0, retenidos: 0 };
+  const resumen: SyncResumen = { nuevos: 0, sustituidos: 0, retenidos: 0, omitidos };
   for (const candidato of candidatos) {
     const retenido = sinBeneficiario(candidato);
     const mesCerrado = cerrados.has(candidato.mes_contable);
