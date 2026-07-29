@@ -628,3 +628,69 @@ segundo par de ojos—. Queda documentado con el alcance exacto (**P-13**).
 **P-13 (nueva).** El flujo de aprobación de pagos: ¿se construye? Y si sí,
 ¿puede un gestor aprobar los pagos de su propia zona, o hace falta validación de
 administración?
+
+---
+
+## 7.11 Adenda 6 — M-07, M-03 y P-13 cerrados
+
+### M-07 — `strict: true` ✅
+
+`tsconfig.json`: `"strict": true` y `"target": "es2020"`. Coste real: **un solo
+error** (`togglePermission(key:any)` en `UserEditor`) más su import. Estimé «L»
+en el informe sin medirlo; era **S**.
+
+### M-03 — una sola implementación de importes ✅
+
+Nuevo **`lib/payments/display.ts`**: la interfaz obtiene los importes del motor
+único y **la aritmética ocurre siempre en céntimos enteros**. Sustituye a las
+cuatro copias que quedaban vivas:
+
+| Copia | Dónde | Qué pasaba |
+|---|---|---|
+| `pPay` / `pointTotal` / `hourTotal` / `serviceTotal` | `app/page.tsx` | euros en coma flotante; importe ausente → **0 silencioso** |
+| «Total previsto» del alta | `ServiceForm` | cuarta copia, no detectada en la primera pasada |
+| `resolveIncident` | `app/page.tsx` | **escribía** en la base un importe sumado en coma flotante |
+| Bloque de cálculo | `lib/payment-ledger.ts` | inalcanzable: `serviceTotal` no lo llamaba nadie, ni dentro del propio fichero |
+
+El mapeo fila→entrada del motor también queda en un sitio: `lines.ts` importa
+`serviceRowToInput` de `display` en vez de su copia privada.
+
+**Un test existente atrapó una regresión mía** durante el cambio: mi `numOrNull`
+convertía `NaN` en `null`, y el `?? 0` del motor lo volvía 0 silencioso — justo
+lo que ese test vigila. Corregido, y el porqué queda escrito en el código para
+que nadie lo «simplifique» de nuevo.
+
+Nuevo **`tests/payments-display.test.ts`** (10 casos) que fija la consolidación,
+incluido uno que demuestra que la aritmética en céntimos es exacta donde la de
+coma flotante no lo era.
+
+### P-13 — Aprobación de pagos ✅
+
+Nueva pantalla **`/pagos/obligaciones`**, en la sidebar bajo Gestión.
+
+**Decisión de negocio aplicada:** el gestor aprueba los pagos de su zona de
+principio a fin —revisar, cerrar y anular—; administración tiene visibilidad de
+todo. Sin segregación de funciones, coherente con el volcado de obligaciones.
+
+- Filtros por estado, periodo e instalador; totales del listado y por instalador.
+- Selección múltiple y avance en lote. El lote solo se ofrece si todas las
+  líneas comparten estado de origen.
+- Anulación con **motivo obligatorio**.
+- Cada transición envía el `version` leído: si otro usuario tocó la línea, el
+  RPC la rechaza en vez de pisarla.
+- Si alguna línea del lote falla, **no se anuncia éxito**: se dice cuántas
+  pasaron y cuáles no, con el motivo de cada una.
+
+**Verificado que el control real está en el servidor, no en esta pantalla.** El
+trigger `payment_obligations_guard` impone las transiciones
+(`calculado→revisado→cerrado`, `→anulado`), exige `void_reason` al anular, deja
+lo cerrado solo anulable, bloquea cualquier cambio sobre lo anulado, impide el
+`DELETE` físico e incrementa `version`. La UI solo ofrece lo que el servidor va
+a aceptar; si alguien la saltara, la base seguiría diciendo que no.
+
+El ámbito lo impone la RLS (`pagos_scope`): un gestor solo ve y toca las
+obligaciones de vinilos de sus provincias, y esta pantalla no puede ampliarlo.
+
+**Lo que queda fuera:** el cierre marca la línea, **no genera remesa ni fichero
+para la gestoría**. Esa decisión (P-13 punto 3) seguía abierta y no la he
+inventado.
