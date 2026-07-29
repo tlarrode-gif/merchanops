@@ -20,7 +20,7 @@ Los cinco riesgos más graves:
 
 1. **CRÍTICO — 364 puntos de servicio (13.466,66 €) legibles y modificables por cualquier usuario autenticado.** El patrón `province IS NULL` de las policies convierte el 79 % de la tabla `points` en datos globales, cruzando las 12 provincias.
 2. **ALTO — 9 mutaciones descartan el error de Supabase** después de haber pintado el cambio en pantalla: si la RLS rechaza la escritura, la UI dice «Guardado» y el dato se pierde al recargar.
-3. **ALTO — toda la cadena ISDIN se clava sobre el `vin` cuando un VIN puede tener varias filas legítimas** (una por visita). El espejo escribía en todas y, sobre todo, **una revisita no genera su propio pago**. Ver A-02 y A-05, corregidos en la §7.7.
+3. **ALTO — 301,00 € de instalaciones terminadas sin obligación de pago**, en 12 vinilos y 9 instaladores, porque la sincronización de obligaciones se ejecutó una sola vez (11 jul) y nunca más. Ver **A-06** en la §7.8. *(A-02 y A-05, que ocupaban antes este puesto, quedaron retirados: eran errores míos.)*
 4. **ALTO — la pestaña Pagos lee dos tablas vacías** (`big_campaigns`, `big_campaign_points`: 0 filas) mientras el modelo vivo (`puntos_venta_campana`: 1.012 filas) queda fuera. El KPI «Grandes campañas» es estructuralmente 0.
 5. **MEDIO — restricciones que solo existen en la UI:** `economic_events` y `payment_obligations` son accesibles por cualquier gestor con permiso `pagos`, aunque las pantallas correspondientes sean admin-only.
 
@@ -383,3 +383,94 @@ advierten explícitamente de que **no debe crearse un índice único sobre
 - **P-11.** Los 12 casos restantes entre 459 filas finalizadas y 446 obligaciones,
   ¿son bloqueos conocidos por falta de importe, o hay más colisiones que no he
   identificado?
+
+---
+
+## 7.8 Adenda 3 — A-05 retirado, y el hallazgo que sí importa
+
+*Tras confirmar negocio la regla de pago de las revisitas.*
+
+### A-05 — RETIRADO. Era un error mío.
+
+Regla de negocio confirmada: **una revisita que acaba en `Finalizado` abona el
+pago de instalación previsto UNA sola vez**, más —si la visita anterior quedó en
+`Incidencia` o `Resuelto - Pendiente colocador`— la tarifa de visita fallida
+(8,56 €).
+
+El motor ya implementa exactamente eso:
+
+- `lib/payments/engine.ts:90` — `ISDIN_FAILED_VISIT_STATUSES = ["Incidencia", "Resuelto - Pendiente colocador"]`
+- `lib/payments/engine.ts:96-105` — `isdinPayableFailedVisits()` cuenta las fallidas
+- `lib/payments/engine.ts:124` — clave `isdin:<vin>:failed_visit:<n>`
+- `lib/payments/engine.ts:142` — clave `isdin:<vin>:installation`
+
+Las dos claves **no colisionan** porque son de tipos distintos. Que
+`obligation_key` sea único sobre `isdin:<vin>:installation` no es un defecto:
+es precisamente **el mecanismo que garantiza un único pago de instalación por
+vinilo**, que es la regla. Me equivoqué al leerlo como una colisión.
+
+En consecuencia, **la clave por `vin` es correcta** y no hay que reclavar nada
+sobre el `id` de la fila. **P-9 y P-10 quedan cerradas**; P-10 además por
+decisión expresa («déjalo como está»): una revisita no genera su propia llamada.
+
+Lo único que sobrevive de todo este hilo es el arreglo del espejo por clave
+primaria, que sigue siendo correcto y necesario: escribía el estado de una
+llamada en *todas* las visitas del vinilo.
+
+### A-06 (NUEVO, ALTO) — 301,00 € de trabajo terminado sin obligación de pago
+
+Investigando el hueco de **P-11** (459 filas `Finalizado` frente a 446
+obligaciones de instalación) aparece la causa, y no tiene nada que ver con las
+claves:
+
+> **`sync_payment_obligations` se ha ejecutado UNA sola vez en toda la vida del
+> sistema: el 2026-07-11 a las 19:33. Nunca más.** Hace **18 días**.
+
+Desde entonces 13 vinilos han cambiado de estado, 12 de ellos a `Finalizado`.
+Esos 12 **no tienen ninguna obligación de pago**, y sus semanas de abono ya han
+pasado (Semana 29 Junio, 6 Julio, 13 Julio, 20 Julio):
+
+| Instalador | Instalaciones | Importe | Desde | Hasta |
+|---|---|---|---|---|
+| DEL CASTILLO CERDA, MANUEL | 2 | 72,00 € | 15 jul | 23 jul |
+| ALVAREZ ARGUELLO, SARA MARIA | 3 | 54,00 € | 13 jul | 20 jul |
+| LAHOZ PERALES, ANTONIO | 1 | 50,00 € | 14 jul | 14 jul |
+| JIMENEZ ROSA, MARIA JOSE | 1 | 35,00 € | 14 jul | 14 jul |
+| FERNANDEZ RODRIGUEZ, JUAN MANUEL | 1 | 27,00 € | 13 jul | 13 jul |
+| GOMEZ PEÑA, MARIA TERESA | 1 | 18,00 € | 14 jul | 14 jul |
+| IGLESIAS GOMEZ, ENRIQUE | 1 | 15,00 € | 13 jul | 13 jul |
+| DOMINGUEZ VECCHIO, FERNANDO | 1 | 15,00 € | 13 jul | 13 jul |
+| RUIZ MATEO, MANUEL | 1 | 15,00 € | 20 jul | 20 jul |
+| **TOTAL** | **12** | **301,00 €** | | |
+
+**Por qué pasa.** La sincronización es **manual**: hay que entrar en la pantalla
+y pulsar el botón, y solo puede hacerlo administración
+(`app/historial-economico/page.tsx:77`). No existe ningún aviso de «hay trabajo
+terminado sin obligación»: `/configuracion/avisos` muestra las obligaciones
+*bloqueadas*, pero **no las que nunca llegaron a crearse**. El trabajo se
+acumula en silencio.
+
+Encaja con **M-09** (las 489 obligaciones están todas en `calculado`): el
+*pipeline* se ejecutó una vez, generó las obligaciones y ahí se quedó.
+
+**No se ha ejecutado la sincronización.** Crear obligaciones de pago en
+producción es una operación financiera y requiere decisión expresa.
+
+### Corrección propuesta para A-06
+
+1. **Inmediato:** ejecutar la sincronización para recuperar los 301,00 € y
+   contrastar el resultado antes de aprobar nada.
+2. **Estructural:** que `/configuracion/avisos` incluya un aviso de «instalaciones
+   finalizadas sin obligación», que hoy es el punto ciego. La consulta es la
+   misma que he usado aquí: `isdin_vinyls` en `Finalizado` sin fila
+   correspondiente en `payment_obligations`.
+3. **De fondo:** que la sincronización no dependa de que alguien se acuerde de
+   pulsar un botón.
+
+### Estado de las preguntas
+
+- **P-6, P-9, P-10** — cerradas.
+- **P-11** — respondida: no eran bloqueos por falta de importe (solo hay 4
+  obligaciones bloqueadas, y son otras); era la sincronización sin ejecutar.
+- **P-12 (nueva).** ¿Ejecuto la sincronización de obligaciones para recuperar los
+  301,00 €, o prefieres lanzarla tú desde la pantalla y revisar el resultado?
