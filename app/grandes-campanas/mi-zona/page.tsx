@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, MapPin } from "lucide-react";
 import { AppSession, canAccessModule, getCurrentAppSession, isAdminSession, sessionProvinceLabel } from "@/lib/access-control";
@@ -65,7 +67,7 @@ export default function MiZonaPage() {
                   <div><p className="text-lg font-extrabold" style={{ color: row.sinAsignar ? "var(--gc-secondary)" : undefined }}>{row.sinAsignar.toLocaleString("es-ES")}</p><p className="text-xs" style={{ color: "var(--gc-muted)" }}>Sin asignar</p></div>
                 </div>
                 {row.incidencias_abiertas > 0 && <p className="text-xs" style={{ color: "var(--gc-secondary)" }}>{row.incidencias_abiertas} incidencias abiertas</p>}
-                <a href={`/grandes-campanas/${row.id}/asignacion`} className="gc-btn-dark w-full justify-center">Asignar por provincia <ArrowRight className="h-4 w-4" /></a>
+                <Link href={`/grandes-campanas/${row.id}/asignacion`} className="gc-btn-dark w-full justify-center">Asignar por provincia <ArrowRight className="h-4 w-4" /></Link>
               </div>
             ))}
           </div>

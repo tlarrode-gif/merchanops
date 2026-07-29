@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import { ChevronDown, KeyRound, LogOut, Menu, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { AppSession, canAccessModule, ensureAuthSession, getCurrentAppSession, isAdminSession, logoutAppUser, merchanopsSessionChangeEvent, sessionProvinceLabel, type AppPermissionKey } from "@/lib/access-control";
@@ -88,10 +89,15 @@ function crumbFor(segment: string) {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  // La navegación es client-side (next/link), así que la pestaña activa NO se
+  // puede leer una sola vez de window.location: al ir de ?tab=servicios a
+  // ?tab=pagos el pathname no cambia y el enlace activo se quedaba congelado.
+  // useSearchParams sí reacciona al cambio de query.
+  const searchParams = useSearchParams();
+  const currentTab = searchParams.get("tab") || "panel";
   const [session, setSession] = useState<AppSession | null>(null);
   const [ready, setReady] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [currentTab, setCurrentTab] = useState("panel");
   const [collapsed, setCollapsed] = useState<string[]>([]);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -112,8 +118,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setMobileOpen(false);
-    if (typeof window !== "undefined") setCurrentTab(new URLSearchParams(window.location.search).get("tab") || "panel");
-  }, [pathname]);
+  }, [pathname, currentTab]);
 
   // Sin sesión (o durante la hidratación) no hay navegación: la home muestra el login.
   if (!ready || !session?.active) return <>{children}</>;
@@ -146,7 +151,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const sidebar = (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between px-4 py-4">
-        <a href="/" className="text-lg font-extrabold tracking-tight">Merchan<span className="text-slate-400">Ops</span></a>
+        <Link href="/" className="text-lg font-extrabold tracking-tight">Merchan<span className="text-slate-400">Ops</span></Link>
         <button className="rounded-xl border p-1.5 lg:hidden" onClick={() => setMobileOpen(false)} aria-label="Cerrar menú"><X className="h-4 w-4" /></button>
       </div>
       <nav className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
@@ -166,14 +171,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   {group.links.filter(link => !isCollapsed || isActive(link)).map(link => {
                     const active = isActive(link);
                     return (
-                      <a
+                      <Link
                         key={link.href + link.label}
                         href={link.href}
                         aria-current={active ? "page" : undefined}
                         className={`block rounded-xl px-3 py-2 text-sm font-medium ${active ? "bg-slate-900 text-white shadow-sm shadow-slate-900/10" : "text-slate-700 hover:bg-slate-100"}`}
                       >
                         {link.label}
-                      </a>
+                      </Link>
                     );
                   })}
                 </div>

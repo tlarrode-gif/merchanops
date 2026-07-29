@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeft, CheckCircle2, RotateCcw, Search, Sparkles, UserMinus, Users } from "lucide-react";
 import { PuntoBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
@@ -250,7 +252,7 @@ export default function AsignacionRapidaPage({ params }: { params: { id: string 
     return <main className="gc-module"><section className="mx-auto max-w-[1400px] space-y-3 p-4"><div className="gc-skeleton h-20" /><div className="gc-skeleton h-96" /></section></main>;
   }
   if (!campana) {
-    return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl"><b>Campaña no encontrada.</b> <a className="underline" href="/grandes-campanas">Volver al listado</a>.</section></main>;
+    return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl"><b>Campaña no encontrada.</b> <Link className="underline" href="/grandes-campanas">Volver al listado</Link>.</section></main>;
   }
 
   return (
@@ -261,9 +263,9 @@ export default function AsignacionRapidaPage({ params }: { params: { id: string 
 
         <div>
           <nav className="text-sm" style={{ color: "var(--gc-muted)" }}>
-            <a href="/grandes-campanas" className="font-semibold hover:underline">Grandes Campañas</a>
+            <Link href="/grandes-campanas" className="font-semibold hover:underline">Grandes Campañas</Link>
             <span> / </span>
-            <a href={`/grandes-campanas/${campana.id}`} className="font-semibold hover:underline">{campana.nombre}</a>
+            <Link href={`/grandes-campanas/${campana.id}`} className="font-semibold hover:underline">{campana.nombre}</Link>
             <span> / Asignación rápida</span>
           </nav>
           <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
@@ -273,7 +275,7 @@ export default function AsignacionRapidaPage({ params }: { params: { id: string 
                 Selecciona puntos y asígnalos en bloque. Ámbito: <b>{sessionProvinceLabel(session)}</b> · <b>{sinAsignar.toLocaleString("es-ES")}</b> puntos sin asignar de {puntos.length.toLocaleString("es-ES")} visibles.
               </p>
             </div>
-            <a href={`/grandes-campanas/${campana.id}`} className="gc-btn-outline"><ArrowLeft className="h-4 w-4" />Volver al detalle</a>
+            <Link href={`/grandes-campanas/${campana.id}`} className="gc-btn-outline"><ArrowLeft className="h-4 w-4" />Volver al detalle</Link>
           </div>
         </div>
 
