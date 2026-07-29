@@ -694,3 +694,103 @@ obligaciones de vinilos de sus provincias, y esta pantalla no puede ampliarlo.
 **Lo que queda fuera:** el cierre marca la línea, **no genera remesa ni fichero
 para la gestoría**. Esa decisión (P-13 punto 3) seguía abierta y no la he
 inventado.
+
+---
+
+## 7.12 Adenda 7 — Ola 4 ejecutada (con el repo de MerchanLOGS a la vista)
+
+Se clonó `tlarrode-gif/merchanlogs` y se diseñó contra su código real, no contra
+suposiciones. Eso cambió el plan dos veces y evitó dos errores.
+
+### Lo que se descubrió al mirar LOGS
+
+**P-5 no había que decidirla: ya estaba decidida.** LOGS entra como
+`authenticated` con la anon key y los MISMOS `app_users`
+(`services/session.ts`: `merchan_auth_bootstrap` + `signInWithPassword`). **Cero
+`service_role` en todo el repo.** La RLS ya es la frontera compartida. Existe un
+contrato escrito: `docs/SUPABASE_RECONCILIATION.md`.
+
+**LOGS toca 9 tablas, no 20**, y **no consume el outbox** (cero referencias en
+código y en docs) — lo que tumbó la hipótesis de que la familia `logistics.*`
+fuera su contrato cross-app.
+
+**Y LOGS sí ha escrito en esta base.** El envío `20329fd7` está vinculado al
+picking `e7c23c3d`, y `logistics_ship_picking` —lo único que crea envíos— solo
+lo llama LOGS (`services/atomic-commands.ts:56`); OPS no la llama nunca. Ocurrió
+el 2026-07-12 09:23:46, con `actor: admin` según el payload del evento.
+
+### El fallo real, y por qué no había saltado
+
+Las policies de `services` e `isdin_vinyls` solo tenían rama de admin y rama de
+provincia. El usuario `almacen` tiene `provinces = '{}'` y no hay filas con
+provincia nula en ninguna de las dos tablas → **veía CERO servicios y CERO
+vinilos**, y cada escritura del espejo de retorno fallaba, en silencio (el espejo
+es best-effort por diseño).
+
+No había saltado porque **LOGS se probó con `admin`**, que es la primera rama de
+todas las policies. Y como los usuarios de almacén **solo** tendrán LOGS, ese rol
+no es un caso marginal: es el usuario principal de la aplicación.
+
+### El error que evitó leer el código de LOGS
+
+El primer diseño acotaba por `logistics_material_requirements`. Pero el espejo
+(`ops-mirror.ts:127,138,155,177`) **no filtra por `service_id` ni por `vin`:
+filtra por `logistics_request_id`**. Aquella policy habría cubierto 5 filas de
+254 y el espejo habría seguido fallando. La policy final cubre **ambas vías**.
+
+### `v9_9` — aplicada y verificada
+
+1. Rama `almacen` en `services` e `isdin_vinyls`, acotada a lo que ya pasó por
+   logística: **5 de 254 servicios (2 %)** y **78 de 475 vinilos (16 %)**.
+2. Lectura de las **20** tablas de logística: `merchan_has_profile()` →
+   `merchan_can_logistics()`. Deja de bastar «tener perfil» para leer el almacén
+   entero. Verificado antes: los 6 gestores tienen `logistica = true` y el
+   almacén entra por su rama, así que **hoy no pierde acceso nadie**.
+3. Cuatro índices de apoyo para los lookups nuevos.
+
+**Simulación por rol, hecha antes y después:**
+
+| Usuario | Rol | Servicios | Vinilos | Puntos |
+|---|---|---|---|---|
+| admin | admin | 254 | 475 | 465 |
+| **Natalia** | **almacen** | **5** (era 0) | **78** (era 0) | 0 |
+| Mai | manager | 254 | 475 | 465 — **sin cambio** |
+| Kilian, Lara, Lidia, Marc, Yima | manager | 0 | 0 | 0 — **sin cambio** |
+
+Los gestores son matemáticamente inmunes: la rama nueva exige
+`merchan_is_almacen()`. Los 0 puntos del almacén son correctos — LOGS no lee
+`points`. Datos intactos: 254 / 475 / 465, y la policy de `points` de `v9_8`
+sigue en pie.
+
+**Los grupos A y B del plan quedan descartados**: solo 2 de las 20 tablas tienen
+provincia porque el modelo logístico es de almacén, no de territorio. Acotarlas
+habría roto justo el trabajo de LOGS.
+
+### `v10_0` — M-08 resuelto
+
+El notificador interno mandaba a dead-letter cualquier tipo desconocido. Esa
+decisión es correcta y **se conserva**. Lo que se corrige es que tres tipos
+publicados por `v8_3_outbox.sql` (`logistics.picking_shipped`,
+`logistics.delivery_confirmed`, `logistics.request_rejected`) no son asunto de
+ese consumidor: ahora se completan con marca explícita
+(`{"skipped": true, "reason": "tipo ajeno a db-notifier"}`) en vez de fallar.
+
+**Solo se tocó el consumidor.** Las tres funciones que publican son comandos
+transaccionales de los que depende LOGS y no se modificaron.
+
+Resultado: `skipped: 1, failed: 0`. Outbox **11 completados, 0 dead-letter**, sin
+notificación duplicada (25, las mismas).
+
+### Dos cosas que NO se han tocado y necesitan decisión
+
+1. **74 `isdin_vinyls.logistics_request_id` son referencias huérfanas.** No casan
+   con `logistics_requests` (12 filas) ni con
+   `logistics_material_requirements.request_id`. Es anterior a este trabajo y
+   afecta al espejo OPS↔LOGS **para cualquier rol, incluido admin**: el espejo
+   busca por esa columna. La policy nueva cubre ambas vías precisamente para no
+   depender de que se limpie, pero **la limpieza sigue pendiente** (**P-14**).
+2. **El outbox es de un solo consumidor.** `outbox_complete` pone
+   `status='completado'` en la fila del evento, mientras `inbox_processed` es por
+   consumidor. Si algún día MerchanLOGS consume la familia `logistics.*`, hay que
+   pasar el estado a por-consumidor **antes**; con el diseño actual, que
+   db-notifier las complete impide que otro las reciba (**P-15**).
