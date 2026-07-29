@@ -20,7 +20,7 @@ Los cinco riesgos más graves:
 
 1. **CRÍTICO — 364 puntos de servicio (13.466,66 €) legibles y modificables por cualquier usuario autenticado.** El patrón `province IS NULL` de las policies convierte el 79 % de la tabla `points` en datos globales, cruzando las 12 provincias.
 2. **ALTO — 9 mutaciones descartan el error de Supabase** después de haber pintado el cambio en pantalla: si la RLS rechaza la escritura, la UI dice «Guardado» y el dato se pierde al recargar.
-3. **ALTO — 301,00 € de instalaciones terminadas sin obligación de pago**, en 12 vinilos y 9 instaladores, porque la sincronización de obligaciones se ejecutó una sola vez (11 jul) y nunca más. Ver **A-06** en la §7.8. *(A-02 y A-05, que ocupaban antes este puesto, quedaron retirados: eran errores míos.)*
+3. **RESUELTO — 309,56 € de trabajo terminado que nunca devengó obligación de pago.** Las obligaciones solo nacían al importar el XLSX, y únicamente para VIN nuevos: ningún cambio de estado posterior las generaba. Corregido en la §7.9. *(A-02 y A-05, que ocupaban antes este puesto, quedaron retirados: eran errores míos.)*
 4. **ALTO — la pestaña Pagos lee dos tablas vacías** (`big_campaigns`, `big_campaign_points`: 0 filas) mientras el modelo vivo (`puntos_venta_campana`: 1.012 filas) queda fuera. El KPI «Grandes campañas» es estructuralmente 0.
 5. **MEDIO — restricciones que solo existen en la UI:** `economic_events` y `payment_obligations` son accesibles por cualquier gestor con permiso `pagos`, aunque las pantallas correspondientes sean admin-only.
 
@@ -474,3 +474,80 @@ producción es una operación financiera y requiere decisión expresa.
   obligaciones bloqueadas, y son otras); era la sincronización sin ejecutar.
 - **P-12 (nueva).** ¿Ejecuto la sincronización de obligaciones para recuperar los
   301,00 €, o prefieres lanzarla tú desde la pantalla y revisar el resultado?
+
+---
+
+## 7.9 Adenda 4 — A-06 rediagnosticado y RESUELTO
+
+*Tras la indicación de negocio: esas instalaciones sí devengan pago, y los
+gestores deben poder volcarlo ellos mismos porque son responsables de su zona.*
+
+### El diagnóstico de A-06 estaba mal
+
+Escribí que la sincronización era manual «y nadie la ejecuta». Falso: **no había
+forma de ejecutarla**. Dos hechos que no había conectado:
+
+1. `app/grandes-campanas/isdin/page.tsx` pasa a `confirm_import_run` **solo las
+   obligaciones de VIN nuevos** (comentario en el propio código: «Registro
+   contable atómico: solo obligaciones de VIN nuevos»).
+2. `reconcileIsdin()` —la función que recalcula obligaciones de vinilos ya
+   existentes— **no la llamaba nadie**. Estaba construida y testeada, pero sin
+   conectar a ninguna pantalla.
+
+Es decir: **en cuanto un VIN existía, ningún cambio de estado volvía a generar
+su obligación de pago, jamás**. No era un despiste operativo; era un camino
+inexistente. Por eso los 12 vinilos que pasaron a `Finalizado` después de la
+importación del 11 de julio se quedaron sin pago, en silencio.
+
+### Lo corregido
+
+**1. Los gestores vuelcan sus propios pagos** (nuevo `lib/payments/vinyl-obligations.ts`,
+conectado en `updateItem` de la página ISDIN). Al cambiar el estado, las
+revisitas (`revisit_count`) o el importe base (`base_payment`) de un vinilo, se
+recalcula y vuelca su obligación **sin exigir rol de administrador**.
+
+No hizo falta relajar nada en base: `sync_payment_obligations` es
+`SECURITY INVOKER` y la policy `pagos_scope` ya admite a cualquier usuario con
+permiso `pagos` sobre vinilos existentes. Verificado: **los 6 gestores activos
+ya tienen `pagos = true`**. El control real sigue estando en la RLS, no en la UI.
+
+Si el volcado falla, el cambio de estado **no** se revierte (ya está guardado)
+pero se avisa de forma explícita: un pago no registrado no puede pasar
+desapercibido.
+
+**2. `updateItem` descartaba el error de Supabase** igual que las 9 de A-01.
+Ahora lo captura y revierte.
+
+**3. Backfill de los 13 pendientes.** Ejecutado a través del RPC
+`sync_payment_obligations` —no con `INSERT` directos— para que pasara por la
+lógica de auditoría y versionado de la aplicación.
+
+Antes de ejecutarlo se validó la traducción de la regla a SQL **contra las 447
+obligaciones que ya había creado el motor**: 447/447 importes coincidentes y
+446/447 fechas (la única discrepancia es el propio VIN-31552 duplicado, cuyas
+dos filas cruzan contra una sola obligación).
+
+| Resultado | Valor |
+|---|---|
+| `sync_payment_obligations` | `inserted: 13, updated: 0, divergences: []` |
+| Obligaciones totales | 489 → **502** |
+| Vinilos `Finalizado` sin obligación | 12 → **0** |
+| Importe recuperado | **309,56 €** (301,00 instalación + 8,56 visita fallida) |
+| Entradas de auditoría | 13 |
+| Todas pagables | 13/13 |
+
+Desglose: 12 obligaciones de instalación más una de visita fallida para
+`VIN-31441`, que tenía `incident_payment_week` y ninguna obligación previa.
+`VIN-30987` ya tenía la suya, así que solo recibió la de instalación.
+
+### Lo que sigue pendiente
+
+- **Punto ciego en avisos.** `/configuracion/avisos` muestra las obligaciones
+  *bloqueadas*, pero no las que **nunca llegaron a crearse**. El volcado
+  automático evita que se repita desde la edición, pero no hay red de seguridad
+  si aparece otra vía. La consulta del aviso es la de la §7.8.
+- **`reconcileIsdin` sigue sin conectar.** Ahora que el volcado por edición
+  existe, una acción de «conciliar todo» en pantalla cerraría el círculo para
+  casos históricos o cargas masivas.
+- **M-09 revisado.** Las 502 obligaciones siguen todas en `calculado`: ninguna
+  ha avanzado a aprobada/pagada. Eso es un flujo aparte, todavía sin usar.
