@@ -53,51 +53,15 @@ function isFailedVisitStatus(status: string) {
   return status === "Incidencia" || status === "Pospuesto";
 }
 
-function isPostIncidentPending(point: AnyRow) {
-  return pointStatus(point) === "Pendiente recepción post-incidencia";
-}
 
-function isIncidentActive(point: AnyRow) {
-  const status = pointStatus(point);
-  return isFailedVisitStatus(status) && point.incident_status !== "Resuelta" && !point.incident_resolved_at;
-}
 
-function isIncidentResolved(point: AnyRow) {
-  return point.incident_status === "Resuelta" || Boolean(point.incident_resolved_at);
-}
 
-function pointOriginal(point: AnyRow) {
-  return number(point.original_fee ?? point.fee);
-}
 
-function pointIncident(point: AnyRow) {
-  return number(point.incident_fee || INCIDENT_FEE);
-}
 
-function pointPay(point: AnyRow) {
-  if (isPostIncidentPending(point)) return 0;
-  if (isIncidentActive(point)) return pointIncident(point);
-  if (isIncidentResolved(point)) return pointOriginal(point) + pointIncident(point);
-  return number(point.fee);
-}
 
-function servicePaymentDate(service: AnyRow) {
-  return dateOnly(service.validated_at) || dateOnly(service.resolved_at) || dateOnly(service.deadline) || dateOnly(service.start_date) || new Date().toISOString().slice(0, 10);
-}
 
-function servicePointTotal(service: AnyRow, points: AnyRow[]) {
-  return points.reduce((sum, point) => sum + pointPay(point), 0);
-}
 
-function serviceHourTotal(service: AnyRow) {
-  return number(service.hourly_rate) * number(service.hours_worked);
-}
 
-export function serviceTotal(service: AnyRow, points: AnyRow[]) {
-  if (service.payment_type === "Horas") return serviceHourTotal(service);
-  if (service.payment_type === "Mixto") return servicePointTotal(service, points) + serviceHourTotal(service);
-  return servicePointTotal(service, points);
-}
 
 export function fingerprint(parts: Array<string | number | null | undefined>) {
   return parts.map(part => String(part ?? "")).join("|").toLowerCase();

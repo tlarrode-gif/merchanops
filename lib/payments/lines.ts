@@ -16,6 +16,8 @@ import {
   computeBigCampaignPointObligations,
   computeServiceObligations
 } from "@/lib/payments/engine";
+// M-03: el mapeo fila→entrada del motor vive en un solo sitio.
+import { serviceRowToInput } from "@/lib/payments/display";
 import { PaymentIssue, PaymentLine } from "@/lib/payment-ledger";
 import { BigCampaignPointInput, ObligationDraft, ServiceInput } from "@/lib/payments/types";
 
@@ -24,27 +26,6 @@ const str = (v: unknown) => (v == null ? "" : String(v));
 const strOrNull = (v: unknown) => (v == null || v === "" ? null : String(v));
 const numOrNull = (v: unknown) => (v == null || v === "" ? null : Number(v));
 
-function serviceToInput(service: Row, points: Row[]): ServiceInput {
-  return {
-    id: str(service.id),
-    status: str(service.status),
-    paymentType: (str(service.payment_type) || "Puntos") as ServiceInput["paymentType"],
-    validatedAt: strOrNull(service.validated_at),
-    hourlyRateEur: numOrNull(service.hourly_rate),
-    hoursWorked: numOrNull(service.hours_worked),
-    workerId: strOrNull(service.worker_id),
-    workerName: strOrNull(service.worker_name),
-    points: points.map((p) => ({
-      id: str(p.id),
-      feeEur: numOrNull(p.fee),
-      originalFeeEur: numOrNull(p.original_fee),
-      incidentFeeEur: numOrNull(p.incident_fee),
-      pointStatus: str(p.point_status || p.status || "Pendiente"),
-      incidentStatus: strOrNull(p.incident_status),
-      incidentResolvedAt: strOrNull(p.incident_resolved_at)
-    }))
-  };
-}
 
 function bigPointToInput(point: Row): BigCampaignPointInput {
   return {
@@ -104,7 +85,7 @@ export function buildEnginePaymentLines(
 
   for (const service of services) {
     const servicePoints = points.filter((p) => str(p.service_id) === str(service.id));
-    const { obligations, issues: engineIssues } = computeServiceObligations(serviceToInput(service, servicePoints));
+    const { obligations, issues: engineIssues } = computeServiceObligations(serviceRowToInput(service, servicePoints));
     for (const issue of engineIssues) {
       issues.push({ severity: issue.severity, origin: "servicio", entity: issue.entityId, description: issue.description, action: "Revisar antes de liquidar." });
     }

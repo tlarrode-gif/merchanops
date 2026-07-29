@@ -187,7 +187,7 @@ export function isdinExpectedTotalEur(v: IsdinVinylInput): number {
 
 const PAYABLE_SERVICE_STATUSES = ["Validado", "Pagado"];
 
-function servicePointPayCents(
+export function servicePointPayCents(
   point: ServiceInput["points"][number],
   issues: EngineIssue[],
   serviceId: string
