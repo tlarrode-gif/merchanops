@@ -20,7 +20,7 @@ Los cinco riesgos más graves:
 
 1. **CRÍTICO — 364 puntos de servicio (13.466,66 €) legibles y modificables por cualquier usuario autenticado.** El patrón `province IS NULL` de las policies convierte el 79 % de la tabla `points` en datos globales, cruzando las 12 provincias.
 2. **ALTO — 9 mutaciones descartan el error de Supabase** después de haber pintado el cambio en pantalla: si la RLS rechaza la escritura, la UI dice «Guardado» y el dato se pierde al recargar.
-3. **ALTO — `isdin_vinyls.vinyl` no tiene índice único y ya hay un duplicado real (`VIN-31552`).** El espejo llamada→vinilo escribe en las dos filas y la sincronización pierde una de ellas.
+3. **ALTO — toda la cadena ISDIN se clava sobre el `vin` cuando un VIN puede tener varias filas legítimas** (una por visita). El espejo escribía en todas y, sobre todo, **una revisita no genera su propio pago**. Ver A-02 y A-05, corregidos en la §7.7.
 4. **ALTO — la pestaña Pagos lee dos tablas vacías** (`big_campaigns`, `big_campaign_points`: 0 filas) mientras el modelo vivo (`puntos_venta_campana`: 1.012 filas) queda fuera. El KPI «Grandes campañas» es estructuralmente 0.
 5. **MEDIO — restricciones que solo existen en la UI:** `economic_events` y `payment_obligations` son accesibles por cualquier gestor con permiso `pagos`, aunque las pantallas correspondientes sean admin-only.
 
@@ -34,7 +34,7 @@ De cara a **Merchan Core**, el modelo de permisos es reutilizable tal cual salvo
 |---|---|---|---|---|---|---|---|
 | **C-01** | **CRÍTICO** | Permisos / RLS | La policy `points.province_scope_all` incluye `province IS NULL`, y **364 de 458 filas (79 %) tienen `province` a NULL**. Como la policy es `FOR ALL`, cualquier usuario autenticado con perfil las **lee y las escribe**, sea cual sea su provincia. | Policy verificada en `pg_policies`; origen en `supabase/v9_3_rls_role_province.sql`. Datos: 364 filas, **13.466,66 €** en `fee`, repartidas en **12 provincias** (Asturias 115, Zaragoza 89, Alicante 31, Valencia 31, Huesca 25, Lleida 22, Sevilla 20, Córdoba 10, Castellón 8, Almería 8, Jaén 4, Teruel 1). | Un gestor de Sevilla puede leer los importes de Asturias y **modificar el `fee` de cualquier punto**. La UI no lo muestra (`app/page.tsx:59` filtra por servicio), pero una llamada directa a `/rest/v1/points` con su propio JWT lo devuelve. | Rellenar `province` en los 364 puntos desde `services.province` (el dato existe: el JOIN lo resuelve al 100 %), añadir `NOT NULL` + *default* por trigger desde el servicio padre, y **quitar la rama `province IS NULL`** de las 7 policies que la usan. | M |
 | **A-01** | ALTO | Funcional | 9 mutaciones aplican el cambio en estado local y luego lanzan `await supabase...` **sin capturar `error`**, anunciando éxito incondicionalmente. | `app/page.tsx:63` (updateClient), `:64` (delClient), `:66` (updateWorker), `:67` (delWorker), `:70` (updateService), `:71` (updateServiceFull), `:72` (updatePoint), `:76` (delPoint), `:77` (delService). Contraste: `:62`, `:65`, `:68`, `:75` sí lo comprueban. | Pérdida silenciosa de datos. Con RLS activa un rechazo de policy es indistinguible del éxito: `saved("Guardado")` se muestra igual. Afecta a cambios de estado de servicio, importes de punto y borrados. | Capturar `error` en las 9, revertir el estado optimista y mostrar el mensaje en rojo. El patrón correcto ya existe en `app/grandes-campanas/isdin/llamadas/page.tsx:218-260` (`persistCall` con *rollback*). | M |
-| **A-02** | ALTO | Integridad ISDIN | `isdin_calls.vin` tiene índice **único** (`idx_isdin_calls_vin_unique`); `isdin_vinyls.vinyl` solo tiene índice **no único** (`idx_isdin_vinyls_vinyl`). Ya existe un duplicado en producción: **`VIN-31552` ×2**. | Índices verificados en `pg_index`. Conteos: 475 vinilos → 474 llamadas (la diferencia es exactamente el duplicado). Dedup en `lib/isdin-calls.ts:228`; espejo en `app/grandes-campanas/isdin/llamadas/page.tsx:274`. | Dos efectos reales: (a) `mergeCallsWithVinyls` se queda con «la última» de las dos filas, así que **una farmacia nunca genera llamada**; (b) `syncCallToVinylMirror` hace `.update(mirror).eq("vinyl", call.vin)` y **escribe el estado de llamada en los dos vinilos**, contaminando el que no corresponde. | Resolver el duplicado `VIN-31552` con negocio, crear `UNIQUE (vinyl)` en `isdin_vinyls`, y hacer el espejo por `id` en vez de por `vinyl`. | M |
+| **A-02** | ALTO | Integridad ISDIN | `isdin_calls.vin` tiene índice **único** (`idx_isdin_calls_vin_unique`); `isdin_vinyls.vinyl` solo tiene índice **no único** (`idx_isdin_vinyls_vinyl`). Ya existe un duplicado en producción: **`VIN-31552` ×2**. | Índices verificados en `pg_index`. Conteos: 475 vinilos → 474 llamadas (la diferencia es exactamente el duplicado). Dedup en `lib/isdin-calls.ts:228`; espejo en `app/grandes-campanas/isdin/llamadas/page.tsx:274`. | Dos efectos reales: (a) `mergeCallsWithVinyls` se queda con «la última» de las dos filas, así que **una farmacia nunca genera llamada**; (b) `syncCallToVinylMirror` hace `.update(mirror).eq("vinyl", call.vin)` y **escribe el estado de llamada en los dos vinilos**, contaminando el que no corresponde. | ⚠️ **RECOMENDACIÓN RETIRADA — ver §7.7.** Crear `UNIQUE (vinyl)` **rompería el modelo de negocio**: la duplicidad es correcta y representa dos visitas en fechas distintas. Solo se mantiene el arreglo del espejo por `id`. | M |
 | **A-03** | ALTO | Datos / Funcional | La pestaña Pagos consulta `big_campaign_points` y `big_campaigns`, que tienen **0 filas**. El modelo vivo de campañas es `grandes_campanas` (4) / `puntos_venta_campana` (**1.012**). | `app/page.tsx:100` (`buildBigCampaignPaymentRow`, `.from("big_campaign_points")`, `.from("big_campaigns")`). Conteos verificados en la base. | El KPI «Grandes campañas» de la pantalla de Pagos vale siempre 0 y el export CSV omite por completo la facturación de grandes campañas. No es un fallo intermitente: es estructural. | Decidir con negocio si Pagos debe consumir `puntos_venta_campana` (y entonces reescribir la consulta) o si esa vista queda deprecada en favor de `/historial-economico`. Ver **P-3** en preguntas abiertas. | M |
 | **A-04** | ALTO | Refresco | `Payments` carga las campañas en un `useEffect(..., [])` que **nunca se vuelve a ejecutar**. No hay revalidación tras ninguna mutación de servicio o punto. | `app/page.tsx:100`. | Tras validar un servicio o cambiar el importe de un punto, los totales de Pagos siguen mostrando el valor anterior hasta recargar la página entera. Riesgo de decisiones de pago sobre cifras obsoletas. | Extraer la carga a una función y llamarla desde `refresh()`, o dependerla de `services`. | S |
 | **M-01** | MEDIO | Permisos | `app_users` tiene `SELECT ... USING (true)` para todo `authenticated`. | Policy `users_read` en `pg_policies`. | Cualquier gestor puede enumerar los 8 usuarios con su `role`, `permissions`, `provinces` y `auth_user_id`. **Mitigado**: los *grants* de columna de `authenticated` excluyen `password`, y `merchan_auth_whoami` hace `to_jsonb(u) - 'password'`. No hay fuga de credenciales, sí de organigrama. | Restringir a `merchan_is_admin() OR id = merchan_my_app_user_id()`. Comprobar antes que ninguna pantalla dependa de listar usuarios ajenos. | S |
@@ -285,12 +285,101 @@ mismos 2 *warnings* preexistentes. `next build` → las 20 rutas compilan.
 
 ### 7.6 Pendiente
 
-- **A-02 (índice único).** `CREATE UNIQUE INDEX` sobre `isdin_vinyls.vinyl` **no
-  se ha aplicado**: fallaría con el duplicado `VIN-31552` presente, y resolverlo
-  implica borrar o fusionar una fila. Bloqueado por **P-6**. El arreglo de código
-  ya protege del efecto principal, pero nada impide que aparezcan más duplicados.
+- **A-02 (índice único).** ⚠️ **RETIRADO — ver §7.7.** `CREATE UNIQUE INDEX` sobre `isdin_vinyls.vinyl` **no
+  se ha aplicado** y **no debe aplicarse nunca**: la duplicidad es correcta por
+  diseño (dos visitas del mismo vinilo). Sustituido por **A-05** en la §7.7.
 - **M-01.** Vista `v_app_users_basic` + migrar la página de asignación.
 - **B-07.** *Leaked password protection* — ajuste del panel de Supabase Auth, no
   hay SQL que lo haga.
 - **A-03, M-08, M-03, M-07** y la **Ola 4** completa siguen abiertos.
 - **P-3 respondida:** se deja `big_campaigns` como está (deuda documentada).
+
+---
+
+## 7.7 Adenda 2 — el modelo ISDIN se clava sobre el VIN, y eso cuesta dinero
+
+*Tras confirmar negocio que **la duplicidad de `VIN-31552` es CORRECTA**: es el
+mismo vinilo visitado en dos fechas distintas.*
+
+### Qué invalida esto
+
+La corrección propuesta en **A-02** —crear `UNIQUE (vinyl)` en `isdin_vinyls`—
+**era errónea y habría roto el modelo de negocio**. Queda retirada. Nunca llegó
+a aplicarse: estaba bloqueada precisamente por el duplicado. Se mantiene el
+arreglo del espejo por clave primaria, que con este modelo es **más** necesario,
+no menos: escribía el estado de una llamada en *todas* las visitas del vinilo.
+
+Las revisitas **no** se modelan con `revisit_count` (solo 3 filas en toda la
+tabla lo tienen > 0), sino como **filas nuevas**. Ejemplo real:
+
+| id | Semana | Estado | `installation_payment_week` |
+|---|---|---|---|
+| `e8ff1c84` | Semana 11 Mayo 2026 | Finalizado | *(NULL)* |
+| `64cce134` | Semana 8 Junio 2026 | Finalizado | Semana 8 Junio 2026 |
+
+### A-05 (NUEVO, ALTO) — una revisita no genera su propio pago
+
+`lib/payments/engine.ts:142` construye la clave de obligación como
+`` `isdin:${vin}:installation` `` — **sobre el VIN, no sobre el `id` de la fila**.
+Y `payment_obligations.obligation_key` tiene constraint **UNIQUE**
+(`payment_obligations_obligation_key_key`). Por tanto N visitas finalizadas del
+mismo vinilo colapsan en **una sola obligación**.
+
+Comprobado en producción:
+
+| Medida | Valor |
+|---|---|
+| Filas `isdin_vinyls` en estado `Finalizado` | **459** |
+| VIN distintos en estado `Finalizado` | **458** |
+| Obligaciones `type='installation'` | **446** |
+| Obligaciones para `VIN-31552` | **1** (`isdin:VIN-31552:installation`, 18,00 €) |
+
+Dos instalaciones completadas → un pago. **El instalador cobra una vez por dos
+trabajos.** El importe en juego hoy es pequeño (18,00 €, un único VIN afectado),
+pero el defecto es **estructural y silencioso**: ahora que se confirma que las
+revisitas se modelan como filas nuevas, se repetirá cada vez que ocurra una. La
+misma colisión afecta a `` `isdin:${vin}:failed_visit:${n}` `` (`engine.ts:124`).
+
+*(Nota: la diferencia entre 459 filas y 446 obligaciones no se explica solo por
+esta colisión —hay 12 más—; probablemente sean obligaciones bloqueadas por falta
+de importe. Queda por cuantificar.)*
+
+### Alcance real del problema
+
+No es solo el motor de pagos. **Toda la cadena ISDIN asume «un VIN = una cosa»**:
+
+| Punto | Cómo se clava hoy | Consecuencia con varias visitas |
+|---|---|---|
+| `payment_obligations.obligation_key` | `isdin:<vin>:installation` | **Un pago para N instalaciones** |
+| `isdin_calls.vin` | índice ÚNICO + `onConflict:"vin"` | Una sola llamada para N visitas |
+| `mergeCallsWithVinyls` | `Map` por VIN | Se queda con la visita más reciente |
+| RLS de `payment_obligations` | `v.vinyl = source_id` | Empareja con cualquiera de las filas |
+| Espejo llamada→vinilo | *(corregido)* ahora por `id` | ✅ ya no contamina |
+
+La corrección de fondo es **reclavar la cadena sobre el `id` de la fila de vinilo**
+(o sobre `vin + semana`) en vez de sobre el `vin`. Es un cambio grande: toca el
+motor de pagos, el índice único de `isdin_calls`, los upsert con `onConflict` y
+una policy de RLS. **No se acomete por iniciativa propia** — mueve dinero y
+requiere decidir antes, con negocio, si una revisita debe generar su propia
+llamada de confirmación además de su propio pago.
+
+### Aplicado en esta pasada
+
+Solo documentación y comentarios de código: `lib/isdin-calls.ts` y
+`app/grandes-campanas/isdin/llamadas/page.tsx` explicaban la duplicidad como un
+defecto de datos. Ahora dicen lo contrario —que es correcta por diseño— y
+advierten explícitamente de que **no debe crearse un índice único sobre
+`isdin_vinyls.vinyl`**, para que nadie «arregle» en el futuro lo que no está roto.
+
+### Sustituye a P-6
+
+**P-6 queda respondida y cerrada.** En su lugar:
+
+- **P-9.** ¿Una revisita debe generar su **propio pago de instalación**? Si sí,
+  hay que reclavar `obligation_key` sobre el `id` de la fila (y decidir qué se
+  hace con las obligaciones ya calculadas).
+- **P-10.** ¿Y su **propia llamada** de confirmación? Si sí, hay que sustituir el
+  índice único de `isdin_calls.vin` por uno sobre `isdin_vinyl_id`.
+- **P-11.** Los 12 casos restantes entre 459 filas finalizadas y 446 obligaciones,
+  ¿son bloqueos conocidos por falta de importe, o hay más colisiones que no he
+  identificado?

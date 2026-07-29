@@ -234,13 +234,23 @@ export function normalizeVin(value?: string | null) {
   return String(value ?? "").trim().toUpperCase();
 }
 
+/**
+ * IMPORTANTE — un VIN puede tener VARIAS filas en `isdin_vinyls`, y es CORRECTO:
+ * así se representa que el mismo vinilo se visitó en fechas distintas. Ejemplo
+ * real en producción: VIN-31552 tiene dos filas «Finalizado», una de la semana
+ * del 11 de mayo y otra de la del 8 de junio. NO se debe crear un índice único
+ * sobre `isdin_vinyls.vinyl`: rompería el modelo de negocio.
+ *
+ * Consecuencia de la que hay que ser consciente: `isdin_calls.vin` SÍ tiene
+ * índice único (`idx_isdin_calls_vin_unique`) y los upsert usan
+ * `onConflict:"vin"`, así que N visitas de un mismo vinilo colapsan en UNA sola
+ * llamada. Esta función refleja esa realidad quedándose con la fila más reciente
+ * del listado (viene ordenado por semana ascendente). Si el negocio necesita una
+ * llamada por visita, el cambio no es aquí: hay que reclavar `isdin_calls` sobre
+ * el `id` de la fila de vinilo en vez de sobre el VIN.
+ */
 export function mergeCallsWithVinyls(calls: IsdinCall[], vinyls: IsdinVinylBase[]) {
   const byVin = new Map(calls.map(c => [normalizeVin(c.vin), c]));
-  // Un vinilo duplicado por VIN rompería el upsert onConflict:"vin" de todo el lote,
-  // así que se deduplica quedándose con la última fila (la más reciente del listado).
-  // OJO: `isdin_vinyls.vinyl` NO tiene índice único en base, así que los duplicados
-  // son posibles y de hecho existe uno en producción (VIN-31552). Mientras siga sin
-  // constraint, esta deduplicación es lo único que evita que reviente el lote entero.
   const uniqueVinyls = Array.from(new Map(vinyls.filter(v => normalizeVin(v.vinyl)).map(v => [normalizeVin(v.vinyl), v])).values());
   return uniqueVinyls.map(v => {
     const key = normalizeVin(v.vinyl);
