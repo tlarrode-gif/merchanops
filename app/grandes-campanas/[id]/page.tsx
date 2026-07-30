@@ -4,7 +4,7 @@ import Link from "next/link";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileDown, Info, MapPin, MessageCircle, Package, Pencil, Plus, Upload, Users } from "lucide-react";
-import { parseImportFile } from "@/lib/csv-parser";
+import { FILE_ACCEPT_ATTR, parseImportFile } from "@/lib/csv-parser";
 import { supabase } from "@/lib/supabase";
 import { CampanaBadgeEstado, IncidenciaBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
 import { CampanaDetalleKpis } from "@/components/grandes-campanas/campana-detalle-kpis";
@@ -250,11 +250,14 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
       const sinCodigo = parsed.rows.filter(row => !String(row.data.codigo || "").trim()).length;
       if (sinCodigo === parsed.rows.length) { setError("El archivo no tiene columna de código; la actualización necesita un código por fila para emparejar los puntos."); return; }
       const filas = parsed.rows.filter(row => !row.errors.length).map(row => row.data);
+      // Un archivo de avance puede traer solo código + estado/fecha/importe: eso
+      // actualiza, pero no puede crear puntos nuevos (harían falta los nombres).
+      const sinNombre = filas.filter(fila => !String(fila.nombre_comercial || "").trim()).length;
       const insertarNuevos = window.confirm(`Se actualizarán los puntos existentes emparejados por código.\n\n¿Quieres además CREAR como nuevos los puntos cuyo código no exista todavía?\n\nAceptar = actualizar y crear nuevos · Cancelar = solo actualizar existentes`);
       const result = await updatePuntosPorCodigo(params.id, filas, { insertarNuevos });
       if (result.error) { setError(result.error); return; }
       const r = result.data;
-      flash(`Actualización: ${r.actualizados} puntos actualizados · ${r.sinCambios} sin cambios · ${r.nuevos} nuevos · ${r.noEncontrados - r.nuevos} códigos no encontrados${sinCodigo ? ` · ${sinCodigo} filas sin código ignoradas` : ""}.`);
+      flash(`Actualización: ${r.actualizados} puntos actualizados · ${r.sinCambios} sin cambios · ${r.nuevos} nuevos · ${r.noEncontrados - r.nuevos} códigos no encontrados${sinCodigo ? ` · ${sinCodigo} filas sin código ignoradas` : ""}${insertarNuevos && sinNombre ? ` · ${sinNombre} filas sin nombre no se han creado como nuevas` : ""}.`);
       await refresh(true);
     } finally {
       setSaving(false);
@@ -386,7 +389,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
               {canManageCampaigns(session) && <Link href={`/grandes-campanas/${campana.id}/editar`} className="gc-btn-outline"><Pencil className="h-4 w-4" />Editar</Link>}
               {canManageCampaigns(session) && (
                 <>
-                  <input ref={updateFileRef} type="file" accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={event => handleUpdateFromExcel(event.target.files?.[0])} />
+                  <input ref={updateFileRef} type="file" accept={FILE_ACCEPT_ATTR} className="hidden" onChange={event => handleUpdateFromExcel(event.target.files?.[0])} />
                   <button className="gc-btn-outline" disabled={saving} onClick={() => updateFileRef.current?.click()} title="Sube un Excel/CSV con la columna de código para actualizar estado, fecha, importe o notas de los puntos existentes sin tocar el resto"><Upload className="h-4 w-4" />Actualizar desde Excel</button>
                 </>
               )}
