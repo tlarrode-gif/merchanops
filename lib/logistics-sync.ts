@@ -212,13 +212,40 @@ export function upsertMaterialRequirement(state: LogisticsState, input: {
   return requirement;
 }
 
+/** Prefijo del código de solicitud por origen: GC / SRV / ISD (LOG de respaldo). */
+export const PREFIJO_CODIGO_SOLICITUD: Record<string, string> = {
+  campaign: "GC",
+  service: "SRV",
+  service_point: "SRV",
+  isdin_vinyl: "ISD"
+};
+
+/**
+ * Código de solicitud para el espejo en memoria, con el MISMO formato que genera la base
+ * (merchan_next_request_code, v10.3): {ORIGEN}-{AAMMDD}-{NNN}. La verdad la tiene la base,
+ * que lleva el contador en su propia tabla; aquí solo se numera contra el estado local.
+ */
+export function codigoSolicitudEnMemoria(state: LogisticsState, sourceType: string): string {
+  const prefijo = PREFIJO_CODIGO_SOLICITUD[sourceType] || "LOG";
+  const hoy = new Date();
+  const dia = [
+    String(hoy.getFullYear()).slice(2),
+    String(hoy.getMonth() + 1).padStart(2, "0"),
+    String(hoy.getDate()).padStart(2, "0")
+  ].join("");
+  const scope = `${prefijo}-${dia}`;
+  const usados = state.requests.filter(request => String(request.code || "").startsWith(`${scope}-`)).length;
+  return `${scope}-${String(usados + 1).padStart(3, "0")}`;
+}
+
 export function createOrUpdateRequestForRequirement(state: LogisticsState, requirement: MaterialRequirement, source: SourceBase, eventId?: string | null) {
   let request = requirement.request_id ? state.requests.find(x => x.id === requirement.request_id) : state.requests.find(x => x.source_type === requirement.source_type && x.source_id === requirement.source_id);
   const now = new Date().toISOString();
   if (!request) {
     request = {
       id: uid("logreq"),
-      code: `LOG-${new Date().getFullYear()}-${String(state.requests.length + 1).padStart(4, "0")}`,
+      // Mismo formato que merchan_next_request_code (v10.3): {ORIGEN}-{AAMMDD}-{NNN}.
+      code: codigoSolicitudEnMemoria(state, requirement.source_type),
       source_type: requirement.source_type,
       source_id: requirement.source_id,
       client_id: requirement.client_id || null,
