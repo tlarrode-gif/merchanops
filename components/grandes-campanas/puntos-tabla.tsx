@@ -5,6 +5,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, FileDown, Package, Printer, S
 import { PuntoBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
 import { GestorAvatar } from "@/components/grandes-campanas/gestor-avatars";
 import { CampanaColumna, columnasExtraVisibles, formatearValorColumna } from "@/lib/campana-columnas";
+import { trabajadoresDeProvincia } from "@/lib/campana-asignacion";
 import { IncidenciaCampana, PuntoEstado, PuntoVenta, dateOnly, downloadCsv, downloadXlsx, eur, formatDate, puntoEstadoLabels, puntoEstados, puntosCsvRows } from "@/lib/campanas";
 import { WorkerAddress, listWorkerAddresses, formatDireccionEnvio } from "@/lib/direcciones-envio";
 
@@ -56,30 +57,86 @@ function PuntoDireccionEnvio({ punto, saving, onSet }: {
     return () => { alive = false; };
   }, [punto.instalador_id]);
 
-  if (!punto.instalador_id) return <p style={{ color: "var(--gc-muted)" }}>Asigna un instalador para elegir su dirección de envío.</p>;
+  if (!punto.instalador_id) return <p style={{ color: "var(--gc-muted)" }}>Asigna un instalador para indicar su dirección de envío.</p>;
   return (
     <div className="space-y-1">
       <p><b>Actual:</b> {punto.direccion_envio || <span style={{ color: "var(--gc-muted)" }}>Dirección del punto (por defecto)</span>}</p>
-      {loading ? <p style={{ color: "var(--gc-muted)" }}>Cargando direcciones...</p> : addresses.length ? (
-        <>
-          <select
-            className="gc-select"
-            disabled={saving}
-            value={punto.direccion_envio_id || ""}
-            onChange={event => {
-              const addr = addresses.find(a => a.id === event.target.value);
-              onSet(punto, addr ? formatDireccionEnvio(addr) : null, addr?.id || null, aplicarTodos);
-            }}
-          >
-            <option value="">Dirección del punto (por defecto)</option>
-            {addresses.map(addr => <option key={addr.id} value={addr.id}>{(addr.etiqueta ? `${addr.etiqueta} · ` : "") + formatDireccionEnvio(addr)}</option>)}
-          </select>
-          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={aplicarTodos} onChange={event => setAplicarTodos(event.target.checked)} />Aplicar a todos los puntos de este instalador</label>
-        </>
-      ) : (
-        <p style={{ color: "var(--gc-muted)" }}>Sin direcciones de envío. Añádelas en la ficha del trabajador (Catálogos → Trabajadores).</p>
+      {loading ? <p style={{ color: "var(--gc-muted)" }}>Cargando direcciones...</p> : addresses.length > 0 && (
+        <select
+          className="gc-select"
+          disabled={saving}
+          value={punto.direccion_envio_id || ""}
+          onChange={event => {
+            const addr = addresses.find(a => a.id === event.target.value);
+            onSet(punto, addr ? formatDireccionEnvio(addr) : null, addr?.id || null, aplicarTodos);
+          }}
+        >
+          <option value="">Dirección del punto (por defecto)</option>
+          {addresses.map(addr => <option key={addr.id} value={addr.id}>{(addr.etiqueta ? `${addr.etiqueta} · ` : "") + formatDireccionEnvio(addr)}</option>)}
+        </select>
       )}
+      {/* Escritura directa: el gestor puede teclear una dirección puntual sin depender de
+          que administración la haya guardado antes en la ficha del trabajador. */}
+      <input
+        className="gc-input"
+        placeholder="O escribe aquí la dirección de envío…"
+        defaultValue={punto.direccion_envio || ""}
+        disabled={saving}
+        onBlur={event => {
+          const valor = event.target.value.trim();
+          if (valor === (punto.direccion_envio || "").trim()) return;
+          onSet(punto, valor || null, null, aplicarTodos);
+        }}
+      />
+      <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={aplicarTodos} onChange={event => setAplicarTodos(event.target.checked)} />Aplicar a todos los puntos de este instalador</label>
+      <p className="text-xs" style={{ color: "var(--gc-muted)" }}>Para rellenarlas en bloque usa el panel «Direcciones de envío del material».</p>
     </div>
+  );
+}
+
+type WorkerOption = { id: string; name: string; province?: string | null };
+
+/**
+ * Desplegable de instalador con los trabajadores DE LA PROVINCIA del punto primero.
+ * Antes listaba los 26 trabajadores en bruto, así que el gestor tenía que saberse de
+ * memoria quién cubre cada zona. Los de otras provincias siguen accesibles en un segundo
+ * grupo, porque hay provincias sin ningún trabajador y el punto no puede quedar bloqueado.
+ */
+function InstaladorSelect({ punto, workers, saving, onUpdatePunto }: {
+  punto: PuntoVenta;
+  workers: WorkerOption[];
+  saving: boolean;
+  onUpdatePunto: (punto: PuntoVenta, patch: Partial<PuntoVenta>) => Promise<void>;
+}) {
+  const deZona = useMemo(() => trabajadoresDeProvincia(workers, punto.provincia), [workers, punto.provincia]);
+  const otros = useMemo(() => {
+    const ids = new Set(deZona.map(worker => worker.id));
+    return workers.filter(worker => !ids.has(worker.id));
+  }, [workers, deZona]);
+  return (
+    <select
+      className="gc-select"
+      style={{ width: 160, padding: "5px 8px", fontSize: 12 }}
+      value={punto.instalador_id || ""}
+      disabled={saving}
+      title={deZona.length ? `${deZona.length} trabajador(es) en ${punto.provincia}` : `Sin trabajadores en ${punto.provincia || "esta provincia"}`}
+      onChange={event => {
+        const worker = workers.find(w => w.id === event.target.value);
+        onUpdatePunto(punto, { instalador_id: worker?.id || null, instalador_nombre: worker?.name || null });
+      }}
+    >
+      <option value="">Sin instalador</option>
+      {deZona.length > 0 && (
+        <optgroup label={`En ${punto.provincia}${deZona.length > 1 ? ` (${deZona.length} opciones)` : ""}`}>
+          {deZona.map(worker => <option key={worker.id} value={worker.id}>{worker.name}</option>)}
+        </optgroup>
+      )}
+      {otros.length > 0 && (
+        <optgroup label={deZona.length ? "Otras provincias" : `Sin trabajadores en ${punto.provincia || "esta provincia"} · otras`}>
+          {otros.map(worker => <option key={worker.id} value={worker.id}>{worker.name}{worker.province ? ` · ${worker.province}` : ""}</option>)}
+        </optgroup>
+      )}
+    </select>
   );
 }
 
@@ -209,11 +266,11 @@ export function PuntosTabla({
             </select>
           </label>
           <label className="w-40">
-            <span className="gc-label">Visita desde</span>
+            <span className="gc-label">Instalación desde</span>
             <input type="date" className="gc-input" value={filtros.desde} onChange={event => patchFiltros({ desde: event.target.value })} />
           </label>
           <label className="w-40">
-            <span className="gc-label">Visita hasta</span>
+            <span className="gc-label">Instalación hasta</span>
             <input type="date" className="gc-input" value={filtros.hasta} onChange={event => patchFiltros({ hasta: event.target.value })} />
           </label>
           <button className="gc-btn-outline" onClick={() => { setFiltros(emptyFiltros); setPage(1); }}>Limpiar</button>
@@ -235,7 +292,8 @@ export function PuntosTabla({
                 <th>Instalador</th>
                 <th>Tipo</th>
                 <th>Estado</th>
-                <th>Fecha visita</th>
+                <th>Fecha instalación</th>
+                <th title="Fecha en la que Almacén cerró el picking del material">Picking</th>
                 <th>Incid.</th>
                 <th style={{ textAlign: "right" }}>Importe</th>
                 <th className="gc-no-print">Acciones</th>
@@ -262,24 +320,17 @@ export function PuntosTabla({
                     </td>
                     <td onClick={event => event.stopPropagation()}>
                       {workers.length ? (
-                        <select
-                          className="gc-select"
-                          style={{ width: 150, padding: "5px 8px", fontSize: 12 }}
-                          value={punto.instalador_id || ""}
-                          disabled={saving}
-                          onChange={event => {
-                            const worker = workers.find(w => w.id === event.target.value);
-                            onUpdatePunto(punto, { instalador_id: worker?.id || null, instalador_nombre: worker?.name || null });
-                          }}
-                        >
-                          <option value="">Sin instalador</option>
-                          {workers.map(worker => <option key={worker.id} value={worker.id}>{worker.name}</option>)}
-                        </select>
+                        <InstaladorSelect punto={punto} workers={workers} saving={saving} onUpdatePunto={onUpdatePunto} />
                       ) : (punto.instalador_nombre || <span style={{ color: "var(--gc-muted)" }}>—</span>)}
                     </td>
                     <td>{punto.tipo || "—"}</td>
                     <td><PuntoBadgeEstado estado={punto.estado} /></td>
                     <td>{formatDate(punto.fecha_visita)}</td>
+                    <td title={punto.picking_cerrado_at ? "Picking cerrado por Almacén" : "Almacén no ha cerrado el picking"}>
+                      {punto.picking_cerrado_at
+                        ? formatDate(punto.picking_cerrado_at)
+                        : <span style={{ color: "var(--gc-muted)" }}>—</span>}
+                    </td>
                     <td>{abiertas > 0 ? <span className="inline-flex items-center gap-1 font-bold" style={{ color: "var(--gc-secondary)" }}><AlertTriangle className="h-4 w-4" />{abiertas}</span> : "—"}</td>
                     <td className="text-right font-semibold">{punto.importe != null ? eur(punto.importe) : "—"}</td>
                     <td className="gc-no-print" onClick={event => event.stopPropagation()}>
@@ -296,7 +347,7 @@ export function PuntosTabla({
                   </tr>,
                   isOpen && (
                     <tr key={`${punto.id}-detalle`}>
-                      <td colSpan={12} style={{ background: "#fafbfc" }}>
+                      <td colSpan={13} style={{ background: "#fafbfc" }}>
                         <div className="grid gap-4 p-3 md:grid-cols-2 lg:grid-cols-3">
                           <div className="space-y-1 text-sm">
                             <p className="text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>Ficha del punto</p>
@@ -306,8 +357,42 @@ export function PuntosTabla({
                             <p><b>Tipo:</b> {punto.tipo || "—"}</p>
                             <p><b>Gestor de zona:</b> {punto.gestor_nombre || "Sin asignar"}</p>
                             <p><b>Instalador:</b> {punto.instalador_nombre || "Sin asignar"}</p>
-                            <p><b>Fecha visita:</b> {formatDate(punto.fecha_visita)}</p>
-                            <p><b>Importe:</b> {punto.importe != null ? eur(punto.importe) : "—"}</p>
+                            <p><b>Picking:</b> {punto.picking_cerrado_at ? formatDate(punto.picking_cerrado_at) : <span style={{ color: "var(--gc-muted)" }}>Almacén no lo ha cerrado</span>}</p>
+                            {/* v10.2 · Fecha de instalación e importe editables también por el gestor:
+                                la fecha es el dato que administración pasa al cliente y el importe es
+                                lo que se paga al trabajador (margen bruto de la campaña). */}
+                            <div className="mt-2 grid gap-2 border-t pt-2 gc-no-print sm:grid-cols-2">
+                              <label>
+                                <span className="gc-label">Fecha instalación</span>
+                                <input
+                                  type="date"
+                                  className="gc-input"
+                                  defaultValue={dateOnly(punto.fecha_visita)}
+                                  disabled={saving}
+                                  onChange={event => {
+                                    const valor = event.target.value || null;
+                                    if (valor !== (dateOnly(punto.fecha_visita) || null)) onUpdatePunto(punto, { fecha_visita: valor });
+                                  }}
+                                />
+                              </label>
+                              <label>
+                                <span className="gc-label">Importe del trabajador (€)</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  className="gc-input"
+                                  defaultValue={punto.importe ?? ""}
+                                  disabled={saving}
+                                  onBlur={event => {
+                                    const texto = event.target.value.trim();
+                                    const valor = texto === "" ? null : Number(texto);
+                                    if (valor != null && (!Number.isFinite(valor) || valor < 0)) return;
+                                    if (valor !== (punto.importe ?? null)) onUpdatePunto(punto, { importe: valor });
+                                  }}
+                                />
+                              </label>
+                            </div>
                             {solicitarDireccionEnvio && onSetDireccionEnvio && (
                               <div className="mt-2 border-t pt-2 gc-no-print">
                                 <p className="mb-1 text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>Dirección de envío (Logística)</p>

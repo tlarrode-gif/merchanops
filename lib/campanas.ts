@@ -1,4 +1,5 @@
 import { AppSession, AppUser, canDeleteCampaigns, canManageCampaigns, isAdminSession, userCanSeeProvince } from "@/lib/access-control";
+import { agruparPuntosParaMaterial } from "@/lib/campana-asignacion";
 import { copyCampanaColumnas } from "@/lib/campana-columnas";
 import { normalizeProvince, provinceScopeValues } from "@/lib/provinces";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
@@ -74,6 +75,9 @@ export type PuntoVenta = {
   fecha_visita?: string | null;
   importe?: number | null;
   notas?: string | null;
+  // v10.2: fecha en que Almacen cerro el picking del material de este punto.
+  // La escribe logistics_close_picking; en Grandes Campanas es de solo lectura.
+  picking_cerrado_at?: string | null;
   datos_extra?: Record<string, unknown> | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -172,10 +176,14 @@ export function sessionCanSeeCampana(session: AppSession | null | undefined, cam
   return (campana.provincias || []).some(provincia => userCanSeeProvince(session, provincia));
 }
 
+// v10.2 · Operativa de roles: administración reparte los puntos entre gestores (gestor_id),
+// y ese reparto es lo que otorga el acceso. Un punto YA asignado solo lo ve su gestor; los
+// que aún no tienen gestor siguen visibles para quien cubre la provincia, para que se puedan
+// descubrir y repartir (y para no romper «Mi zona» ni «Asignación rápida»).
 export function sessionCanSeePunto(session: AppSession | null | undefined, punto: Pick<PuntoVenta, "provincia" | "gestor_id">) {
   if (!session?.active) return false;
   if (isAdminSession(session)) return true;
-  if (punto.gestor_id === session.id) return true;
+  if (punto.gestor_id) return punto.gestor_id === session.id;
   return userCanSeeProvince(session, punto.provincia);
 }
 
@@ -616,6 +624,51 @@ export async function bulkAssignPuntos(
   return { data: { asignados: permitidos.length, omitidos } };
 }
 
+export type ResultadoReparto = { aplicados: number; personas: number };
+
+// Aplica un reparto persona -> puntos en bloque. Se agrupa por persona para hacer un
+// UPDATE por cada una en lugar de uno por punto. `campo` decide si se reparte el GESTOR
+// de zona (administración) o el INSTALADOR/trabajador (gestor).
+async function aplicarReparto(
+  sugerencias: Array<{ punto_id: string; persona_id: string; persona_nombre: string }>,
+  campo: "gestor" | "instalador"
+): Promise<Result<ResultadoReparto>> {
+  if (!supabase) return { data: { aplicados: 0, personas: 0 }, error: "Supabase no está configurado." };
+  if (!sugerencias.length) return { data: { aplicados: 0, personas: 0 } };
+  const porPersona = new Map<string, { nombre: string; ids: string[] }>();
+  for (const sugerencia of sugerencias) {
+    const actual = porPersona.get(sugerencia.persona_id) || { nombre: sugerencia.persona_nombre, ids: [] };
+    actual.ids.push(sugerencia.punto_id);
+    porPersona.set(sugerencia.persona_id, actual);
+  }
+  let aplicados = 0;
+  for (const [personaId, { nombre, ids }] of Array.from(porPersona.entries())) {
+    const patch = campo === "gestor"
+      ? { gestor_id: personaId, gestor_nombre: nombre, updated_at: new Date().toISOString() }
+      : { instalador_id: personaId, instalador_nombre: nombre, updated_at: new Date().toISOString() };
+    for (let index = 0; index < ids.length; index += 200) {
+      const { data, error } = await supabase
+        .from("puntos_venta_campana")
+        .update(patch)
+        .in("id", ids.slice(index, index + 200))
+        .select("id");
+      if (error) return { data: { aplicados, personas: porPersona.size }, error: error.message };
+      aplicados += (data || []).length;
+    }
+  }
+  return { data: { aplicados, personas: porPersona.size } };
+}
+
+/** Administración: reparte los puntos entre gestores de zona (les da acceso). */
+export async function aplicarSugerenciasGestor(sugerencias: Array<{ punto_id: string; persona_id: string; persona_nombre: string }>) {
+  return aplicarReparto(sugerencias, "gestor");
+}
+
+/** Gestor: reparte sus puntos entre los trabajadores de la zona. */
+export async function aplicarSugerenciasInstalador(sugerencias: Array<{ punto_id: string; persona_id: string; persona_nombre: string }>) {
+  return aplicarReparto(sugerencias, "instalador");
+}
+
 export async function updatePunto(id: string, patch: Partial<PuntoVenta>): Promise<Result<boolean>> {
   if (!supabase) return { data: false, error: "Supabase no está configurado." };
   if (patch.importe !== undefined && Number(patch.importe ?? 0) < 0) return { data: false, error: "El importe no puede ser negativo." };
@@ -630,15 +683,107 @@ export async function updatePunto(id: string, patch: Partial<PuntoVenta>): Promi
   return { data: true };
 }
 
+export type SolicitudMaterialGrupo = {
+  instalador_nombre: string | null;
+  direccion_envio: string | null;
+  puntos: number;
+  code?: string | null;
+  request_id?: string | null;
+  error?: string;
+};
+
+/**
+ * Solicita material a Logística para varios puntos de una campaña.
+ *
+ * Una cabecera de logistics_requests solo tiene UN instalador y UNA dirección de envío,
+ * así que los puntos se agrupan por trabajador + dirección y se envía una solicitud por
+ * grupo. Antes se mandaba una sola llamada con todos los puntos y la cabecera se quedaba
+ * con el primer instalador no nulo, de modo que Almacén veía todo el material a nombre de
+ * una única persona.
+ */
+export async function solicitarMaterialCampana(
+  campana: Pick<Campana, "id" | "nombre" | "cliente_marca">,
+  puntos: PuntoVenta[],
+  material: { name: string; cantidad: number; notas?: string | null },
+  actor: string
+): Promise<Result<SolicitudMaterialGrupo[]>> {
+  if (!supabase) return { data: [], error: "Supabase no está configurado." };
+  if (!puntos.length) return { data: [], error: "No hay puntos para solicitar material." };
+  if (!material.name.trim()) return { data: [], error: "Indica qué material se solicita." };
+
+  const grupos = agruparPuntosParaMaterial(puntos);
+  const resultados: SolicitudMaterialGrupo[] = [];
+  for (const grupo of grupos) {
+    const puntosGrupo = grupo.puntos.map(punto => {
+      const completo = puntos.find(item => item.id === punto.id)!;
+      return {
+        id: completo.id,
+        nombre_comercial: completo.nombre_comercial,
+        direccion: completo.direccion || null,
+        direccion_envio: completo.direccion_envio || null,
+        provincia: completo.provincia || null,
+        instalador_id: completo.instalador_id || null,
+        instalador_nombre: completo.instalador_nombre || null,
+        fecha_visita: dateOnly(completo.fecha_visita) || null
+      };
+    });
+    const { data, error } = await supabase.rpc("create_logistics_request_campaign", {
+      p_campana: { id: campana.id, nombre: campana.nombre, cliente_marca: campana.cliente_marca || null },
+      p_puntos: puntosGrupo,
+      p_material: { name: material.name.trim(), quantity: Math.max(1, Number(material.cantidad) || 1), notes: material.notas?.trim() || null },
+      p_actor: actor
+    });
+    const cabecera = data as { code?: string; request_id?: string } | null;
+    resultados.push({
+      instalador_nombre: grupo.instalador_nombre,
+      direccion_envio: grupo.direccion_envio,
+      puntos: grupo.puntos.length,
+      code: cabecera?.code || null,
+      request_id: cabecera?.request_id || null,
+      error: error?.message
+    });
+  }
+  const fallidos = resultados.filter(item => item.error);
+  return {
+    data: resultados,
+    error: fallidos.length
+      ? `${fallidos.length} de ${resultados.length} solicitudes fallaron: ${fallidos.map(item => `${item.instalador_nombre || "sin trabajador"} (${item.error})`).join("; ")}`
+      : undefined
+  };
+}
+
 // Feature 2: fija la direccion de envio (snapshot + referencia) en todos los puntos
 // de un instalador dentro de una campana, para no teclearla punto a punto.
-export async function bulkSetDireccionEnvio(campanaId: string, instaladorId: string, direccionEnvio: string | null, direccionEnvioId: string | null): Promise<Result<number>> {
+export async function bulkSetDireccionEnvio(
+  campanaId: string,
+  instaladorId: string,
+  direccionEnvio: string | null,
+  direccionEnvioId: string | null,
+  session?: AppSession | null
+): Promise<Result<number>> {
   if (!supabase) return { data: 0, error: "Supabase no está configurado." };
   const bloqueada = await assertCampanaEditable(campanaId);
   if (bloqueada) return { data: 0, error: bloqueada };
-  const { data, error } = await supabase.from("puntos_venta_campana")
-    .update({ direccion_envio: direccionEnvio || null, direccion_envio_id: direccionEnvioId || null, updated_at: new Date().toISOString() })
-    .eq("campana_id", campanaId).eq("instalador_id", instaladorId).select("id");
+  // Con sesión, el volcado se limita a los puntos del ámbito de quien lo ejecuta: un gestor
+  // no debe cambiar el destino de puntos que son de otro gestor aunque compartan trabajador.
+  let ids: string[] | null = null;
+  if (session && !isAdminSession(session)) {
+    const { data: candidatos, error: readError } = await supabase
+      .from("puntos_venta_campana")
+      .select("id,provincia,gestor_id")
+      .eq("campana_id", campanaId)
+      .eq("instalador_id", instaladorId);
+    if (readError) return { data: 0, error: readError.message };
+    ids = ((candidatos || []) as Array<Pick<PuntoVenta, "id" | "provincia" | "gestor_id">>)
+      .filter(punto => sessionCanSeePunto(session, punto))
+      .map(punto => punto.id);
+    if (!ids.length) return { data: 0, error: "Ninguno de los puntos de ese trabajador está dentro de tu ámbito." };
+  }
+  const patch = { direccion_envio: direccionEnvio || null, direccion_envio_id: direccionEnvioId || null, updated_at: new Date().toISOString() };
+  const query = supabase.from("puntos_venta_campana").update(patch);
+  const { data, error } = ids
+    ? await query.in("id", ids).select("id")
+    : await query.eq("campana_id", campanaId).eq("instalador_id", instaladorId).select("id");
   if (error) return { data: 0, error: error.message };
   return { data: (data || []).length };
 }
@@ -748,7 +893,8 @@ export function puntosCsvRows(puntos: PuntoVenta[]): CampanaExportRow[] {
     Gestor: punto.gestor_nombre || "",
     Instalador: punto.instalador_nombre || "",
     Estado: puntoEstadoLabels[punto.estado] || punto.estado,
-    "Fecha visita": dateOnly(punto.fecha_visita),
+    "Fecha instalacion": dateOnly(punto.fecha_visita),
+    Picking: dateOnly(punto.picking_cerrado_at),
     Importe: Number(punto.importe || 0),
     Notas: punto.notas || ""
   }));
