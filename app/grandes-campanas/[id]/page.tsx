@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileDown, Info, MapPin, MessageCircle, Package, Pencil, Plus, Upload, UserCheck, Users } from "lucide-react";
+import { Euro, FileDown, Info, MapPin, MessageCircle, Package, Pencil, Plus, Upload, UserCheck, Users } from "lucide-react";
 import { FILE_ACCEPT_ATTR, parseImportFile } from "@/lib/csv-parser";
 import { supabase } from "@/lib/supabase";
 import { CampanaBadgeEstado, IncidenciaBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
@@ -15,6 +15,7 @@ import { AppSession, AppUser, canAccessModule, canManageCampaigns, getCurrentApp
 import { CampanaColumna, fetchCampanaColumnas } from "@/lib/campana-columnas";
 import { agruparPuntosParaMaterial, mismaProvincia, provinciasConVariosTrabajadores, sugerirGestoresPorPunto, sugerirTrabajadoresPorPunto } from "@/lib/campana-asignacion";
 import { addWorkerAddress, formatDireccionEnvio } from "@/lib/direcciones-envio";
+import { IncidenciaRow, resumenVolcado, syncCampanaObligations } from "@/lib/payments/campana-obligations";
 import {
   Campana,
   CampanaGestor,
@@ -187,14 +188,49 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
+  /**
+   * Vuelca a Pagos las obligaciones de los puntos indicados. Devuelve el texto del
+   * aviso; nunca lanza: si el volcado falla, el cambio del punto ya está guardado y lo
+   * que procede es avisar, no revertirlo (mismo criterio que en los vinilos ISDIN).
+   */
+  async function volcarPagos(objetivo: PuntoVenta[], correlacion?: string): Promise<string> {
+    try {
+      const result = await syncCampanaObligations(
+        objetivo as unknown as Array<Record<string, unknown>>,
+        incidencias as unknown as IncidenciaRow[],
+        session?.display_name || "Operaciones",
+        correlacion
+      );
+      return resumenVolcado(result);
+    } catch (err) {
+      const texto = err instanceof Error ? err.message : "error desconocido";
+      setError(`El punto se guardó, pero el volcado a Pagos falló: ${texto}. Usa «Volcar pagos» para reintentarlo.`);
+      return "";
+    }
+  }
+
+  // Recuperación: recalcula los pagos de todos los puntos visibles. Necesario para los
+  // puntos que se completaron antes de que existiera este volcado, y para reflejar
+  // correcciones de importe o de fecha posteriores.
+  async function handleVolcarPagosCampana() {
+    setSaving(true);
+    setError("");
+    const mensaje = await volcarPagos(puntos, `campana:${params.id}`);
+    if (mensaje) flash(mensaje);
+    setSaving(false);
+  }
+
   async function handleUpdatePunto(punto: PuntoVenta, patch: Partial<PuntoVenta>) {
     setSaving(true);
     const result = await updatePunto(punto.id, patch);
     if (result.error) { setError(result.error); setSaving(false); return; }
     if (patch.estado === "completado" && punto.estado !== "completado") {
       const bridgeError = await syncPuntoCompletadoConLogistica({ ...punto, ...patch }, campana, session);
+      // v10.3: completar el punto es lo que genera el pago del trabajador. Si falta el
+      // importe o la fecha, la obligación se crea BLOQUEADA en lugar de perderse.
+      const pagos = await volcarPagos([{ ...punto, ...patch }], `punto:${punto.id}`);
       if (bridgeError) setError(`Punto guardado, pero la sincronización con Logística falló: ${bridgeError}`);
-      else flash("Punto completado y sincronizado con Logística");
+      else flash(`Punto completado y sincronizado con Logística. ${pagos}`);
     } else if (patch.estado === "incidencia" && punto.estado !== "incidencia") {
       // Marcar un punto como incidencia desde el desplegable crea también su registro
       // en la pestaña Incidencias (si no hay ya una abierta), para que no se pierda.
@@ -435,6 +471,16 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     () => puntos.filter(punto => punto.estado !== "completado" && punto.estado !== "cancelado" && !logisticaPuntos[punto.id]?.request_id),
     [puntos, logisticaPuntos]
   );
+  // Puntos que generan pago: completados (instalación) o con incidencia (visita fallida).
+  const puntosPagables = useMemo(() => {
+    const conIncidencia = new Set(incidencias.map(inc => inc.punto_id).filter(Boolean) as string[]);
+    return puntos.filter(punto => punto.estado === "completado" || conIncidencia.has(punto.id));
+  }, [puntos, incidencias]);
+  // Completados a los que les falta un dato para poder cobrarse.
+  const puntosSinImporte = useMemo(
+    () => puntos.filter(punto => punto.estado === "completado" && (!Number(punto.importe || 0) || !punto.fecha_visita)),
+    [puntos]
+  );
   const puntosSinGestor = useMemo(() => puntos.filter(punto => !punto.gestor_id), [puntos]);
   const puntosSinTrabajador = useMemo(() => puntos.filter(punto => !punto.instalador_id), [puntos]);
   // Provincias de ESTA campaña en las que hay que elegir a mano porque hay varios trabajadores.
@@ -649,6 +695,19 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
                 <UserCheck className="h-4 w-4" />
                 Sugerir trabajador ({puntosSinTrabajador.length} sin trabajador)
               </button>
+              {/* Los pagos se vuelcan al completar cada punto; este botón recupera los
+                  puntos completados antes de existir el volcado y refleja correcciones. */}
+              <button
+                className="gc-btn-outline"
+                disabled={saving || !puntosPagables.length}
+                title={puntosPagables.length
+                  ? "Recalcular y registrar en Pagos las obligaciones de los puntos completados y de las incidencias"
+                  : "Todavía no hay puntos completados ni incidencias que generen pago"}
+                onClick={handleVolcarPagosCampana}
+              >
+                <Euro className="h-4 w-4" />
+                Volcar pagos ({puntosPagables.length})
+              </button>
               <button
                 className="gc-btn-dark"
                 disabled={saving || !puntosSinMaterial.length}
@@ -659,6 +718,12 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
                 Solicitar material ({puntosSinMaterial.length} sin petición)
               </button>
             </div>
+            {puntosSinImporte.length > 0 && (
+              <p className="text-xs gc-no-print" style={{ color: "var(--gc-secondary)" }}>
+                <b>{puntosSinImporte.length} punto(s) completados sin importe o sin fecha de instalación.</b> Su pago
+                queda registrado en Pagos pero <b>bloqueado</b>: nadie los cobrará hasta rellenar esos datos en la ficha del punto.
+              </p>
+            )}
             {provinciasVariosTrabajadores.length > 0 && (
               <p className="text-xs gc-no-print" style={{ color: "var(--gc-muted)" }}>
                 Provincias de esta campaña con <b>más de un trabajador</b> disponible: {provinciasVariosTrabajadores.join(", ")}.
