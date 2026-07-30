@@ -56,6 +56,25 @@ export interface ObligationDraft {
   blockedReasons: BlockReason[];
 }
 
+/**
+ * Punto del módulo ACTUAL de Grandes Campañas (`puntos_venta_campana`).
+ * Distinto de BigCampaignPointInput, que describe las tablas legadas.
+ */
+export interface CampanaPuntoInput {
+  id: string;
+  campaignId: string;
+  /** pendiente | completado | incidencia | cancelado */
+  estado: string;
+  /** Importe que se paga al trabajador. null = bloquea la obligación. */
+  importeEur: number | null;
+  /** Fecha de instalación del punto. null = bloquea la obligación. */
+  fechaInstalacion: string | null;
+  workerId: string | null;
+  workerName: string | null;
+  /** Incidencias registradas del punto: cada una es un desplazamiento fallido. */
+  incidencias?: Array<{ id: string; estado: string; fecha: string | null }>;
+}
+
 export interface EngineIssue {
   severity: "critico" | "alto" | "medio";
   origin: ObligationOrigin;

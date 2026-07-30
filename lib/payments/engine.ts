@@ -27,6 +27,7 @@ import { FAILED_VISIT_FEE_CENTS } from "@/lib/payments/constants";
 import { MoneyError, eurosToCents } from "@/lib/payments/money";
 import {
   BigCampaignPointInput,
+  CampanaPuntoInput,
   BlockReason,
   EngineIssue,
   EngineResult,
@@ -345,6 +346,83 @@ export function computeBigCampaignPointObligations(point: BigCampaignPointInput)
         workerId: point.workerId,
         workerName: point.workerName,
         concept: "Gran campaña · punto finalizado",
+        blockedReasons: blocked
+      })
+    );
+  }
+
+  return { obligations, issues };
+}
+
+// ---------------------------------------------------------------------------
+// Grandes campañas (módulo actual: grandes_campanas / puntos_venta_campana)
+// ---------------------------------------------------------------------------
+
+/**
+ * v10.3 · Obligaciones de un punto del módulo ACTUAL de Grandes Campañas.
+ *
+ * `computeBigCampaignPointObligations` (arriba) trabaja sobre las tablas legadas
+ * big_campaigns/big_campaign_points, que están vacías, y con sus estados en texto
+ * («Finalizado», «Pospuesto»...). Este es su equivalente para el modelo vivo, y no
+ * es un simple renombrado: aquí una incidencia resuelta devuelve el punto a
+ * `pendiente`, así que resolver la incidencia NO puede generar por sí sola el pago
+ * de la instalación —solo lo genera el estado `completado`—.
+ *
+ * Reglas:
+ *  - `completado`  → obligación de instalación por el importe del punto.
+ *  - incidencia    → una obligación de visita fallida por cada incidencia registrada,
+ *                    con la tarifa única de FAILED_VISIT_FEE_CENTS (8,56 €).
+ *  - `cancelado` y `pendiente` sin incidencias → nada.
+ *
+ * Nada se descarta en silencio: si falta el importe, la fecha de instalación o el
+ * trabajador, la obligación se crea igualmente pero BLOQUEADA (`payable = false`)
+ * con su motivo, para que aparezca en Pagos y en Avisos en lugar de desaparecer.
+ */
+export function computeCampanaPuntoObligations(punto: CampanaPuntoInput): EngineResult {
+  const issues: EngineIssue[] = [];
+  const obligations: ObligationDraft[] = [];
+  const estado = String(punto.estado || "pendiente").toLowerCase();
+
+  // Un punto cancelado no genera pago ni por la instalación ni por el desplazamiento.
+  if (estado === "cancelado") return { obligations, issues };
+
+  // Visita fallida: el trabajador se desplazó y no pudo instalar. Una por incidencia
+  // registrada, con clave estable por incidencia para que dos viajes sean dos pagos.
+  for (const incidencia of punto.incidencias ?? []) {
+    if (!incidencia.id) continue;
+    obligations.push(
+      draft({
+        key: `gran_campana:${punto.id}:failed_visit:${incidencia.id}`,
+        origin: "gran_campana",
+        sourceId: punto.id,
+        type: "failed_visit",
+        amountCents: FAILED_VISIT_FEE_CENTS,
+        eventDate: dateOnly(incidencia.fecha),
+        workerId: punto.workerId,
+        workerName: punto.workerName,
+        concept: "Gran campaña · visita fallida",
+        blockedReasons: punto.workerId || punto.workerName ? [] : (["missing_worker"] as BlockReason[])
+      })
+    );
+  }
+
+  if (estado === "completado") {
+    const blocked: BlockReason[] = [];
+    const amountCents = centsOrBlock(punto.importeEur, blocked);
+    if (!punto.workerId && !punto.workerName) blocked.push("missing_worker");
+    obligations.push(
+      draft({
+        key: `gran_campana:${punto.id}:installation`,
+        origin: "gran_campana",
+        sourceId: punto.id,
+        type: "installation",
+        amountCents,
+        // Sin fecha de instalación `draft` bloquea con missing_event_date: nunca se
+        // sustituye por la fecha de hoy, que falsearía el mes contable.
+        eventDate: dateOnly(punto.fechaInstalacion),
+        workerId: punto.workerId,
+        workerName: punto.workerName,
+        concept: "Gran campaña · punto completado",
         blockedReasons: blocked
       })
     );
