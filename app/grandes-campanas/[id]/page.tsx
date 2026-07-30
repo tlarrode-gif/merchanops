@@ -3,15 +3,18 @@
 import Link from "next/link";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileDown, Info, MapPin, MessageCircle, Package, Pencil, Plus, Upload, Users } from "lucide-react";
+import { FileDown, Info, MapPin, MessageCircle, Package, Pencil, Plus, Upload, UserCheck, Users } from "lucide-react";
 import { FILE_ACCEPT_ATTR, parseImportFile } from "@/lib/csv-parser";
 import { supabase } from "@/lib/supabase";
 import { CampanaBadgeEstado, IncidenciaBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
 import { CampanaDetalleKpis } from "@/components/grandes-campanas/campana-detalle-kpis";
 import { GestorAvatar } from "@/components/grandes-campanas/gestor-avatars";
 import { PuntosTabla } from "@/components/grandes-campanas/puntos-tabla";
-import { AppSession, canAccessModule, canManageCampaigns, getCurrentAppSession, isAdminSession } from "@/lib/access-control";
+import { DireccionesEnvioPanel } from "@/components/grandes-campanas/direcciones-envio-panel";
+import { AppSession, AppUser, canAccessModule, canManageCampaigns, getCurrentAppSession, isAdminSession, loadInternalUsers } from "@/lib/access-control";
 import { CampanaColumna, fetchCampanaColumnas } from "@/lib/campana-columnas";
+import { agruparPuntosParaMaterial, mismaProvincia, provinciasConVariosTrabajadores, sugerirGestoresPorPunto, sugerirTrabajadoresPorPunto } from "@/lib/campana-asignacion";
+import { addWorkerAddress, formatDireccionEnvio } from "@/lib/direcciones-envio";
 import {
   Campana,
   CampanaGestor,
@@ -36,7 +39,10 @@ import {
   puntosCsvRows,
   setIncidenciaEstado,
   syncPuntoCompletadoConLogistica,
+  aplicarSugerenciasGestor,
+  aplicarSugerenciasInstalador,
   bulkSetDireccionEnvio,
+  solicitarMaterialCampana,
   updatePunto,
   updatePuntosPorCodigo,
   deletePunto as deletePuntoDb
@@ -71,6 +77,8 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   const [nuevoAbierto, setNuevoAbierto] = useState(false);
   const [nuevoPunto, setNuevoPunto] = useState<PuntoInput>({ ...emptyNuevoPunto });
   const [workers, setWorkers] = useState<Array<{ id: string; name: string; province?: string | null; phone?: string | null }>>([]);
+  // Usuarios internos con provincias: candidatos a gestor de zona para «Sugerir gestor».
+  const [gestoresInternos, setGestoresInternos] = useState<AppUser[]>([]);
   const updateFileRef = useRef<HTMLInputElement>(null);
   const [waOpen, setWaOpen] = useState(false);
   const [waWorkerId, setWaWorkerId] = useState("");
@@ -83,6 +91,10 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
 
   useEffect(() => {
     if (supabase) supabase.from("workers").select("id,name,province,phone").order("name").then(({ data }) => setWorkers((data || []) as Array<{ id: string; name: string; province?: string | null; phone?: string | null }>));
+    if (isAdminSession(session)) {
+      loadInternalUsers().then(users => setGestoresInternos(users.filter(user => user.active && (user.provinces || []).length > 0)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Mensaje de WhatsApp para el instalador: campaña + sus puntos asignados. Editable
@@ -159,7 +171,17 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     refresh();
     const search = new URLSearchParams(window.location.search);
     const importados = search.get("importados");
-    if (importados) flash(`${Number(importados).toLocaleString("es-ES")} puntos importados${search.get("omitidos") && search.get("omitidos") !== "0" ? `, ${search.get("omitidos")} omitidos` : ""}${search.get("duplicados") ? `, ${search.get("duplicados")} duplicados no importados (código ya existente)` : ""}.`);
+    if (importados) {
+      const repartidos = search.get("repartidos");
+      const sinGestor = search.get("sinGestor");
+      flash([
+        `${Number(importados).toLocaleString("es-ES")} puntos importados`,
+        search.get("omitidos") && search.get("omitidos") !== "0" ? `${search.get("omitidos")} omitidos` : "",
+        search.get("duplicados") ? `${search.get("duplicados")} duplicados no importados (código ya existente)` : "",
+        repartidos ? `${repartidos} repartidos entre los gestores de zona` : "",
+        sinGestor ? `sin gestor en ${sinGestor.split(",").join(", ")}` : ""
+      ].filter(Boolean).join(" · ") + ".");
+    }
     const timer = setInterval(() => refresh(true), 30000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -195,7 +217,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   async function handleSetDireccionEnvio(punto: PuntoVenta, direccionEnvio: string | null, direccionEnvioId: string | null, aplicarTodos: boolean) {
     setSaving(true);
     const result = aplicarTodos && punto.instalador_id
-      ? await bulkSetDireccionEnvio(params.id, punto.instalador_id, direccionEnvio, direccionEnvioId)
+      ? await bulkSetDireccionEnvio(params.id, punto.instalador_id, direccionEnvio, direccionEnvioId, session)
       : await updatePunto(punto.id, { direccion_envio: direccionEnvio, direccion_envio_id: direccionEnvioId });
     if (result.error) setError(result.error);
     else flash(aplicarTodos ? "Dirección de envío aplicada a los puntos del instalador" : "Dirección de envío actualizada");
@@ -275,6 +297,10 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     setMatPara(target);
   }
 
+  // Grupos de la solicitud: una solicitud por trabajador + dirección de envío. Se calcula
+  // antes de enviar para que quien pide el material vea exactamente qué va a crear.
+  const gruposMaterial = useMemo(() => (matPara ? agruparPuntosParaMaterial(matPara) : []), [matPara]);
+
   async function handleSolicitarMaterial() {
     if (!campana || !matPara?.length) return;
     if (!matForm.name.trim()) { setError("Indica qué material se solicita."); return; }
@@ -282,21 +308,124 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     setError("");
     try {
       if (!supabase) { setError("Logística no disponible en modo local"); return; }
-      const dateOk = (x?: string | null) => (x && /^\d{4}-\d{2}-\d{2}/.test(x) ? x.slice(0, 10) : null);
-      // C2: comando transaccional en la base (sin guardado en bloque).
-      const { data, error: rpcError } = await supabase.rpc("create_logistics_request_campaign", {
-        p_campana: { id: campana.id, nombre: campana.nombre, cliente_marca: campana.cliente_marca || null },
-        p_puntos: matPara.map(p => ({ id: p.id, nombre_comercial: p.nombre_comercial, direccion: p.direccion || null, direccion_envio: p.direccion_envio || null, provincia: p.provincia || null, instalador_id: p.instalador_id || null, instalador_nombre: p.instalador_nombre || null, fecha_visita: dateOk(p.fecha_visita) })),
-        p_material: { name: matForm.name.trim(), quantity: Math.max(1, Number(matForm.cantidad) || 1), notes: matForm.notas.trim() || null },
-        p_actor: session?.display_name || "Operaciones"
-      });
-      if (rpcError) throw new Error(rpcError.message);
-      const request = data as { code?: string } | null;
-      flash(`Solicitud ${request?.code || ""} enviada a Logística (${matPara.length} punto${matPara.length > 1 ? "s" : ""})`);
-      setMatPara(null);
+      // Una cabecera de solicitud solo admite un destinatario: los puntos se agrupan por
+      // trabajador y dirección, así que Almacén recibe una solicitud por destino real.
+      const result = await solicitarMaterialCampana(
+        campana,
+        matPara,
+        { name: matForm.name, cantidad: matForm.cantidad, notas: matForm.notas },
+        session?.display_name || "Operaciones"
+      );
+      const creadas = result.data.filter(grupo => !grupo.error);
+      if (result.error) setError(`Logística: ${result.error}`);
+      if (creadas.length) {
+        const resumen = creadas
+          .map(grupo => `${grupo.code || "s/código"} · ${grupo.instalador_nombre || "sin trabajador"} (${grupo.puntos})`)
+          .join(" · ");
+        flash(`${creadas.length} solicitud${creadas.length > 1 ? "es" : ""} enviada${creadas.length > 1 ? "s" : ""} a Logística: ${resumen}`);
+      }
+      if (!result.error) setMatPara(null);
       await refresh(true);
     } catch (err) {
       setError(err instanceof Error ? `Error logística: ${err.message}` : "Error creando la solicitud de material");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // --- Reparto de personas por zona ---
+  // Administración reparte los puntos entre GESTORES (y ese reparto es lo que les da
+  // acceso al punto). Cada gestor reparte sus puntos entre TRABAJADORES de la zona.
+
+  async function handleSugerirGestores() {
+    const candidatos = gestoresInternos.length ? gestoresInternos : [];
+    if (!candidatos.length) { setError("No hay usuarios con provincias asignadas a los que repartir los puntos."); return; }
+    const propuesta = sugerirGestoresPorPunto(puntos, candidatos);
+    if (!propuesta.sugerencias.length) {
+      setError(propuesta.provinciasSinCandidato.length
+        ? `Ningún gestor cubre estas provincias: ${propuesta.provinciasSinCandidato.join(", ")}. Ajusta las provincias de los usuarios y vuelve a intentarlo.`
+        : "Todos los puntos visibles ya tienen gestor asignado.");
+      return;
+    }
+    const detalle = Object.entries(propuesta.sugerencias.reduce<Record<string, number>>((acc, item) => {
+      acc[item.persona_nombre] = (acc[item.persona_nombre] || 0) + 1;
+      return acc;
+    }, {})).map(([nombre, total]) => `${nombre}: ${total}`).join("\n");
+    if (!window.confirm(`Se van a repartir ${propuesta.sugerencias.length} punto(s) sin gestor:\n\n${detalle}\n\n${propuesta.provinciasSinCandidato.length ? `Sin gestor en: ${propuesta.provinciasSinCandidato.join(", ")}.\n\n` : ""}Asignar el gestor es lo que le da acceso al punto. ¿Continuar?`)) return;
+    setSaving(true);
+    setError("");
+    const result = await aplicarSugerenciasGestor(propuesta.sugerencias);
+    if (result.error) setError(result.error);
+    else flash(`${result.data.aplicados} puntos repartidos entre ${result.data.personas} gestor(es)${propuesta.provinciasSinCandidato.length ? ` · sin gestor en ${propuesta.provinciasSinCandidato.join(", ")}` : ""}`);
+    await refresh(true);
+    setSaving(false);
+  }
+
+  async function handleSugerirTrabajadores() {
+    if (!workers.length) { setError("No hay trabajadores en el catálogo."); return; }
+    const propuesta = sugerirTrabajadoresPorPunto(puntos, workers);
+    if (!propuesta.sugerencias.length) {
+      setError(propuesta.provinciasSinCandidato.length
+        ? `No hay trabajadores en estas provincias: ${propuesta.provinciasSinCandidato.join(", ")}. Asígnalos a mano o añade trabajadores a esas zonas.`
+        : "Todos tus puntos ya tienen trabajador asignado.");
+      return;
+    }
+    const detalle = Object.entries(propuesta.sugerencias.reduce<Record<string, number>>((acc, item) => {
+      acc[item.persona_nombre] = (acc[item.persona_nombre] || 0) + 1;
+      return acc;
+    }, {})).map(([nombre, total]) => `${nombre}: ${total}`).join("\n");
+    const avisoVarios = propuesta.provinciasConVarios.length
+      ? `\n\nProvincias con varios trabajadores (repartidos por carga, revísalas si quieres otro): ${propuesta.provinciasConVarios.join(", ")}.`
+      : "";
+    if (!window.confirm(`Se van a asignar ${propuesta.sugerencias.length} punto(s) sin trabajador:\n\n${detalle}${avisoVarios}${propuesta.provinciasSinCandidato.length ? `\n\nSin trabajador en: ${propuesta.provinciasSinCandidato.join(", ")}.` : ""}\n\n¿Continuar?`)) return;
+    setSaving(true);
+    setError("");
+    const result = await aplicarSugerenciasInstalador(propuesta.sugerencias);
+    if (result.error) setError(result.error);
+    else flash(`${result.data.aplicados} puntos asignados a ${result.data.personas} trabajador(es)${propuesta.provinciasConVarios.length ? ` · revisa ${propuesta.provinciasConVarios.join(", ")}: hay varias opciones` : ""}`);
+    await refresh(true);
+    setSaving(false);
+  }
+
+  // Dirección de envío en bloque: se escribe una vez por trabajador y se vuelca a todos
+  // sus puntos de la campaña. Si se marca, queda guardada en su ficha para reutilizarla.
+  async function handleAplicarDireccionEnvio(input: {
+    workerId: string;
+    workerNombre: string;
+    direccion: string;
+    poblacion: string;
+    codigoPostal: string;
+    provincia: string;
+    etiqueta: string;
+    guardarEnFicha: boolean;
+    direccionExistenteId?: string | null;
+  }) {
+    setSaving(true);
+    setError("");
+    try {
+      let direccionId = input.direccionExistenteId || null;
+      if (input.guardarEnFicha) {
+        const guardada = await addWorkerAddress(input.workerId, {
+          etiqueta: input.etiqueta || null,
+          direccion: input.direccion,
+          poblacion: input.poblacion || null,
+          provincia: input.provincia || null,
+          codigo_postal: input.codigoPostal || null,
+          predeterminada: true
+        });
+        if (guardada.error) { setError(`No se pudo guardar la dirección en la ficha del trabajador: ${guardada.error}`); return; }
+        direccionId = guardada.data?.id || null;
+      }
+      const snapshot = formatDireccionEnvio({
+        direccion: input.direccion,
+        codigo_postal: input.codigoPostal,
+        poblacion: input.poblacion,
+        provincia: input.provincia
+      });
+      const result = await bulkSetDireccionEnvio(params.id, input.workerId, snapshot, direccionId, session);
+      if (result.error) setError(result.error);
+      else flash(`Dirección de envío aplicada a ${result.data} punto(s) de ${input.workerNombre}${input.guardarEnFicha ? " y guardada en su ficha" : ""}`);
+      await refresh(true);
     } finally {
       setSaving(false);
     }
@@ -306,6 +435,15 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     () => puntos.filter(punto => punto.estado !== "completado" && punto.estado !== "cancelado" && !logisticaPuntos[punto.id]?.request_id),
     [puntos, logisticaPuntos]
   );
+  const puntosSinGestor = useMemo(() => puntos.filter(punto => !punto.gestor_id), [puntos]);
+  const puntosSinTrabajador = useMemo(() => puntos.filter(punto => !punto.instalador_id), [puntos]);
+  // Provincias de ESTA campaña en las que hay que elegir a mano porque hay varios trabajadores.
+  const provinciasVariosTrabajadores = useMemo(() => {
+    const deLaCampana = new Set(puntos.map(punto => punto.provincia).filter(Boolean) as string[]);
+    return provinciasConVariosTrabajadores(workers).filter(provincia =>
+      Array.from(deLaCampana).some(propia => mismaProvincia(propia, provincia))
+    );
+  }, [puntos, workers]);
 
   async function handleAddPunto() {
     if (!nuevoPunto.nombre_comercial.trim()) { setError("El punto necesita un nombre comercial."); return; }
@@ -437,8 +575,32 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
                 <button className="gc-btn-outline" onClick={() => setMatPara(null)}>Cancelar</button>
               </div>
             </div>
+            {/* Una cabecera de solicitud solo tiene un destinatario y una dirección, así que
+                se crea una solicitud por trabajador + dirección. Se muestra antes de enviar. */}
+            <div className="mt-3">
+              <p className="mb-1 text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>
+                Se crearán {gruposMaterial.length} solicitud{gruposMaterial.length === 1 ? "" : "es"} (una por trabajador y dirección de envío)
+              </p>
+              <ul className="space-y-1 text-xs">
+                {gruposMaterial.map(grupo => (
+                  <li key={grupo.key} className="flex flex-wrap items-center gap-2">
+                    <span className="gc-badge" style={grupo.instalador_id ? undefined : { background: "#fdecec", color: "#9f1d2e" }}>
+                      {grupo.instalador_nombre || "Sin trabajador asignado"}
+                    </span>
+                    <span>{grupo.puntos.length} punto{grupo.puntos.length > 1 ? "s" : ""}</span>
+                    <span style={{ color: "var(--gc-muted)" }}>→ {grupo.direccion_envio || "sin dirección (irá a la dirección del punto)"}</span>
+                  </li>
+                ))}
+              </ul>
+              {gruposMaterial.some(grupo => !grupo.instalador_id) && (
+                <p className="gc-note mt-2">
+                  Hay puntos <b>sin trabajador asignado</b>: Almacén recibirá su material sin destinatario. Asigna los
+                  trabajadores antes de pedir el material si quieres que salga a nombre de cada uno.
+                </p>
+              )}
+            </div>
             <p className="mt-2 text-xs" style={{ color: "var(--gc-muted)" }}>
-              Se creará una necesidad por punto y una única petición agrupada visible en Logística y en MerchanLOGS. Al completar un punto, su necesidad se cierra automáticamente.
+              Se creará una necesidad por punto, agrupada en una petición por destinatario, visible en Logística y en MerchanLOGS. Al completar un punto, su necesidad se cierra automáticamente.
             </p>
           </section>
         )}
@@ -461,7 +623,32 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
 
         {tab === "puntos" && (
           <>
-            <div className="flex justify-end gc-no-print">
+            {campana.solicitar_direccion_envio && (
+              <DireccionesEnvioPanel puntos={puntos} saving={saving} onAplicar={handleAplicarDireccionEnvio} />
+            )}
+            <div className="flex flex-wrap items-center justify-end gap-2 gc-no-print">
+              {/* Administración reparte los puntos entre gestores: es lo que les da acceso. */}
+              {admin && (
+                <button
+                  className="gc-btn-outline"
+                  disabled={saving || !puntosSinGestor.length}
+                  title={puntosSinGestor.length ? "Repartir los puntos sin gestor entre los gestores de cada provincia" : "Todos los puntos tienen gestor asignado"}
+                  onClick={handleSugerirGestores}
+                >
+                  <Users className="h-4 w-4" />
+                  Sugerir gestor ({puntosSinGestor.length} sin gestor)
+                </button>
+              )}
+              {/* El gestor reparte sus puntos entre los trabajadores de la zona. */}
+              <button
+                className="gc-btn-outline"
+                disabled={saving || !puntosSinTrabajador.length}
+                title={puntosSinTrabajador.length ? "Proponer un trabajador por provincia para tus puntos sin asignar" : "Todos tus puntos tienen trabajador asignado"}
+                onClick={handleSugerirTrabajadores}
+              >
+                <UserCheck className="h-4 w-4" />
+                Sugerir trabajador ({puntosSinTrabajador.length} sin trabajador)
+              </button>
               <button
                 className="gc-btn-dark"
                 disabled={saving || !puntosSinMaterial.length}
@@ -472,6 +659,12 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
                 Solicitar material ({puntosSinMaterial.length} sin petición)
               </button>
             </div>
+            {provinciasVariosTrabajadores.length > 0 && (
+              <p className="text-xs gc-no-print" style={{ color: "var(--gc-muted)" }}>
+                Provincias de esta campaña con <b>más de un trabajador</b> disponible: {provinciasVariosTrabajadores.join(", ")}.
+                Usa el filtro de provincia para revisarlas y elegir a mano.
+              </p>
+            )}
             <PuntosTabla
               puntos={puntos}
               incidencias={incidencias}

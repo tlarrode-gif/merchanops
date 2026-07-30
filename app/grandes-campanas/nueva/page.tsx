@@ -7,6 +7,7 @@ import { ArrowRight, Plus } from "lucide-react";
 import { CampanaForm, CampanaFormState, emptyCampanaForm } from "@/components/grandes-campanas/campana-form";
 import { ImportProgress, ImportadorCSV, ImportadorEstado } from "@/components/grandes-campanas/importador-csv";
 import { AppSession, AppUser, canAccessModule, canManageCampaigns, getCurrentAppSession, loadInternalUsers } from "@/lib/access-control";
+import { asignarGestoresAPuntosNuevos, provinciasDeLosPuntos } from "@/lib/campana-asignacion";
 import { saveCampanaColumnas } from "@/lib/campana-columnas";
 import { PuntoInput, insertCampana, insertPuntosBatch, saveGestoresCampana } from "@/lib/campanas";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
@@ -43,6 +44,22 @@ export default function NuevaCampanaPage() {
   }, []);
 
   const totalAImportar = useMemo(() => (importEstado?.readyRows.length || 0) + manualPuntos.length, [importEstado, manualPuntos]);
+
+  // Las provincias de la campaña se deducen del propio archivo. Antes había que teclearlas
+  // a mano y, sin ellas, «Sugerir gestor» quedaba deshabilitado justo cuando hacía falta.
+  const provinciasDelArchivo = useMemo(
+    () => provinciasDeLosPuntos(importEstado?.readyRows || []),
+    [importEstado]
+  );
+
+  useEffect(() => {
+    if (!provinciasDelArchivo.length) return;
+    setForm(previous => {
+      const faltan = provinciasDelArchivo.filter(provincia => !previous.provincias.includes(provincia));
+      if (!faltan.length) return previous;
+      return { ...previous, provincias: [...previous.provincias, ...faltan] };
+    });
+  }, [provinciasDelArchivo]);
 
   function addManualPunto() {
     if (!manualPunto.nombre_comercial.trim()) { setFormError("El punto manual necesita un nombre comercial."); return; }
@@ -88,7 +105,11 @@ export default function NuevaCampanaPage() {
         if (columnasResult.error) setFormError(`Campaña creada, pero el esquema de columnas no se pudo guardar: ${columnasResult.error}`);
       }
 
-      const puntos = [...(importEstado?.readyRows || []), ...manualPuntos];
+      // Reparto por zona en el momento de crear: cada punto nace con su gestor, y ese
+      // reparto es lo que le da acceso al punto. Solo se reparte entre el equipo elegido.
+      const puntosSinRepartir = [...(importEstado?.readyRows || []), ...manualPuntos];
+      const reparto = asignarGestoresAPuntosNuevos(puntosSinRepartir, seleccionados);
+      const puntos = reparto.puntos;
       let importados = 0;
       let duplicados = 0;
       if (puntos.length) {
@@ -107,7 +128,12 @@ export default function NuevaCampanaPage() {
         }
       }
       const omitidos = (importEstado?.rows.filter(row => row.errors.length).length || 0);
-      window.location.href = `/grandes-campanas/${campanaId}?importados=${importados}&omitidos=${importEstado?.omitErrors ? omitidos : 0}${duplicados ? `&duplicados=${duplicados}` : ""}`;
+      const query = new URLSearchParams({ importados: String(importados) });
+      if (importEstado?.omitErrors && omitidos) query.set("omitidos", String(omitidos));
+      if (duplicados) query.set("duplicados", String(duplicados));
+      if (reparto.asignados) query.set("repartidos", String(reparto.asignados));
+      if (reparto.provinciasSinGestor.length) query.set("sinGestor", reparto.provinciasSinGestor.join(","));
+      window.location.href = `/grandes-campanas/${campanaId}?${query.toString()}`;
     } finally {
       setSaving(false);
       setProgress(null);

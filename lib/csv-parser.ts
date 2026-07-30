@@ -1,6 +1,6 @@
 import { spanishProvinces, normalizeProvince } from "@/lib/provinces";
 import { PuntoEstado, PuntoInput } from "@/lib/campanas";
-import { CAMPO_IGNORAR, CampanaColumna } from "@/lib/campana-columnas";
+import { CAMPO_IGNORAR, CampanaColumna, camposNoImportables } from "@/lib/campana-columnas";
 
 export const MAX_IMPORT_ROWS = 50000;
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -58,8 +58,14 @@ const columnVariants: Record<string, string[]> = {
   estado: ["estado", "status", "situacion"],
   fecha_visita: ["fecha visita", "fecha_visita", "fecha", "visita", "fecha de visita", "date", "fecha prevista"],
   importe: ["importe", "precio", "fee", "amount", "coste", "costo", "tarifa", "pago", "presupuesto punto"],
-  gestor_nombre: ["gestor", "manager", "responsable", "instalador", "operativo"],
-  notas: ["notas", "notes", "observaciones", "comentarios", "nota"]
+  // «Instalador» ya NO cae aquí: es el trabajador de campo (tabla workers), no el gestor de zona.
+  gestor_nombre: ["gestor", "manager", "responsable", "operativo", "gestor de zona"],
+  notas: ["notas", "notes", "observaciones", "comentarios", "nota"],
+  // Columnas fijas de campaña: se reconocen para no duplicarlas en el esquema, pero su
+  // valor NO se importa (las rellenan el gestor y Almacén). Ver camposNoImportables.
+  instalador_nombre: ["instalador", "trabajador", "montador", "operario", "instalador asignado"],
+  direccion_envio: ["direccion envio", "direccion de envio", "envio", "direccion entrega", "entrega", "direccion de entrega"],
+  picking_cerrado_at: ["picking", "fecha picking", "picking cerrado", "fecha de picking"]
 };
 
 const estadoVariants: Record<string, PuntoEstado> = {
@@ -357,6 +363,9 @@ export async function parseImportFile(file: File, esquema?: CampanaColumna[] | n
       const value = raw[col];
       const field = mapping[col];
       if (field === CAMPO_IGNORAR) return;
+      // Instalador, dirección de envío y picking se reservan al gestor y a Almacén: la
+      // columna se mantiene en el esquema pero el valor del archivo se descarta.
+      if (field && camposNoImportables.has(field)) return;
       if (field) { record[field] = value; return; }
       if (!header) return;
       const config = configPorHeader.get(fold(header));
