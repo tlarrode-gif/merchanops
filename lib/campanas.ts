@@ -483,6 +483,8 @@ export async function insertPuntosBatch(campanaId: string, puntos: PuntoInput[])
   if (bloqueada) return { data: 0, error: bloqueada };
   const negativos = puntos.filter(punto => Number(punto.importe ?? 0) < 0);
   if (negativos.length) return { data: 0, error: `${negativos.length} punto(s) tienen importe negativo; corrígelos antes de importar.` };
+  const sinNombre = puntos.filter(punto => !String(punto.nombre_comercial ?? "").trim()).length;
+  if (sinNombre) return { data: 0, error: `${sinNombre} punto(s) sin nombre comercial; asigna la columna de nombre en «Configurar columnas» antes de importar.` };
 
   const codigos = Array.from(new Set(puntos.map(punto => (punto.codigo || "").trim()).filter(Boolean)));
   const existentes = new Set<string>();
@@ -552,7 +554,9 @@ export async function updatePuntosPorCodigo(
   for (const fila of filas) {
     const codigo = String(fila.codigo || "").trim();
     const existente = codigo ? porCodigo.get(codigo) : undefined;
-    if (!existente) { resumen.noEncontrados += 1; if (opciones.insertarNuevos && codigo) nuevos.push(fila); continue; }
+    // Un archivo de actualización puede traer solo código + avance (sin nombre):
+    // esas filas actualizan lo existente, pero no pueden crearse como nuevas.
+    if (!existente) { resumen.noEncontrados += 1; if (opciones.insertarNuevos && codigo && String(fila.nombre_comercial ?? "").trim()) nuevos.push(fila); continue; }
     const patch: Record<string, unknown> = {};
     for (const campo of camposActualizablesPunto) {
       const valor = (fila as Record<string, unknown>)[campo];

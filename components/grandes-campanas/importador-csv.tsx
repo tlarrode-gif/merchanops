@@ -5,7 +5,7 @@ import { AlertTriangle, CheckCircle2, Download, FileUp, Loader2, Settings2, XCir
 import { ColumnasConfig } from "@/components/grandes-campanas/columnas-config";
 import { CampanaColumna, columnasDesdeImportacion } from "@/lib/campana-columnas";
 import { PuntoInput } from "@/lib/campanas";
-import { ParseResult, ParsedRow, buildTemplateCsv, parseImportFile, summarizeParse } from "@/lib/csv-parser";
+import { FILE_ACCEPT_ATTR, MAX_FILE_MB, ParseResult, ParsedRow, buildTemplateCsv, parseImportFile, summarizeParse } from "@/lib/csv-parser";
 
 export type ImportProgress = { done: number; total: number } | null;
 
@@ -17,6 +17,8 @@ export type ImportadorEstado = {
   blockingErrors: number;
   // Esquema de columnas configurado por el usuario; se persiste con la campaña.
   columnas: CampanaColumna[];
+  // El archivo se ha leído pero falta decir qué columna es el nombre del punto.
+  needsNameColumn: boolean;
 };
 
 export function ImportadorCSV({
@@ -45,13 +47,16 @@ export function ImportadorCSV({
   function emit(nextResult: ParseResult | null, nextOmit: boolean, name: string, nextColumnas: CampanaColumna[]) {
     if (!nextResult || nextResult.fileError) { onChange(null); return; }
     const usable = nextResult.rows.filter(row => nextOmit ? !row.errors.length : true);
+    const needsNameColumn = Boolean(nextResult.needsNameColumn);
     onChange({
       fileName: name,
       rows: nextResult.rows,
       omitErrors: nextOmit,
-      readyRows: usable.filter(row => !row.errors.length).map(row => row.data),
+      // Sin columna de nombre no hay nada importable todavía, aunque el archivo se lea bien.
+      readyRows: needsNameColumn ? [] : usable.filter(row => !row.errors.length).map(row => row.data),
       blockingErrors: nextOmit ? 0 : nextResult.rows.filter(row => row.errors.length).length,
-      columnas: nextColumnas
+      columnas: nextColumnas,
+      needsNameColumn
     });
   }
 
@@ -70,6 +75,8 @@ export function ImportadorCSV({
       const esquema = parsed.fileError ? [] : columnasDesdeImportacion(parsed.headers, parsed.mapping);
       setResult(parsed);
       setColumnas(esquema);
+      // Falta el nombre del punto: se abre el configurador para que lo asigne.
+      if (parsed.needsNameColumn) setConfigAbierta(true);
       emit(parsed, omitErrors, nextFile.name, esquema);
     } catch (error) {
       setResult({ rows: [], headers: [], mapping: [], unmappedColumns: [], fileError: error instanceof Error ? error.message : "No se pudo leer el archivo." });
@@ -130,7 +137,7 @@ export function ImportadorCSV({
       <input
         ref={inputRef}
         type="file"
-        accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        accept={FILE_ACCEPT_ATTR}
         className="hidden"
         onChange={event => { handleFile(event.target.files?.[0]); event.target.value = ""; }}
       />
@@ -143,8 +150,8 @@ export function ImportadorCSV({
         onDrop={event => { event.preventDefault(); setDragOver(false); handleFile(event.dataTransfer.files?.[0]); }}
       >
         <FileUp className="mx-auto h-8 w-8" style={{ color: "var(--gc-secondary)" }} />
-        <p className="mt-3 text-sm font-semibold">Arrastra aquí tus archivos CSV, XLS o XLSX</p>
-        <p className="mt-1 text-xs" style={{ color: "var(--gc-muted)" }}>O haz clic para explorar en tu ordenador (Máx. 10MB)</p>
+        <p className="mt-3 text-sm font-semibold">Arrastra aquí tus archivos CSV, XLS, XLSX, XLSM u ODS</p>
+        <p className="mt-1 text-xs" style={{ color: "var(--gc-muted)" }}>O haz clic para explorar en tu ordenador (Máx. {MAX_FILE_MB}MB)</p>
         {fileName && !analyzing && <p className="mt-2 text-xs font-semibold" style={{ color: "var(--gc-primary)" }}>{fileName}</p>}
       </div>
 
@@ -156,13 +163,35 @@ export function ImportadorCSV({
       )}
 
       {result?.fileError && (
-        <div className="gc-note mt-4"><b>No se puede importar:</b> {result.fileError}</div>
+        <div className="gc-note mt-4">
+          <b>No se puede importar:</b> {result.fileError}
+          {result.headers.length > 0 && (
+            <span> Cabeceras detectadas: {result.headers.filter(Boolean).join(", ") || "ninguna"}.</span>
+          )}
+        </div>
+      )}
+
+      {result && !result.fileError && result.needsNameColumn && (
+        <div className="gc-note mt-4">
+          <b>Falta la columna del nombre del punto.</b> El archivo se ha leído correctamente
+          ({result.rows.length.toLocaleString("es-ES")} filas), pero no se reconoce ninguna cabecera como nombre
+          del punto de venta. Abre <b>«Configurar columnas»</b>, elige «Campo interno: Nombre comercial» en la
+          columna que corresponda y pulsa <b>«Aplicar y revalidar archivo»</b>.
+          {result.headers.filter(Boolean).length > 0 && <span> Cabeceras del archivo: {result.headers.filter(Boolean).join(", ")}.</span>}
+        </div>
       )}
 
       {result && !result.fileError && summary && (
         <div className="mt-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-            <p><b>{summary.total.toLocaleString("es-ES")}</b> puntos detectados</p>
+            <p>
+              <b>{summary.total.toLocaleString("es-ES")}</b> puntos detectados
+              <span className="ml-2 text-xs" style={{ color: "var(--gc-muted)" }}>
+                {result.sheetName ? `Hoja «${result.sheetName}»` : "Archivo de texto"}
+                {result.headerRow ? ` · cabeceras en la fila ${result.headerRow}` : ""}
+                {result.sheetNames && result.sheetNames.length > 1 ? ` · ${result.sheetNames.length} hojas en el libro` : ""}
+              </span>
+            </p>
             <span className="flex flex-wrap items-center gap-3">
               <button type="button" className="gc-btn-outline" onClick={() => setConfigAbierta(value => !value)}>
                 <Settings2 className="h-4 w-4" />
@@ -206,7 +235,7 @@ export function ImportadorCSV({
                   {preview.map(row => (
                     <tr key={row.index}>
                       <td className="font-mono text-xs">{row.data.codigo || `F${row.index}`}</td>
-                      <td className="font-semibold">{row.data.nombre_comercial}</td>
+                      <td className="font-semibold">{row.data.nombre_comercial || <span style={{ color: "var(--gc-secondary)" }}>Sin nombre</span>}</td>
                       <td>{row.data.direccion || <span style={{ color: "var(--gc-secondary)" }}>Sin dirección</span>}</td>
                       <td>{row.data.provincia || "—"}</td>
                       <td>

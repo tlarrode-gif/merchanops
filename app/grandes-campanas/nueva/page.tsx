@@ -54,6 +54,10 @@ export default function NuevaCampanaPage() {
   async function guardar(modo: "borrador" | "crear") {
     setFormError("");
     if (!form.nombre.trim()) { setFormError("El nombre de la campaña es obligatorio."); return; }
+    if (importEstado?.needsNameColumn) {
+      setFormError("El archivo no tiene columna de nombre del punto. Ábrelo en «Configurar columnas», marca esa columna como «Campo interno: Nombre comercial» y pulsa «Aplicar y revalidar archivo».");
+      return;
+    }
     if (modo === "crear" && importEstado && importEstado.blockingErrors > 0) {
       setFormError(`Hay ${importEstado.blockingErrors} filas con errores en el archivo. Corrígelas o marca «Omitir filas con errores».`);
       return;
