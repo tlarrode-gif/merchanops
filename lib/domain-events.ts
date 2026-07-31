@@ -55,8 +55,22 @@ type ImportedMaterial = {
  * Redacción de payloads para logs técnicos (auditoría M11): los sync_logs no
  * deben almacenar teléfonos, direcciones ni comentarios operativos. Se
  * conservan solo identificadores y campos de control; el resto se elimina.
+ *
+ * El segundo bloque son DATOS PERSONALES (decisión D2 del módulo de RR.HH.,
+ * docs/ROADMAP_RRHH.md): MerchanOps no guarda DNI, NIE, NAF, NSS, IBAN, fecha
+ * de nacimiento ni domicilio —esos datos viven solo en A3—, así que ninguna de
+ * esas claves debería aparecer nunca en un payload. Están aquí precisamente
+ * porque "no debería" no es una garantía: si algún día una integración o un
+ * import los arrastra por error, el log guarda "[redactado]" en vez de dejar un
+ * dato personal escrito para siempre en sync_logs, que cualquier perfil activo
+ * puede leer. RR.HH. jamás debe filtrar estos datos a un log.
  */
-const REDACTED_KEYS = ["phone", "phone_number", "pharmacy_phone", "telefono", "address", "direccion", "street", "street_number", "postal_code", "comments", "comentarios", "client_observations", "observations", "observaciones", "notes", "notas", "call_comment", "incident_comment", "point_comment", "materiales"];
+const REDACTED_KEYS = [
+  "phone", "phone_number", "pharmacy_phone", "telefono", "address", "direccion", "street", "street_number", "postal_code",
+  "comments", "comentarios", "client_observations", "observations", "observaciones", "notes", "notas",
+  "call_comment", "incident_comment", "point_comment", "materiales",
+  "dni", "nif", "nie", "naf", "nss", "seguridad_social", "iban", "cuenta_bancaria", "fecha_nacimiento", "domicilio", "direccion_fiscal"
+];
 export function redactLogPayload(payload: unknown): Record<string, unknown> {
   if (!payload || typeof payload !== "object") return {};
   const out: Record<string, unknown> = {};

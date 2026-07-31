@@ -23,7 +23,27 @@ no se han renombrado: hacerlo rompería esa correspondencia.
 | 11:04 | `v10_0_outbox_tipos_ajenos` | `v10_0_outbox_tipos_ajenos.sql` |
 | 11:12 | `v10_1_outbox_multiconsumidor` | `v10_1_outbox_multiconsumidor.sql` |
 
-**La próxima migración empieza en `v10_2`.** No reutilices `v9_*`.
+**La próxima migración empieza en `v10_9`.** No reutilices `v9_*` ni `v10_2`–`v10_8`.
+
+## Módulo de RR.HH. (`v10_4` – `v10_8`): PENDIENTES DE APLICAR
+
+Estas cinco **no están aplicadas** al proyecto `dptmswhwmqimijpfyndn`. Se
+aplican **en este orden**, porque cada una depende de la anterior: `v10_5`
+necesita `merchan_is_rrhh()` de `v10_4`, `v10_7` necesita la tabla `cadenas` de
+`v10_5` y el contador de códigos de `v10_6`, y `v10_8` arregla el consumidor del
+outbox para los eventos que publican `v10_6` y `v10_7`.
+
+| Fichero | Qué hace |
+|---|---|
+| `v10_4_rol_rrhh.sql` | El rol `rrhh` entra en el CHECK de `app_users`. Helpers `merchan_is_rrhh()` (el ROL, quien tramita) y `merchan_can_rrhh()` (la puerta del módulo, que **incluye a todas las gestoras**). Rama de lectura para el perfil de RR.HH. en `workers`, `services`, `points`, `grandes_campanas` y `puntos_venta_campana`, que si no vería cero filas por no tener provincias. `workers.a3_empleado_codigo`. |
+| `v10_5_rrhh_catalogo.sql` | Catálogo `cadenas` (modo de trámite y plazo) y `centros`. Lectura para cualquier perfil, escritura solo admin o rol `rrhh`. `grandes_campanas.ceco` y `.horas_dia`; `puntos_venta_campana.centro_id`. Sin semilla. |
+| `v10_6_rrhh_altas.sql` | `rrhh_altas`, `rrhh_solicitudes_alta`, `rrhh_solicitud_alta_lineas`, `rrhh_eventos` (append-only), `rrhh_code_counters` y `merchan_next_rrhh_code()`. RPC `merchan_rrhh_solicitar_alta`, `merchan_rrhh_resolver_alta` y `merchan_rrhh_registrar_alta`. Guardián de transiciones, motivo obligatorio en negativo y bloqueo optimista. |
+| `v10_7_rrhh_accesos.sql` | `rrhh_solicitudes_acceso`. RPC `merchan_rrhh_solicitar_acceso` (expande según `cadenas.modo_tramite` y calcula `fecha_limite`) y `merchan_rrhh_resolver_acceso`. |
+| `v10_8_rrhh_outbox_a3.sql` | `outbox_process_db_notifier` deja de mandar a dead-letter las familias `rrhh_alta.*` y `rrhh_acceso.*`. **No** registra `a3-adapter` en `outbox_consumers`: el adaptador no existe y registrarlo dejaría toda la cola pendiente para siempre (ver la cabecera del fichero). |
+
+Cada fichero lleva en su cabecera el problema, la decisión, cómo verificarlo y
+su ROLLBACK. Las cinco son idempotentes y se han validado ejecutándolas dos
+veces seguidas sobre un PostgreSQL limpio con el esquema del proyecto.
 
 ## `v9_11b` y `v9_11c` sin fichero
 

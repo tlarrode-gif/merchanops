@@ -5,20 +5,23 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { ChevronDown, KeyRound, LogOut, Menu, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { AppSession, canAccessModule, ensureAuthSession, getCurrentAppSession, isAdminSession, logoutAppUser, merchanopsSessionChangeEvent, sessionProvinceLabel, type AppPermissionKey } from "@/lib/access-control";
+import { AppSession, canAccessModule, canManageRrhh, ensureAuthSession, getCurrentAppSession, isAdminSession, logoutAppUser, merchanopsSessionChangeEvent, sessionProvinceLabel, sessionRoleLabel, type AppPermissionKey, type AppRole } from "@/lib/access-control";
 
 // Navegación global de MerchanOps (auditoría, bloque 7): UNA sola sidebar con
 // todas las secciones y una top bar con breadcrumb + usuario. Sustituye a la
 // antigua barra superior de píldoras, al subnav de ISDIN y a los tabs del Home,
 // que se duplicaban entre sí.
 
-type NavLink = { href: string; label: string; exact?: boolean; module?: AppPermissionKey; adminOnly?: boolean; tab?: string; excludePrefix?: string };
+// hiddenForRoles: para perfiles que SOLO deben ver su módulo. El Panel no cuelga
+// de ninguna clave de permiso, así que sin esto el perfil de RR.HH. vería en la
+// sidebar una sección que no le corresponde.
+type NavLink = { href: string; label: string; exact?: boolean; module?: AppPermissionKey; adminOnly?: boolean; rrhhManagerOnly?: boolean; hiddenForRoles?: AppRole[]; tab?: string; excludePrefix?: string };
 type NavGroup = { id: string; label: string | null; links: NavLink[] };
 
 const groups: NavGroup[] = [
   {
     id: "principal", label: null, links: [
-      { href: "/", label: "Panel", exact: true, tab: "panel" }
+      { href: "/", label: "Panel", exact: true, tab: "panel", hiddenForRoles: ["rrhh"] }
     ]
   },
   {
@@ -43,6 +46,13 @@ const groups: NavGroup[] = [
     id: "operativa", label: "Operativa", links: [
       { href: "/logistica", label: "Logística", module: "logistica" },
       { href: "/historial-economico", label: "Historial económico", module: "pagos" }
+    ]
+  },
+  {
+    id: "rrhh", label: "RRHH", links: [
+      { href: "/rrhh/altas", label: "Altas laborales", module: "rrhh" },
+      { href: "/rrhh/accesos", label: "Accesos a centro", module: "rrhh" },
+      { href: "/rrhh/cadenas", label: "Cadenas y centros", module: "rrhh", rrhhManagerOnly: true }
     ]
   },
   {
@@ -79,7 +89,11 @@ const crumbLabels: Record<string, string> = {
   "auditoria-pagos": "Historial económico",
   configuracion: "Configuración",
   avisos: "Avisos del sistema",
-  sincronizacion: "Sincronización"
+  sincronizacion: "Sincronización",
+  rrhh: "RRHH",
+  altas: "Altas laborales",
+  accesos: "Accesos a centro",
+  cadenas: "Cadenas y centros"
 };
 const homeTabLabels: Record<string, string> = { panel: "Panel", servicios: "Servicios", calendario: "Calendario", pagos: "Pagos", clientes: "Clientes", trabajadores: "Trabajadores", usuarios: "Usuarios y permisos", "nuevo-servicio": "Nuevo servicio", "nuevo-cliente": "Nuevo cliente", "nuevo-trabajador": "Nuevo trabajador" };
 
@@ -127,7 +141,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (!ready || !session?.active) return <>{children}</>;
 
   const admin = isAdminSession(session);
-  const canSee = (link: NavLink) => (!link.module || canAccessModule(session, link.module)) && (!link.adminOnly || admin);
+  const canSee = (link: NavLink) =>
+    (!link.module || canAccessModule(session, link.module))
+    && (!link.adminOnly || admin)
+    && (!link.rrhhManagerOnly || canManageRrhh(session))
+    && !(link.hiddenForRoles || []).includes(session.role);
   const visibleGroups = groups.map(group => ({ ...group, links: group.links.filter(canSee) })).filter(group => group.links.length);
 
   function isActive(link: NavLink) {
@@ -192,7 +210,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </nav>
       <div className="border-t px-4 py-3">
         <p className="truncate text-sm font-semibold">{session.display_name}</p>
-        <p className="truncate text-xs text-slate-500">{admin ? "Administración" : "Gestor"} · {sessionProvinceLabel(session)}</p>
+        <p className="truncate text-xs text-slate-500">{sessionRoleLabel(session)} · {sessionProvinceLabel(session)}</p>
         <button onClick={() => setShowPassword(true)} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border bg-white px-3 py-1.5 text-sm hover:bg-slate-50"><KeyRound className="h-4 w-4" />Cambiar contraseña</button>
         {showPassword && <PasswordModal onClose={() => setShowPassword(false)} />}
         <button onClick={signOut} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border bg-white px-3 py-1.5 text-sm hover:bg-slate-50"><LogOut className="h-4 w-4" />Salir</button>
@@ -225,7 +243,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 ))}
               </nav>
             </div>
-            <p className="hidden truncate text-xs text-slate-500 sm:block">{session.display_name} · {admin ? "Administración" : "Gestor"} · {sessionProvinceLabel(session)}</p>
+            <p className="hidden truncate text-xs text-slate-500 sm:block">{session.display_name} · {sessionRoleLabel(session)} · {sessionProvinceLabel(session)}</p>
           </div>
         </header>
         {children}
