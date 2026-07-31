@@ -505,7 +505,11 @@ export function AltasClient() {
           numero_alta: numero,
           tipo: borrador.tipo,
           fecha_inicio: borrador.fecha_inicio || null,
-          // Fin vacío = alta abierta, que es exactamente lo que espera el RPC.
+          // OJO: aquí "vacío" NO abre el alta. Al CREAR, merchan_rrhh_resolver_alta
+          // hace coalesce con la fecha de fin de la solicitud, así que un fin vacío
+          // hereda la de la solicitud. Solo al AMPLIAR (merchan_rrhh_registrar_alta)
+          // un fin vacío deja el alta abierta. El texto de ayuda del campo dice en
+          // cada caso lo que va a pasar de verdad.
           fecha_fin: borrador.fecha_fin || null,
           ceco: borrador.ceco.trim() || null,
           horas_dia: horasONulo(borrador.horas)

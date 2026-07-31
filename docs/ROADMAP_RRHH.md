@@ -668,7 +668,32 @@ bisiesto, y los seis textos literales del diseño. Están fijados en `tests/rrhh
 promesa suelta, sesión leída siempre en `useEffect` (sin desajuste de hidratación), tablas con
 `overflow-auto`, ningún botón de solo icono sin texto y recarga tras cada escritura.
 
-### 8.2 Lo que queda abierto
+### 8.2 Tercera pasada: auditoría de recorrido completo
+
+Última revisión antes de entregar, ejecutando el módulo **entero** contra un PostgreSQL limpio con
+el esqueleto del proyecto: catálogo creado por RR.HH. → gestora rechazada al escribirlo → solicitud
+de alta con dos líneas → gestora rechazada al tramitar → RR.HH. tramita con número de A3 y alta real
+en una transacción → el sistema deja de ofrecer ese trabajo → accesos por centro (2 → 2) y por
+cadena (1 → 1 sin centro) → plazo vencido → denegar sin motivo bloqueado → conceder sella
+`concedido_at` → outbox sin datos personales → notificador con 0 a dead-letter → bitácora inmutable
+→ RLS activa en las ocho tablas. Un defecto más:
+
+| # | Defecto | Corrección |
+|---|---|---|
+| 13 | **La bitácora no registraba quién cambió un estado.** Los tres triggers de UPDATE (`solicitud.estado`, `solicitud.a3`, `alta.modificada`, `acceso.estado`) omitían `actor_nombre` de la lista de columnas, así que el evento más importante —el cambio de estado— se guardaba con el nombre en blanco, mientras otro evento de la misma transacción sí lo llevaba. `actor_id` sí estaba, pero la tabla promete en su propio comentario responder a «¿quién dijo que este trabajador ya estaba de alta?», y con el nombre nulo no lo respondía de un vistazo. | Se añade `actor_nombre` a los tres `insert`, resuelto desde `app_users` con el id del actor. Verificado: `solicitud.estado` y `acceso.estado` registran ya nombre y motivo. |
+
+Comprobado además y **sin hallazgos**: la capa de datos (claves de payload de las cinco RPC contra
+sus contratos, incluido `acceso_id` —que no es `solicitud_id`—), el flujo del modal «Tramitar en
+A3», los trabajos sin fechas (texto de aviso y botón «Tramitar» deshabilitado), los límites de los
+campos numéricos, las policies del catálogo, y `v10_8` (familias `rrhh_*` declaradas ajenas por
+prefijo, sin registrar `a3-adapter`). Se corrigió también un comentario que decía lo contrario de
+lo que hace el código: al **crear** un alta, una fecha de fin vacía hereda la de la solicitud; solo
+al **ampliar** deja el alta abierta (el texto de ayuda del campo ya lo decía bien).
+
+Las cinco migraciones se aplicaron **dos veces sobre una base recién creada** después de todas las
+correcciones: idempotencia intacta.
+
+### 8.3 Lo que queda abierto
 
 - **El bloqueo optimista de `rrhh_altas` no está cableado desde la cola.** `listarAltas()` ya lee
   la columna `version` y `PayloadRegistrarAlta` la acepta, pero el modal de tramitación todavía no

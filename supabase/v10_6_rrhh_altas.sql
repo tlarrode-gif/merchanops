@@ -372,8 +372,9 @@ begin
                                'tipo', new.tipo, 'origen', new.origen,
                                'fecha_inicio', new.fecha_inicio, 'fecha_fin', new.fecha_fin));
   elsif new is distinct from old then
-    insert into public.rrhh_eventos (entidad, entidad_id, evento, estado_anterior, estado_nuevo, actor_id, payload)
+    insert into public.rrhh_eventos (entidad, entidad_id, evento, estado_anterior, estado_nuevo, actor_id, actor_nombre, payload)
     values ('alta', new.id, 'alta.modificada', old.estado, new.estado, public.merchan_my_app_user_id(),
+            (select u.display_name from public.app_users u where u.id = public.merchan_my_app_user_id()),
             jsonb_build_object('worker_id', new.worker_id, 'numero_alta', new.numero_alta,
                                'fecha_inicio', new.fecha_inicio, 'fecha_fin', new.fecha_fin,
                                'version', new.version));
@@ -575,10 +576,11 @@ begin
   elsif new.estado is distinct from old.estado
      or new.a3_numero is distinct from old.a3_numero
      or new.alta_id is distinct from old.alta_id then
-    insert into public.rrhh_eventos (entidad, entidad_id, evento, estado_anterior, estado_nuevo, motivo, actor_id, payload)
+    insert into public.rrhh_eventos (entidad, entidad_id, evento, estado_anterior, estado_nuevo, motivo, actor_id, actor_nombre, payload)
     values ('alta', new.id,
             case when new.estado is distinct from old.estado then 'solicitud.estado' else 'solicitud.a3' end,
             old.estado, new.estado, new.motivo, public.merchan_my_app_user_id(),
+            (select u.display_name from public.app_users u where u.id = public.merchan_my_app_user_id()),
             jsonb_build_object('codigo', new.codigo, 'a3_numero', new.a3_numero,
                                'a3_canal', new.a3_canal, 'alta_id', new.alta_id,
                                'version', new.version));

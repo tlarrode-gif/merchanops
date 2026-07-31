@@ -234,8 +234,9 @@ begin
                                'cadena_id', new.cadena_id, 'centro_id', new.centro_id,
                                'fecha_trabajo', new.fecha_trabajo, 'fecha_limite', new.fecha_limite));
   elsif new.estado is distinct from old.estado then
-    insert into public.rrhh_eventos (entidad, entidad_id, evento, estado_anterior, estado_nuevo, motivo, actor_id, payload)
+    insert into public.rrhh_eventos (entidad, entidad_id, evento, estado_anterior, estado_nuevo, motivo, actor_id, actor_nombre, payload)
     values ('acceso', new.id, 'acceso.estado', old.estado, new.estado, new.motivo, public.merchan_my_app_user_id(),
+            (select u.display_name from public.app_users u where u.id = public.merchan_my_app_user_id()),
             jsonb_build_object('codigo', new.codigo, 'cadena_id', new.cadena_id,
                                'centro_id', new.centro_id, 'version', new.version));
   end if;
