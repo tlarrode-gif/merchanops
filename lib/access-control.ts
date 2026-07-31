@@ -4,8 +4,8 @@ import { hashPassword, isHashedPassword, randomPassword, verifyPassword } from "
 import { checkLoginAllowed, clearLoginAttempts, recordLoginFailure } from "@/lib/rate-limit";
 import { sanitizeIdentifier } from "@/lib/sanitize";
 
-export type AppPermissionKey = "servicios" | "isdin" | "calendario" | "pagos" | "logistica" | "usuarios";
-export type AppRole = "admin" | "manager" | "almacen";
+export type AppPermissionKey = "servicios" | "isdin" | "calendario" | "pagos" | "logistica" | "rrhh" | "usuarios";
+export type AppRole = "admin" | "manager" | "almacen" | "rrhh";
 
 export type AppUser = {
   id: string;
@@ -31,12 +31,17 @@ const usersLocalKey = "merchanops_internal_users_v1";
 const sessionLocalKey = "merchanops_internal_session_v1";
 export const merchanopsSessionChangeEvent = "merchanops-session-change";
 
+// Los gestores entran en RR.HH. para pedir las altas y los accesos a centro, así
+// que `rrhh` nace en true igual que el resto de módulos operativos: las filas ya
+// guardadas no traen la clave en su jsonb y el spread de normalizeUser les aplica
+// este valor por defecto.
 export const defaultPermissions: Record<AppPermissionKey, boolean> = {
   servicios: true,
   isdin: true,
   calendario: true,
   pagos: true,
   logistica: true,
+  rrhh: true,
   usuarios: false
 };
 
@@ -46,6 +51,7 @@ export const adminPermissions: Record<AppPermissionKey, boolean> = {
   calendario: true,
   pagos: true,
   logistica: true,
+  rrhh: true,
   usuarios: true
 };
 
@@ -61,12 +67,36 @@ export const almacenPermissions: Record<AppPermissionKey, boolean> = {
   calendario: false,
   pagos: false,
   logistica: false,
+  rrhh: false,
+  usuarios: false
+};
+
+// RR.HH.: perfil dedicado que SOLO ve su módulo (altas laborales y accesos a
+// centro). Ni panel, ni servicios, ni pagos. Su ámbito es nacional: no se le
+// asignan provincias, así que toda policy que filtre por provincia necesita una
+// rama explícita para este rol (lección del rol `almacen`, v9_9_ola4).
+export const rrhhPermissions: Record<AppPermissionKey, boolean> = {
+  servicios: false,
+  isdin: false,
+  calendario: false,
+  pagos: false,
+  logistica: false,
+  rrhh: true,
   usuarios: false
 };
 
 export function normalizeUser(row: Partial<AppUser>): AppUser {
-  const role = row.role === "admin" ? "admin" : row.role === "almacen" ? "almacen" : "manager";
-  const permissions = role === "admin" ? adminPermissions : role === "almacen" ? almacenPermissions : { ...defaultPermissions, ...(row.permissions || {}), usuarios: false };
+  // Cualquier rol desconocido cae en "manager": si un rol nuevo no se añade AQUÍ,
+  // el usuario se degrada en silencio a gestor y saveInternalUsers reescribe esa
+  // degradación en la base.
+  const role = row.role === "admin" ? "admin" : row.role === "almacen" ? "almacen" : row.role === "rrhh" ? "rrhh" : "manager";
+  const permissions = role === "admin"
+    ? adminPermissions
+    : role === "almacen"
+      ? almacenPermissions
+      : role === "rrhh"
+        ? rrhhPermissions
+        : { ...defaultPermissions, ...(row.permissions || {}), usuarios: false };
   return {
     id: row.id || uid(),
     username: sanitizeIdentifier(row.username),
@@ -312,6 +342,32 @@ export function isAdminSession(session?: AppSession | null) {
   return session?.role === "admin";
 }
 
+/** Perfil dedicado de RR.HH.: solo ve su módulo, pero lo ve entero y de toda España. */
+export function isRrhhSession(session?: AppSession | null) {
+  return session?.role === "rrhh";
+}
+
+/**
+ * Quien TRAMITA en RR.HH.: rellena el número de A3, cambia el estado de una
+ * solicitud, concede o deniega un acceso y mantiene el catálogo de cadenas.
+ * Los gestores entran al módulo (canAccessModule(session, "rrhh")) pero solo
+ * para SOLICITAR; el espejo de esta función en la base es merchan_is_rrhh().
+ */
+export function canManageRrhh(session?: AppSession | null) {
+  return Boolean(session?.active) && (isAdminSession(session) || isRrhhSession(session));
+}
+
+export const roleLabels: Record<AppRole, string> = {
+  admin: "Administración",
+  manager: "Gestor",
+  almacen: "Almacén",
+  rrhh: "RR.HH."
+};
+
+export function sessionRoleLabel(session?: AppSession | null) {
+  return session ? roleLabels[session.role] || "Gestor" : "Sin sesión";
+}
+
 // Capacidades sensibles por rol. Los gestores nunca ven datos financieros del cliente
 // (presupuesto, facturación, margen) ni tocan la estructura de campañas; su visión
 // operativa se limita además a sus provincias asignadas.
@@ -349,5 +405,7 @@ export function filterBySessionProvince<T extends { province?: string | null; po
 export function sessionProvinceLabel(session?: AppSession | null) {
   if (!session) return "Sin sesion";
   if (isAdminSession(session)) return "Todas las provincias";
+  // RR.HH. tramita altas y accesos de toda España: no se le asignan provincias.
+  if (isRrhhSession(session)) return "Ámbito nacional";
   return session.provinces.length ? session.provinces.join(", ") : "Sin provincias asignadas";
 }
