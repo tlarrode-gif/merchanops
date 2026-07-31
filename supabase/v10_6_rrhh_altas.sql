@@ -1,5 +1,5 @@
 -- v10_6 · Altas laborales: solicitudes, altas reales de A3 y su bitácora.
--- PENDIENTE DE APLICAR al proyecto dptmswhwmqimijpfyndn.
+-- APLICADA al proyecto dptmswhwmqimijpfyndn el 2026-07-31.
 --
 -- ============================================================================
 -- PROBLEMA

@@ -1,5 +1,5 @@
 -- v10_4 · El rol `rrhh` existe en la base, y el perfil de RR.HH. deja de ver cero filas.
--- PENDIENTE DE APLICAR al proyecto dptmswhwmqimijpfyndn.
+-- APLICADA al proyecto dptmswhwmqimijpfyndn el 2026-07-31.
 --
 -- ============================================================================
 -- PROBLEMA

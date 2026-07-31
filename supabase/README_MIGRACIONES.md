@@ -52,3 +52,20 @@ escribieron como fichero. Su efecto está en producción y es el que describe el
 propio nombre: dejar visibles las campañas para el rol `almacen` y limitar ese
 escape. Si hace falta reconstruirlas, el contenido se puede recuperar del
 registro de migraciones del proyecto.
+
+## Modulo de RR.HH. · v10_4 a v10_8 (aplicadas el 2026-07-31)
+
+| Fichero | Qué hace |
+|---|---|
+| `v10_4_rol_rrhh.sql` | Rol `rrhh` en el CHECK de `app_users`, helpers `merchan_is_rrhh()` / `merchan_can_rrhh()`, backfill del permiso en los usuarios existentes, `workers.a3_empleado_codigo`, y visibilidad de solo lectura del perfil en `workers`, `services`, `points`, `puntos_venta_campana` y `grandes_campanas`. |
+| `v10_5_rrhh_catalogo.sql` | Tablas `cadenas` y `centros`; `grandes_campanas.ceco` y `.horas_dia`; `puntos_venta_campana.centro_id`. |
+| `v10_6_rrhh_altas.sql` | `rrhh_code_counters`, `rrhh_eventos` (append-only), `rrhh_altas`, `rrhh_solicitudes_alta` + líneas, guardianes de transición y los RPC de solicitar, resolver y registrar. |
+| `v10_7_rrhh_accesos.sql` | `rrhh_solicitudes_acceso` y sus RPC; expande por `modo_tramite` y calcula el plazo. |
+| `v10_8_rrhh_outbox_a3.sql` | Declara `rrhh_alta.*` y `rrhh_acceso.*` como ajenas al `db-notifier`. **No** registra `a3-adapter` en `outbox_consumers`. |
+
+**La próxima migración libre es `v10_9`.**
+
+Nota sobre `v10_4`: reescribe las policies `province_scope_all` de cuatro tablas y `campanas_read`.
+Se copiaron literalmente de `pg_policies` del proyecto antes de tocarlas y solo se les añadió
+`and not merchan_is_rrhh()` en la rama de escritura, de modo que el comportamiento de admin,
+gestores y almacén no cambia.

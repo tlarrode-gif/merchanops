@@ -1,5 +1,5 @@
 -- v10_5 · Catálogo de RR.HH.: cadenas y centros, y las columnas que los enlazan.
--- PENDIENTE DE APLICAR al proyecto dptmswhwmqimijpfyndn.
+-- APLICADA al proyecto dptmswhwmqimijpfyndn el 2026-07-31.
 --
 -- ============================================================================
 -- PROBLEMA

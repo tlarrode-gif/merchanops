@@ -1,5 +1,5 @@
 -- v10_7 · Accesos a centro: solicitudes puntuales, con el plazo calculado por el sistema.
--- PENDIENTE DE APLICAR al proyecto dptmswhwmqimijpfyndn.
+-- APLICADA al proyecto dptmswhwmqimijpfyndn el 2026-07-31.
 --
 -- ============================================================================
 -- PROBLEMA

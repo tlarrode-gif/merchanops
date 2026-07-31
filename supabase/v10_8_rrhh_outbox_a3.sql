@@ -1,5 +1,5 @@
 -- v10_8 · Los eventos de RR.HH. dejan de morir en dead-letter antes de nacer.
--- PENDIENTE DE APLICAR al proyecto dptmswhwmqimijpfyndn.
+-- APLICADA al proyecto dptmswhwmqimijpfyndn el 2026-07-31.
 --
 -- ============================================================================
 -- PROBLEMA
