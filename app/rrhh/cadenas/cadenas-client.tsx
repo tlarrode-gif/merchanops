@@ -177,20 +177,30 @@ export function CadenasClient() {
 
   // Centros de la cadena elegida. Se recargan a mano tras cada escritura para no
   // pintar nunca un centro que la base no haya confirmado.
+  // Contador de peticiones: si se salta de una cadena a otra deprisa, la respuesta
+  // de la primera puede llegar DESPUÉS que la de la segunda y pintaría los centros
+  // de A bajo la cabecera de B. Solo manda la última petición lanzada, igual que en
+  // las pantallas de altas y de accesos.
+  const peticionCentros = useRef(0);
+
   const cargarCentros = useCallback(async (cadenaId: string) => {
+    const token = ++peticionCentros.current;
     if (!cadenaId) {
       setCentros([]);
       return;
     }
     setCargandoCentros(true);
     try {
-      setCentros(await listarCentros(cadenaId));
+      const lista = await listarCentros(cadenaId);
+      if (token !== peticionCentros.current) return;
+      setCentros(lista);
       setError("");
     } catch (err) {
+      if (token !== peticionCentros.current) return;
       setCentros([]);
       setError(`No se pudieron cargar los centros de la cadena: ${mensaje(err)}`);
     } finally {
-      setCargandoCentros(false);
+      if (token === peticionCentros.current) setCargandoCentros(false);
     }
   }, []);
 

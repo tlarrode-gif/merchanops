@@ -70,12 +70,36 @@ const ESTADOS_ALTA_DESCARTADOS = ["anulada", "baja"] as const;
 
 const MILISEGUNDOS_POR_DIA = 86400000;
 
+/** Zona en la que se cuentan los días laborales de MerchanOps. */
+const ZONA_HORARIA = "Europe/Madrid";
+
 /**
  * Única puerta a "hoy" de todo el módulo. Recibe el instante por parámetro para
  * que las pruebas (y cualquier cálculo reproducible) no dependan del reloj.
+ *
+ * Devuelve el día CIVIL en España, no el día UTC. La diferencia no es teórica:
+ * en horario de verano España va dos horas por delante de UTC, así que entre las
+ * 00:00 y las 02:00 `toISOString()` todavía devuelve la fecha de AYER. Con eso,
+ * a las 00:30 del 1 de agosto un plazo que vencía el 31 de julio se habría
+ * pintado como «pedir antes del 31/07» en vez de «plazo vencido», que es
+ * justamente el aviso que esta pantalla existe para dar. La base ya lo hace bien
+ * (`now() at time zone 'Europe/Madrid'`, v10_7:360); esto pone al cliente de
+ * acuerdo con ella en vez de dejar que se contradigan.
  */
 export function hoyISO(ahora: Date = new Date()): string {
-  return normalizaFecha(ahora) ?? "";
+  if (!(ahora instanceof Date) || Number.isNaN(ahora.getTime())) return "";
+  // "en-CA" formatea como YYYY-MM-DD, que es exactamente el ISO que usa el módulo.
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: ZONA_HORARIA,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(ahora);
+  } catch {
+    // Entorno sin datos de zonas horarias: mejor la fecha UTC que ninguna.
+    return normalizaFecha(ahora) ?? "";
+  }
 }
 
 /**

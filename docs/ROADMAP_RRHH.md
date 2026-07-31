@@ -649,13 +649,32 @@ para confirmar que siguen siendo idempotentes.
 | 9 | El **número de A3 no se podía borrar**: un `coalesce` conservaba el valor viejo y la pantalla decía «guardado» | Se distingue clave ausente («no lo toques») de `null` («bórralo») | `v10_6` RPC resolver |
 | 10 | El perfil `rrhh` podía **escribir y borrar** filas con provincia nula de `workers`, `services`, `points` y `puntos_venta_campana` | Ese rol sale de la rama de escritura de `province_scope_all`; su acceso es de solo lectura (`rrhh_perfil_read`) | `v10_4` §4 |
 
-### 8.1 Lo que queda abierto
+### 8.1 Segunda pasada: las dos lentes que faltaban
+
+La revisión se completó después con las dos lentes que se habían quedado sin ejecutar
+(aritmética de fechas y experiencia de las pantallas). Salieron **dos defectos más**, los dos
+corregidos y con prueba de regresión:
+
+| # | Defecto | Corrección |
+|---|---|---|
+| 11 | **`hoyISO()` contaba los días en UTC, no en España.** En horario de verano el país va dos horas por delante, así que entre las 00:00 y las 02:00 `toISOString()` devolvía todavía la fecha de ayer. A las 00:30 del 1 de agosto, un plazo que vencía el 31 de julio se pintaba como «pedir antes del 31/07» en lugar de «plazo vencido» — justo el aviso que la pantalla existe para dar. Peor aún: la base **sí** lo calculaba bien (`now() at time zone 'Europe/Madrid'`, v10_7:360), así que la solicitud nacía `fuera_de_plazo` después de que la pantalla dijera lo contrario. | `hoyISO()` devuelve el día civil en `Europe/Madrid`. Cliente y base dicen ya lo mismo. Cinco casos nuevos en `tests/rrhh-accesos.test.ts`, y la aserción de `tests/rrhh-altas.test.ts` que codificaba el comportamiento antiguo se actualizó al criterio correcto. |
+| 12 | **`cargarCentros()` no descartaba respuestas obsoletas.** Saltando deprisa de una cadena a otra, la respuesta de la primera podía llegar después que la de la segunda y pintar los centros de A bajo la cabecera de B. Las pantallas de altas y de accesos ya se protegían de esta carrera; el catálogo, no. | Contador de peticiones: solo manda la última lanzada. |
+
+Lo que se revisó y **no** dio problemas: los bordes del cálculo de cobertura (alta contigua que no
+es solape, alta abierta, cobertura exacta por los dos extremos, altas anuladas y de baja, elección
+entre varias altas candidatas), la aritmética de plazos cruzando fin de mes, fin de año y año
+bisiesto, y los seis textos literales del diseño. Están fijados en `tests/rrhh-bordes.test.ts`
+(23 casos) para que nadie los rompa sin enterarse. En las pantallas: ningún `catch` vacío, ninguna
+promesa suelta, sesión leída siempre en `useEffect` (sin desajuste de hidratación), tablas con
+`overflow-auto`, ningún botón de solo icono sin texto y recarga tras cada escritura.
+
+### 8.2 Lo que queda abierto
 
 - **El bloqueo optimista de `rrhh_altas` no está cableado desde la cola.** `listarAltas()` ya lee
   la columna `version` y `PayloadRegistrarAlta` la acepta, pero el modal de tramitación todavía no
   la envía al ampliar. El daño real —que una ampliación recortase un alta sin avisar— lo evita ya
   la bandera `ampliar`; lo que queda es que dos personas de RR.HH. ampliando el mismo alta a la vez
   se pisen sin conflicto. Cablearlo es pasar `version` en la llamada.
-- **Dos lentes de revisión (lógica de fechas y experiencia de las pantallas) no llegaron a
-  ejecutarse.** Convendría repasar a mano la aritmética de fechas en zonas horarias distintas de
-  la del servidor y el comportamiento de las dos pantallas con la base vacía.
+- **Las pantallas no se han ejecutado nunca contra una base real.** Todo lo verificado hasta aquí
+  es tipos, pruebas unitarias, y SQL contra un PostgreSQL desechable con el esqueleto del proyecto.
+  Falta la prueba de humo de §7 con un usuario `rrhh` de verdad.

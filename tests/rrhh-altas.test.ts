@@ -90,7 +90,12 @@ describe("Fechas: normalización y formato corto", () => {
     expect(diasEntreFechas("2026-07-28", "2026-07-31")).toBe(3);
     expect(diasEntreFechas("2026-07-31", "2026-07-28")).toBe(-3);
     expect(diasEntreFechas("2026-07-28", "basura")).toBe(0);
-    expect(hoyISO(new Date(Date.UTC(2026, 6, 31, 22, 0, 0)))).toBe("2026-07-31");
+    // «Hoy» es el día CIVIL en España, no el día UTC: a las 22:00 UTC del 31 de
+    // julio en Madrid ya es la medianoche del 1 de agosto, y así lo cuenta
+    // también la base (now() at time zone 'Europe/Madrid', v10_7).
+    expect(hoyISO(new Date(Date.UTC(2026, 6, 31, 22, 0, 0)))).toBe("2026-08-01");
+    // A las 21:59 UTC todavía es 31 de julio en Madrid.
+    expect(hoyISO(new Date(Date.UTC(2026, 6, 31, 21, 59, 0)))).toBe("2026-07-31");
   });
 });
 

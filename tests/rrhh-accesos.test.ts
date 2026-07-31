@@ -20,6 +20,7 @@ import {
   puedeTransicionarAcceso,
   textoSolicitudAcceso
 } from "@/lib/rrhh/accesos";
+import { hoyISO } from "@/lib/rrhh/altas";
 import { Cadena, Centro, SolicitudAcceso } from "@/lib/rrhh/tipos";
 
 function cadena(overrides: Partial<Cadena> = {}): Cadena {
@@ -296,5 +297,32 @@ describe("Transiciones y motivo obligatorio", () => {
     expect(exigeMotivoAcceso("concedido")).toBe(false);
     expect(exigeMotivoAcceso("pendiente")).toBe(false);
     expect(exigeMotivoAcceso("fuera_de_plazo")).toBe(false);
+  });
+});
+
+describe("hoyISO cuenta los días en España, no en UTC", () => {
+  it("a las 00:30 del 1 de agosto en Madrid, hoy es el 1 de agosto (no el 31 de julio)", () => {
+    // En horario de verano España va 2 horas por delante de UTC: toISOString()
+    // devolvería 2026-07-31 y un plazo vencido se pintaría como vigente.
+    expect(hoyISO(new Date("2026-08-01T00:30:00+02:00"))).toBe("2026-08-01");
+  });
+
+  it("un plazo que vence el 31/07 ya está vencido a las 00:30 del 1 de agosto", () => {
+    const hoy = hoyISO(new Date("2026-08-01T00:30:00+02:00"));
+    expect(estadoDePlazo("2026-07-31", hoy)).toBe("fuera_de_plazo");
+  });
+
+  it("a las 23:30 del 31 de julio en Madrid sigue siendo 31 de julio y el plazo aguanta", () => {
+    const hoy = hoyISO(new Date("2026-07-31T23:30:00+02:00"));
+    expect(hoy).toBe("2026-07-31");
+    expect(estadoDePlazo("2026-07-31", hoy)).toBe("en_plazo");
+  });
+
+  it("en invierno (UTC+1) el cambio de día también se cuenta en Madrid", () => {
+    expect(hoyISO(new Date("2026-01-15T00:30:00+01:00"))).toBe("2026-01-15");
+  });
+
+  it("una fecha ilegible no revienta: devuelve cadena vacía", () => {
+    expect(hoyISO(new Date("no soy una fecha"))).toBe("");
   });
 });
