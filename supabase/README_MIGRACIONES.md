@@ -23,7 +23,7 @@ no se han renombrado: hacerlo rompería esa correspondencia.
 | 11:04 | `v10_0_outbox_tipos_ajenos` | `v10_0_outbox_tipos_ajenos.sql` |
 | 11:12 | `v10_1_outbox_multiconsumidor` | `v10_1_outbox_multiconsumidor.sql` |
 
-**La próxima migración empieza en `v10_9`.** No reutilices `v9_*` ni `v10_2`–`v10_8`.
+**La próxima migración empieza en `v11_0`.** No reutilices `v9_*` ni `v10_2`–`v10_9`.
 
 ## Módulo de RR.HH. (`v10_4` – `v10_8`): PENDIENTES DE APLICAR
 
@@ -63,7 +63,21 @@ registro de migraciones del proyecto.
 | `v10_7_rrhh_accesos.sql` | `rrhh_solicitudes_acceso` y sus RPC; expande por `modo_tramite` y calcula el plazo. |
 | `v10_8_rrhh_outbox_a3.sql` | Declara `rrhh_alta.*` y `rrhh_acceso.*` como ajenas al `db-notifier`. **No** registra `a3-adapter` en `outbox_consumers`. |
 
-**La próxima migración libre es `v10_9`.**
+## `v10_9`: PENDIENTE DE APLICAR
+
+| Fichero | Qué hace |
+|---|---|
+| `v10_9_rrhh_semilla_cadenas.sql` | Semilla de 34 cadenas de distribución en `cadenas`, con su `modo_tramite` y su `lead_time_dias` **de arranque**. Corrige la decisión (d) de `v10_5` («sin semilla»): con 0 cadenas la pantalla "Accesos a centro" nace muerta y no puede calcularse el plazo. **No siembra ningún centro** (no se conocen direcciones ni códigos: los da de alta RR.HH. o llegan desde `puntos_venta_campana.centro_id`). |
+
+`insert ... on conflict (nombre) do nothing`, nunca `do update`: reaplicarla
+solo puede añadir cadenas que falten, jamás devolver a "fábrica" un plazo que
+RR.HH. haya corregido desde la pantalla "Cadenas y centros". Validada
+ejecutándola dos veces seguidas sobre un PostgreSQL 16 limpio con el esquema de
+`v10_5`: 34 filas la primera vez, 0 la segunda, y un `lead_time_dias` editado a
+mano sobrevive. El ROLLBACK de su cabecera borra solo las cadenas sembradas que
+no tengan centros ni accesos colgando (comprobado: 32 borradas, 2 conservadas).
+
+**La próxima migración libre es `v11_0`.**
 
 Nota sobre `v10_4`: reescribe las policies `province_scope_all` de cuatro tablas y `campanas_read`.
 Se copiaron literalmente de `pg_policies` del proyecto antes de tocarlas y solo se les añadió

@@ -15,6 +15,8 @@ import {
   estadoSugerido,
   exigeMotivo,
   formateaFechaCorta,
+  formateaHoras,
+  horasDiaDerivadas,
   hoyISO,
   imputacionesPorCeco,
   interseccionDias,
@@ -96,6 +98,83 @@ describe("Fechas: normalización y formato corto", () => {
     expect(hoyISO(new Date(Date.UTC(2026, 6, 31, 22, 0, 0)))).toBe("2026-08-01");
     // A las 21:59 UTC todavía es 31 de julio en Madrid.
     expect(hoyISO(new Date(Date.UTC(2026, 6, 31, 21, 59, 0)))).toBe("2026-07-31");
+  });
+});
+
+describe("Horas por día derivadas de las horas totales", () => {
+  it("un solo día: todas las horas caen ese día", () => {
+    expect(horasDiaDerivadas(6, "2026-07-28", "2026-07-28")).toBe(6);
+    expect(horasDiaDerivadas(1.5, "2026-07-28", "2026-07-28")).toBe(1.5);
+  });
+
+  it("dos días: 6 h del 28/07 al 29/07 son 3 h/día (el ejemplo del diseño)", () => {
+    expect(horasDiaDerivadas(6, "2026-07-28", "2026-07-29")).toBe(3);
+    // Cuatro días naturales, extremos incluidos: 12 / 4.
+    expect(horasDiaDerivadas(12, "2026-07-28", "2026-07-31")).toBe(3);
+  });
+
+  it("un reparto no exacto se redondea a la media hora más cercana", () => {
+    expect(horasDiaDerivadas(10, "2026-07-28", "2026-07-30")).toBe(3.5); // 3,33 → 3,5
+    expect(horasDiaDerivadas(7, "2026-07-28", "2026-07-29")).toBe(3.5); // exacto
+    expect(horasDiaDerivadas(8, "2026-07-28", "2026-07-30")).toBe(2.5); // 2,66 → 2,5
+    // Un reparto por debajo de la media hora NO se convierte en cero: un trabajo
+    // con horas no tiene jornadas de cero horas.
+    expect(horasDiaDerivadas(1, "2026-07-28", "2026-08-01")).toBe(0.5); // 0,2 → 0,5
+  });
+
+  it("sin horas no hay reparto: null, undefined, 0 y negativo dan null", () => {
+    expect(horasDiaDerivadas(null, "2026-07-28", "2026-07-29")).toBeNull();
+    expect(horasDiaDerivadas(undefined, "2026-07-28", "2026-07-29")).toBeNull();
+    expect(horasDiaDerivadas(0, "2026-07-28", "2026-07-29")).toBeNull();
+    expect(horasDiaDerivadas(-6, "2026-07-28", "2026-07-29")).toBeNull();
+    expect(horasDiaDerivadas(Number.NaN, "2026-07-28", "2026-07-29")).toBeNull();
+  });
+
+  it("sin fechas legibles no hay calendario que repartir: null", () => {
+    expect(horasDiaDerivadas(6, "", "2026-07-29")).toBeNull();
+    expect(horasDiaDerivadas(6, "2026-07-28", "")).toBeNull();
+    expect(horasDiaDerivadas(6, "28/07/2026", "29/07/2026")).toBeNull();
+    expect(horasDiaDerivadas(6, "2026-02-30", "2026-03-02")).toBeNull(); // día que no existe
+    expect(horasDiaDerivadas(6, null as unknown as string, null as unknown as string)).toBeNull();
+  });
+
+  it("un fin anterior al inicio es un dato incoherente: cuenta como un solo día", () => {
+    // Mismo criterio que rangoDeTrabajos, que cierra el rango en el inicio en vez
+    // de devolver un intervalo imposible.
+    expect(horasDiaDerivadas(6, "2026-07-29", "2026-07-28")).toBe(6);
+    expect(horasDiaDerivadas(6, "2026-07-31", "2026-07-01")).toBe(6);
+  });
+
+  it("un trabajo largo que cruza el fin de mes cuenta los días naturales de los dos meses", () => {
+    // Del 28/07 al 06/08 hay 10 días naturales: 4 de julio + 6 de agosto.
+    expect(horasDiaDerivadas(40, "2026-07-28", "2026-08-06")).toBe(4);
+    expect(horasDiaDerivadas(45, "2026-07-28", "2026-08-06")).toBe(4.5);
+    // Y de un febrero bisiesto a marzo: del 27/02 al 02/03 de 2024 son 5 días.
+    expect(horasDiaDerivadas(15, "2024-02-27", "2024-03-02")).toBe(3);
+  });
+
+  it("las horas también se leen si llegan como texto numérico desde la base", () => {
+    expect(horasDiaDerivadas("6" as unknown as number, "2026-07-28", "2026-07-29")).toBe(3);
+    expect(horasDiaDerivadas("" as unknown as number, "2026-07-28", "2026-07-29")).toBeNull();
+    expect(horasDiaDerivadas("seis" as unknown as number, "2026-07-28", "2026-07-29")).toBeNull();
+  });
+});
+
+describe("Horas formateadas para la fila", () => {
+  it("entero sin decimales, media hora con coma, y vacío cuando no hay horas", () => {
+    expect(formateaHoras(3)).toBe("3 h/día");
+    expect(formateaHoras(4.5)).toBe("4,5 h/día");
+    expect(formateaHoras(0.5)).toBe("0,5 h/día");
+    expect(formateaHoras(null)).toBe("");
+    expect(formateaHoras(0)).toBe("");
+    expect(formateaHoras(-3)).toBe("");
+    expect(formateaHoras(Number.NaN)).toBe("");
+  });
+
+  it("encaja con lo que devuelve el cálculo: «3 h/día» en la fila del diseño", () => {
+    expect(formateaHoras(horasDiaDerivadas(6, "2026-07-28", "2026-07-29"))).toBe("3 h/día");
+    expect(formateaHoras(horasDiaDerivadas(9, "2026-07-28", "2026-07-29"))).toBe("4,5 h/día");
+    expect(formateaHoras(horasDiaDerivadas(null, "2026-07-28", "2026-07-29"))).toBe("");
   });
 });
 
