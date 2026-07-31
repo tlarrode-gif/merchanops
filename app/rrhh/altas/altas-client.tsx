@@ -4,10 +4,18 @@
  * MerchanOps · RR.HH. — Altas laborales.
  *
  * QUÉ RESUELVE
- * La gestora elige un trabajador, marca los trabajos que van juntos y el sistema
- * dice —en gris, sin que nadie teclee nada— si hace falta un alta nueva, si el
- * rango ya está cubierto por un alta vigente o si hay que ampliar una existente.
- * «Tramitar» convierte esa lectura en una solicitud con sus líneas de imputación.
+ * Con 26 trabajadores y 173 trabajos pendientes, la pregunta no es «¿sabe el
+ * sistema calcular el alta?» sino «¿se tarda menos que con un Excel?». Por eso
+ * esta pantalla enseña la carga ENTERA de todos los trabajadores a la vez,
+ * agrupada por persona, y deja marcar en bloque: casilla por fila, casilla por
+ * grupo y «marcar todo lo visible». Ir trabajador por trabajador —26 vueltas
+ * para tramitar lo mismo— era la fricción que hacía la pantalla inservible.
+ *
+ * UNA SOLICITUD ES DE UN TRABAJADOR
+ * Es la regla de `merchan_rrhh_solicitar_alta` y no se negocia. Así que marcar
+ * trabajos de varias personas no crea un engendro compartido: crea UNA solicitud
+ * por trabajador, en serie, enseñando el progreso. Si una falla, las demás
+ * siguen: al final se dice cuáles se crearon y cuáles no, con su motivo real.
  *
  * QUIÉN PUEDE QUÉ
  *  - Cualquiera con permiso `rrhh` (los gestores lo tienen por defecto) SOLICITA.
@@ -18,16 +26,19 @@
  * `merchan_is_rrhh()` de los RPC. Aquí solo se evita ofrecer lo que va a fallar.
  *
  * NADA SE TECLEA DOS VECES
- * `resolucion_sistema`, `resolucion_detalle`, fechas y CECOs salen íntegros de
- * `lib/rrhh/altas.ts`. Si el cálculo cambia, cambia la pantalla sola.
+ * `resolucion_sistema`, `resolucion_detalle`, fechas, CECOs y horas/día salen
+ * íntegros de `lib/rrhh/altas.ts` y `lib/rrhh/datos.ts`. Las horas/día de un
+ * servicio se derivan de sus horas totales repartidas entre los días naturales
+ * (`horasDiaDerivadas`), así que la fila enseña «3 h/día» en vez de un hueco que
+ * alguien tendría que rellenar 173 veces.
  *
- * EL CICLO SE CIERRA
- * Mover una solicitud a «Tramitada» o «Alta online» abre el modal «Tramitar en
- * A3»: además del número de A3 y el estado, ahí se decide si el alta REAL queda
- * registrada en `rrhh_altas` (o si se amplía la que ya existía). Ese paso es el
- * que hace que el sistema aprenda: sin él, los próximos trabajos del mismo
- * trabajador volverían a calcularse como «Alta nueva» aunque el alta ya esté
- * hecha en A3, y la pantalla no serviría para nada.
+ * EL TRÁMITE YA NO ES UN MODAL OBLIGATORIO
+ * Mover la cola a «Tramitada» o «Alta online» es un clic, también en bloque.
+ * El modal «Registrar alta…» sigue estando, pero solo para quien quiera crear o
+ * ampliar el alta REAL con detalle. Ese paso es el que hace que el sistema
+ * aprenda: sin él, los próximos trabajos del mismo trabajador se volverán a
+ * calcular como «Alta nueva» aunque el alta ya esté hecha en A3. Se dice en gris
+ * bajo la barra de acciones, en vez de imponerlo con un formulario de 6 campos.
  *
  * CONCURRENCIA
  * Cada resolución envía el `version` que se leyó. Si otra persona tocó la
@@ -35,8 +46,8 @@
  * mensaje real y se recarga la cola.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Search, Send } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, RefreshCw, Search, Send } from "lucide-react";
 import { AppSession, canAccessModule, canManageRrhh, getCurrentAppSession, merchanopsSessionChangeEvent } from "@/lib/access-control";
 import {
   AltaLaboral,
@@ -50,7 +61,16 @@ import {
   estadoSolicitudAltaLabels,
   tipoAltaLabels
 } from "@/lib/rrhh/tipos";
-import { estadoSugerido, exigeMotivo, formateaFechaCorta, puedeTransicionar, rangoDeTrabajos, textoResolucion } from "@/lib/rrhh/altas";
+import {
+  estadoSugerido,
+  exigeMotivo,
+  formateaFechaCorta,
+  formateaHoras,
+  normalizaFecha,
+  puedeTransicionar,
+  rangoDeTrabajos,
+  textoResolucion
+} from "@/lib/rrhh/altas";
 import {
   PayloadResolverAlta,
   PayloadSolicitarAlta,
@@ -60,7 +80,7 @@ import {
   listarTrabajadores,
   registrarAlta,
   resolverSolicitudAlta,
-  trabajosPendientesDeAlta
+  trabajosPendientesDeTodos
 } from "@/lib/rrhh/datos";
 
 /** Lo que devuelve `listarTrabajadores()`. */
@@ -92,7 +112,7 @@ function esEstadoInicial(estado: EstadoSolicitudAlta): estado is EstadoInicialAl
 function estadoInicial(resolucion: ResolucionAlta, alta: AltaLaboral | null): EstadoInicialAlta {
   const sugerido = estadoSugerido(resolucion, alta);
   if (!esEstadoInicial(sugerido)) {
-    throw new Error(`El cálculo propuso el estado «${sugerido}», que no es un estado con el que una solicitud pueda nacer.`);
+    throw new Error(`el cálculo propuso el estado «${sugerido}», que no es un estado con el que una solicitud pueda nacer`);
   }
   return sugerido;
 }
@@ -106,8 +126,11 @@ const CLASE_TONO: Record<"neutro" | "aviso" | "vacio", string> = {
   vacio: "text-slate-400"
 };
 
-/** Los estados que significan «esto ya está hecho en A3»: abren el modal de trámite. */
+/** Los estados que significan «esto ya está hecho en A3». */
 const ESTADOS_TRAMITE: EstadoSolicitudAlta[] = ["tramitada", "alta_online"];
+
+/** Las tres acciones en bloque de la cola, en el orden en que se usan. */
+const ACCIONES_COLA: EstadoSolicitudAlta[] = ["tramitada", "alta_online", "rechazada"];
 
 /** Los tres tipos de contrato del desplegable, en el orden del CHECK de la base. */
 const TIPOS_ALTA = Object.keys(tipoAltaLabels) as TipoAlta[];
@@ -128,10 +151,11 @@ function modoDeTramite(solicitud: SolicitudAlta): ModoTramite {
   return "crear";
 }
 
-/** Lo que RR.HH. teclea en el modal «Tramitar en A3» antes de confirmar. */
+/** Lo que RR.HH. teclea en el modal «Registrar alta…» antes de confirmar. */
 type BorradorTramite = {
   solicitud: SolicitudAlta;
-  destino: EstadoSolicitudAlta;
+  /** "" = no se toca el estado: solo se registra el alta y el número de A3. */
+  destino: EstadoSolicitudAlta | "";
   modo: ModoTramite;
   /** La decisión de arriba del modal: ¿aprende el sistema de este trámite? */
   registrar: boolean;
@@ -147,13 +171,16 @@ type BorradorTramite = {
 /**
  * Todo prerrellenado con lo que ya sabe la solicitud: RR.HH. teclea el número de
  * A3 y, como mucho, corrige. La casilla nace marcada siempre que haya algo que
- * registrar, porque no registrar el alta es la excepción, no lo normal.
+ * registrar, porque no registrar el alta es la excepción, no lo normal. El estado
+ * de destino se propone —«Tramitada» si la transición existe— pero ya no se
+ * impone: el modal es para el ALTA, y mover la cola se puede hacer sin él.
  */
-function borradorTramite(solicitud: SolicitudAlta, destino: EstadoSolicitudAlta): BorradorTramite {
+function borradorTramite(solicitud: SolicitudAlta): BorradorTramite {
   const modo = modoDeTramite(solicitud);
+  const destinos = ESTADOS_TRAMITE.filter(estado => puedeTransicionar(solicitud.estado, estado));
   return {
     solicitud,
-    destino,
+    destino: destinos[0] ?? "",
     modo,
     registrar: modo !== "ninguno",
     numero: String(solicitud.a3_numero ?? "").trim(),
@@ -166,38 +193,60 @@ function borradorTramite(solicitud: SolicitudAlta, destino: EstadoSolicitudAlta)
   };
 }
 
+/** Un trabajador con todos sus trabajos pendientes: la unidad de esta pantalla. */
+type GrupoTrabajador = {
+  workerId: string;
+  nombre: string;
+  trabajos: TrabajoPendiente[];
+};
+
+/** Lo que hay que decidir en el modal de motivo: puede ser una fila o un lote entero. */
+type PeticionMotivo = { solicitudes: SolicitudAlta[]; destino: EstadoSolicitudAlta };
+
 export function AltasClient() {
   const [session, setSession] = useState<AppSession | null>(null);
 
-  // Tarjeta de trabajo
+  // Tarjeta de trabajo: la carga ENTERA, de todos los trabajadores a la vez.
   const [trabajadores, setTrabajadores] = useState<FilaTrabajador[]>([]);
-  const [workerId, setWorkerId] = useState("");
   const [pendientes, setPendientes] = useState<TrabajoPendiente[]>([]);
   const [altas, setAltas] = useState<AltaLaboral[]>([]);
   const [seleccion, setSeleccion] = useState<string[]>([]);
-  const [cargandoTrabajador, setCargandoTrabajador] = useState(false);
+  const [abiertos, setAbiertos] = useState<string[]>([]);
+  const [cargandoCarga, setCargandoCarga] = useState(true);
   const [tramitando, setTramitando] = useState(false);
+  const [progreso, setProgreso] = useState("");
+
+  // Filtros rápidos de la carga
+  const [busqueda, setBusqueda] = useState("");
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [enfocado, setEnfocado] = useState("");
 
   // Cola de altas
   const [solicitudes, setSolicitudes] = useState<SolicitudAlta[]>([]);
   const [cargandoCola, setCargandoCola] = useState(true);
   const [consulta, setConsulta] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<EstadoSolicitudAlta | "">("");
+  const [seleccionCola, setSeleccionCola] = useState<string[]>([]);
   const [a3Borrador, setA3Borrador] = useState<Record<string, string>>({});
   const [guardandoId, setGuardandoId] = useState("");
+  const [progresoCola, setProgresoCola] = useState("");
 
   // Avisos
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
 
   // Modal de motivo (nada se cierra en negativo sin explicación escrita).
-  const [peticionMotivo, setPeticionMotivo] = useState<{ solicitud: SolicitudAlta; destino: EstadoSolicitudAlta } | null>(null);
+  const [peticionMotivo, setPeticionMotivo] = useState<PeticionMotivo | null>(null);
   const [motivo, setMotivo] = useState("");
   const [errorMotivo, setErrorMotivo] = useState("");
 
-  // Modal «Tramitar en A3»: número de A3, estado y —lo importante— el alta real.
+  // Modal «Registrar alta…»: el alta REAL, y de paso el número de A3 y el estado.
   const [peticionTramite, setPeticionTramite] = useState<BorradorTramite | null>(null);
   const [errorTramite, setErrorTramite] = useState("");
+
+  /** Para que el selector de trabajador pueda llevar la pantalla hasta su grupo. */
+  const nodosGrupo = useRef<Record<string, HTMLDivElement | null>>({});
 
   // La sesión se lee en un efecto, nunca en el render inicial: el servidor no
   // tiene localStorage y leerlo antes de montar rompe la hidratación.
@@ -225,12 +274,31 @@ export function AltasClient() {
     }
   }, []);
 
-  const cargarTrabajadores = useCallback(async () => {
+  /**
+   * Toda la carga en una sola pasada: trabajadores, trabajos pendientes de TODOS
+   * y todas las altas reales. Son tres viajes para pintar la pantalla entera, no
+   * tres por cabeza. `primeraVez` deja abierto solo el primer grupo; al recargar
+   * después de tramitar se respeta lo que la persona tenga desplegado.
+   */
+  const cargarCarga = useCallback(async (primeraVez: boolean) => {
+    setCargandoCarga(true);
     try {
-      setTrabajadores(await listarTrabajadores());
+      const [gente, trabajos, todasLasAltas] = await Promise.all([listarTrabajadores(), trabajosPendientesDeTodos(), listarAltas()]);
+      setTrabajadores(gente);
+      setPendientes(trabajos);
+      setAltas(todasLasAltas);
+      if (primeraVez) {
+        const primero = agrupaPorTrabajador(trabajos, gente)[0];
+        setAbiertos(primero ? [primero.workerId] : []);
+      }
+      setError("");
     } catch (err) {
       setTrabajadores([]);
-      setError(`No se pudo cargar la lista de trabajadores: ${mensaje(err)}`);
+      setPendientes([]);
+      setAltas([]);
+      setError(`No se pudo cargar la carga de trabajo pendiente: ${mensaje(err)}`);
+    } finally {
+      setCargandoCarga(false);
     }
   }, []);
 
@@ -238,48 +306,63 @@ export function AltasClient() {
 
   useEffect(() => {
     if (!activa) return;
-    void cargarTrabajadores();
+    void cargarCarga(true);
     void cargarCola();
-  }, [activa, cargarTrabajadores, cargarCola]);
+  }, [activa, cargarCarga, cargarCola]);
 
-  // Trabajos pendientes y altas reales del trabajador elegido. Se cancela la
-  // respuesta vieja si el usuario cambia de trabajador antes de que llegue.
-  useEffect(() => {
-    if (!workerId) {
-      setPendientes([]);
-      setAltas([]);
-      setSeleccion([]);
-      return;
+  const nombresPorId = useMemo(() => {
+    const mapa = new Map<string, string>();
+    for (const fila of trabajadores) mapa.set(fila.id, fila.name?.trim() || fila.id);
+    return mapa;
+  }, [trabajadores]);
+
+  /** Las altas de cada trabajador, para calcular su cobertura sin volver a la red. */
+  const altasPorTrabajador = useMemo(() => {
+    const mapa = new Map<string, AltaLaboral[]>();
+    for (const alta of altas) {
+      const lista = mapa.get(alta.worker_id);
+      if (lista) lista.push(alta);
+      else mapa.set(alta.worker_id, [alta]);
     }
-    let cancelado = false;
-    setCargandoTrabajador(true);
-    setSeleccion([]);
-    (async () => {
-      try {
-        const [trabajos, altasTrabajador] = await Promise.all([trabajosPendientesDeAlta(workerId), listarAltas(workerId)]);
-        if (cancelado) return;
-        setPendientes(trabajos);
-        setAltas(altasTrabajador);
-        setError("");
-      } catch (err) {
-        if (cancelado) return;
-        setPendientes([]);
-        setAltas([]);
-        setError(`No se pudieron cargar los trabajos del trabajador: ${mensaje(err)}`);
-      } finally {
-        if (!cancelado) setCargandoTrabajador(false);
-      }
-    })();
-    return () => {
-      cancelado = true;
-    };
-  }, [workerId]);
+    return mapa;
+  }, [altas]);
 
-  const trabajadorElegido = useMemo(() => trabajadores.find(fila => fila.id === workerId), [trabajadores, workerId]);
-  const nombreTrabajador = trabajadorElegido?.name?.trim() || "";
+  /** Lo que queda tras los filtros rápidos: es lo que se ve y lo que marca «todo lo visible». */
+  const visibles = useMemo(() => {
+    const aguja = busqueda.trim().toLowerCase();
+    const inicioFiltro = normalizaFecha(desde);
+    const finFiltro = normalizaFecha(hasta);
+    return pendientes.filter(trabajo => {
+      // Rango: se conserva el trabajo que TOCA la ventana, no solo el que cabe
+      // entera dentro. Un trabajo del 28/07 al 03/08 sale al filtrar por julio.
+      if (inicioFiltro && trabajo.fecha_fin && trabajo.fecha_fin < inicioFiltro) return false;
+      if (finFiltro && trabajo.fecha_inicio && trabajo.fecha_inicio > finFiltro) return false;
+      if (!aguja) return true;
+      const heno = [nombresPorId.get(trabajo.worker_id) ?? "", trabajo.campana, trabajo.ceco, trabajo.provincia ?? ""]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return heno.includes(aguja);
+    });
+  }, [pendientes, busqueda, desde, hasta, nombresPorId]);
 
-  const marcados = useMemo(() => pendientes.filter(trabajo => seleccion.includes(claveTrabajo(trabajo))), [pendientes, seleccion]);
-  const resolucion = useMemo(() => textoResolucion(marcados, altas), [marcados, altas]);
+  const grupos = useMemo(() => agrupaPorTrabajador(visibles, trabajadores), [visibles, trabajadores]);
+
+  const claves = useMemo(() => new Set(seleccion), [seleccion]);
+  const marcados = useMemo(() => pendientes.filter(trabajo => claves.has(claveTrabajo(trabajo))), [pendientes, claves]);
+  const gruposMarcados = useMemo(() => agrupaPorTrabajador(marcados, trabajadores), [marcados, trabajadores]);
+
+  /** Marcados que los filtros están escondiendo: se dice, no se disimula. */
+  const marcadosOcultos = useMemo(() => {
+    const visiblesClaves = new Set(visibles.map(claveTrabajo));
+    return marcados.filter(trabajo => !visiblesClaves.has(claveTrabajo(trabajo))).length;
+  }, [marcados, visibles]);
+
+  /** Una línea de texto gris POR TRABAJADOR: cada alta se calcula contra las suyas. */
+  const resoluciones = useMemo(
+    () => gruposMarcados.map(grupo => ({ grupo, resolucion: textoResolucion(grupo.trabajos, altasPorTrabajador.get(grupo.workerId) ?? []) })),
+    [gruposMarcados, altasPorTrabajador]
+  );
 
   const cola = useMemo(() => {
     const aguja = consulta.trim().toLowerCase();
@@ -300,58 +383,127 @@ export function AltasClient() {
     });
   }, [solicitudes, filtroEstado, consulta]);
 
+  const clavesCola = useMemo(() => new Set(seleccionCola), [seleccionCola]);
+  const marcadasCola = useMemo(() => solicitudes.filter(solicitud => clavesCola.has(solicitud.id)), [solicitudes, clavesCola]);
+
+  // ---------- Marcar: barato en todas sus formas ----------
+
   function alternar(trabajo: TrabajoPendiente) {
     const clave = claveTrabajo(trabajo);
     setSeleccion(previa => (previa.includes(clave) ? previa.filter(x => x !== clave) : [...previa, clave]));
   }
 
-  async function tramitar() {
-    if (!marcados.length || !workerId) return;
-    const rango = rangoDeTrabajos(marcados);
-    if (!resolucion.resolucion || !rango) {
-      setError("Los trabajos seleccionados no tienen fechas válidas: no se puede calcular el alta.");
+  /** Marca o desmarca una lista entera de golpe (un grupo, o todo lo visible). */
+  function alternarLote(trabajos: TrabajoPendiente[], marcar: boolean) {
+    const afectadas = new Set(trabajos.map(claveTrabajo));
+    setSeleccion(previa => {
+      const restantes = previa.filter(clave => !afectadas.has(clave));
+      return marcar ? [...restantes, ...afectadas] : restantes;
+    });
+  }
+
+  function abrirGrupo(workerId: string, abierto: boolean) {
+    setAbiertos(previa => (abierto ? (previa.includes(workerId) ? previa : [...previa, workerId]) : previa.filter(id => id !== workerId)));
+  }
+
+  /**
+   * El selector de arriba NO filtra la carga: lleva hasta el grupo y lo despliega.
+   * Filtrar escondería el resto de lo marcado, que es justo lo que esta pantalla
+   * quiere evitar; el buscador sí filtra, y para eso está.
+   */
+  function irATrabajador(workerId: string) {
+    setEnfocado(workerId);
+    if (!workerId) return;
+    abrirGrupo(workerId, true);
+    const nodo = nodosGrupo.current[workerId];
+    if (!nodo) {
+      setAviso(`${nombresPorId.get(workerId) ?? workerId} no tiene trabajos pendientes con los filtros de ahora mismo.`);
       return;
     }
+    setAviso("");
+    nodo.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // ---------- Tramitar EN BLOQUE: una solicitud por trabajador ----------
+
+  /**
+   * Una llamada por trabajador, en serie y con progreso. Un fallo NO aborta el
+   * lote: se anota y se sigue, porque que la solicitud 2 de 12 dé error no es
+   * motivo para dejar sin tramitar las diez siguientes. Al final se enseña lo
+   * creado y lo fallado, cada cosa con su mensaje real.
+   */
+  async function tramitarLote() {
+    if (!gruposMarcados.length || tramitando) return;
+    const lote = gruposMarcados;
     setTramitando(true);
     setError("");
     setAviso("");
-    try {
-      const payload: PayloadSolicitarAlta = {
-        worker_id: workerId,
-        worker_nombre: nombreTrabajador || null,
-        resolucion_sistema: resolucion.resolucion,
-        resolucion_detalle: resolucion.texto,
-        alta_referencia_id: resolucion.alta?.id ?? null,
-        alta_referencia_numero: resolucion.alta?.numero_alta ?? null,
-        estado: estadoInicial(resolucion.resolucion, resolucion.alta),
-        fecha_inicio: rango.inicio,
-        fecha_fin: rango.fin,
-        horas_dia: horasDeLaSeleccion(marcados),
-        solicitada_por_nombre: session?.display_name || null,
-        lineas: marcados.map(trabajo => ({
-          origen_tipo: trabajo.origen_tipo,
-          origen_id: trabajo.origen_id,
-          campana: trabajo.campana,
-          ceco: trabajo.ceco,
-          fecha_inicio: trabajo.fecha_inicio,
-          fecha_fin: trabajo.fecha_fin,
-          horas_dia: trabajo.horas_dia ?? null
-        }))
-      };
-      const creada = await crearSolicitudAlta(payload);
-      setAviso(`Solicitud ${creada.codigo} creada.`);
-      setSeleccion([]);
-      // Los trabajos ya solicitados dejan de estar pendientes: se relee todo.
-      const [trabajos, altasTrabajador] = await Promise.all([trabajosPendientesDeAlta(workerId), listarAltas(workerId)]);
-      setPendientes(trabajos);
-      setAltas(altasTrabajador);
-      await cargarCola();
-    } catch (err) {
-      setError(`No se pudo tramitar la solicitud: ${mensaje(err)}`);
-    } finally {
-      setTramitando(false);
+
+    const creadas: string[] = [];
+    const fallos: string[] = [];
+    const hechas = new Set<string>();
+
+    for (let i = 0; i < lote.length; i += 1) {
+      const grupo = lote[i];
+      setProgreso(`${i + 1} de ${lote.length}...`);
+      try {
+        const rango = rangoDeTrabajos(grupo.trabajos);
+        const resolucion = textoResolucion(grupo.trabajos, altasPorTrabajador.get(grupo.workerId) ?? []);
+        if (!resolucion.resolucion || !rango) {
+          throw new Error("los trabajos marcados no tienen fechas válidas y no se puede calcular el alta");
+        }
+        const payload: PayloadSolicitarAlta = {
+          worker_id: grupo.workerId,
+          worker_nombre: grupo.nombre || null,
+          resolucion_sistema: resolucion.resolucion,
+          resolucion_detalle: resolucion.texto,
+          alta_referencia_id: resolucion.alta?.id ?? null,
+          alta_referencia_numero: resolucion.alta?.numero_alta ?? null,
+          estado: estadoInicial(resolucion.resolucion, resolucion.alta),
+          fecha_inicio: rango.inicio,
+          fecha_fin: rango.fin,
+          horas_dia: horasDeLaSeleccion(grupo.trabajos),
+          solicitada_por_nombre: session?.display_name || null,
+          lineas: grupo.trabajos.map(trabajo => ({
+            origen_tipo: trabajo.origen_tipo,
+            origen_id: trabajo.origen_id,
+            campana: trabajo.campana,
+            ceco: trabajo.ceco,
+            fecha_inicio: trabajo.fecha_inicio,
+            fecha_fin: trabajo.fecha_fin,
+            horas_dia: trabajo.horas_dia ?? null
+          }))
+        };
+        const creada = await crearSolicitudAlta(payload);
+        creadas.push(creada.codigo);
+        for (const trabajo of grupo.trabajos) hechas.add(claveTrabajo(trabajo));
+      } catch (err) {
+        fallos.push(`${grupo.nombre}: ${mensaje(err)}`);
+      }
     }
+
+    setProgreso("");
+    // Solo se desmarca lo que SÍ se creó: lo que falló sigue marcado para reintentar.
+    if (hechas.size) setSeleccion(previa => previa.filter(clave => !hechas.has(clave)));
+
+    setAviso(
+      creadas.length
+        ? `${creadas.length} ${creadas.length === 1 ? "solicitud creada" : "solicitudes creadas"}: ${creadas.join(", ")}.`
+        : ""
+    );
+    setError(
+      fallos.length
+        ? `${fallos.length} ${fallos.length === 1 ? "solicitud no se pudo crear" : "solicitudes no se pudieron crear"} · ${fallos.join(" · ")}`
+        : ""
+    );
+
+    // Lo ya solicitado deja de estar pendiente: se relee la carga y la cola.
+    await cargarCarga(false);
+    await cargarCola();
+    setTramitando(false);
   }
+
+  // ---------- Cola: número de A3 y acciones en bloque ----------
 
   async function guardarA3(solicitud: SolicitudAlta, valor: string) {
     const limpio = valor.trim();
@@ -389,27 +541,109 @@ export function AltasClient() {
     });
   }
 
-  function pedirCambioEstado(solicitud: SolicitudAlta, destino: EstadoSolicitudAlta) {
-    if (destino === solicitud.estado) return;
-    if (!puedeTransicionar(solicitud.estado, destino)) {
-      setError(`${solicitud.codigo} no puede pasar de «${estadoSolicitudAltaLabels[solicitud.estado]}» a «${estadoSolicitudAltaLabels[destino]}».`);
-      return;
-    }
+  function alternarCola(id: string) {
+    setSeleccionCola(previa => (previa.includes(id) ? previa.filter(x => x !== id) : [...previa, id]));
+  }
+
+  function alternarColaLote(lista: SolicitudAlta[], marcar: boolean) {
+    const afectadas = new Set(lista.map(solicitud => solicitud.id));
+    setSeleccionCola(previa => {
+      const restantes = previa.filter(id => !afectadas.has(id));
+      return marcar ? [...restantes, ...afectadas] : restantes;
+    });
+  }
+
+  /**
+   * Puerta única de los cambios de estado, tanto de una fila como de un lote. Si
+   * el destino exige motivo se pide UNO para todo el lote: escribir doce veces
+   * «duplicado» es exactamente la fricción que esta fase viene a quitar.
+   */
+  function pedirCambioEstado(lista: SolicitudAlta[], destino: EstadoSolicitudAlta) {
+    const candidatas = lista.filter(solicitud => solicitud.estado !== destino);
+    if (!candidatas.length) return;
     if (exigeMotivo(destino)) {
       setMotivo("");
       setErrorMotivo("");
-      setPeticionMotivo({ solicitud, destino });
+      setPeticionMotivo({ solicitudes: candidatas, destino });
       return;
     }
-    // «Tramitada» y «Alta online» dicen que el alta ya existe en A3: se pregunta
-    // por su número y por si hay que registrarla (o ampliarla) en MerchanOps.
-    if (ESTADOS_TRAMITE.includes(destino)) {
-      setErrorTramite("");
-      setPeticionTramite(borradorTramite(solicitud, destino));
-      return;
-    }
-    void aplicarEstado(solicitud, destino);
+    void aplicarLoteCola(candidatas, destino);
   }
+
+  /**
+   * Aplica la transición a todas las marcadas, en serie. Las que no la admiten
+   * según `puedeTransicionar` se saltan —no se intentan contra la base para que
+   * el trigger guardián las rechace una a una— y se dicen al final por su nombre.
+   * Un error tampoco corta el lote: se anota y se sigue.
+   */
+  async function aplicarLoteCola(lista: SolicitudAlta[], destino: EstadoSolicitudAlta, motivoEscrito?: string) {
+    if (!lista.length || progresoCola) return;
+    const admiten = lista.filter(solicitud => puedeTransicionar(solicitud.estado, destino));
+    const saltadas = lista.filter(solicitud => !puedeTransicionar(solicitud.estado, destino));
+
+    setError("");
+    setAviso("");
+
+    const hechas: string[] = [];
+    const fallos: string[] = [];
+
+    for (let i = 0; i < admiten.length; i += 1) {
+      const solicitud = admiten[i];
+      setProgresoCola(`${i + 1} de ${admiten.length}...`);
+      setGuardandoId(solicitud.id);
+      try {
+        const payload: PayloadResolverAlta = {
+          solicitud_id: solicitud.id,
+          estado: destino,
+          motivo: motivoEscrito?.trim() || null,
+          version: solicitud.version
+        };
+        await resolverSolicitudAlta(payload);
+        hechas.push(solicitud.codigo);
+      } catch (err) {
+        fallos.push(`${solicitud.codigo}: ${mensaje(err)}`);
+      }
+    }
+
+    setProgresoCola("");
+    setGuardandoId("");
+
+    const partes: string[] = [];
+    if (hechas.length) {
+      partes.push(
+        `${hechas.length} ${hechas.length === 1 ? "solicitud pasa" : "solicitudes pasan"} a «${estadoSolicitudAltaLabels[destino]}»: ${hechas.join(", ")}.`
+      );
+    }
+    if (saltadas.length) {
+      partes.push(
+        `Se ${saltadas.length === 1 ? "ha saltado 1 solicitud que no admite" : `han saltado ${saltadas.length} solicitudes que no admiten`} ese cambio: ${saltadas
+          .map(solicitud => `${solicitud.codigo} (${estadoSolicitudAltaLabels[solicitud.estado]})`)
+          .join(", ")}.`
+      );
+    }
+    setAviso(partes.join(" "));
+    setError(fallos.length ? `${fallos.length} ${fallos.length === 1 ? "solicitud falló" : "solicitudes fallaron"} · ${fallos.join(" · ")}` : "");
+
+    if (hechas.length) {
+      const hechasIds = new Set(admiten.filter(solicitud => hechas.includes(solicitud.codigo)).map(solicitud => solicitud.id));
+      setSeleccionCola(previa => previa.filter(id => !hechasIds.has(id)));
+    }
+    await cargarCola();
+  }
+
+  async function confirmarMotivo() {
+    if (!peticionMotivo) return;
+    if (!motivo.trim()) {
+      setErrorMotivo("El motivo es obligatorio: queda escrito en la auditoría.");
+      return;
+    }
+    const { solicitudes: lista, destino } = peticionMotivo;
+    setPeticionMotivo(null);
+    await aplicarLoteCola(lista, destino, motivo);
+    setMotivo("");
+  }
+
+  // ---------- Modal «Registrar alta…»: el alta REAL, ya no obligatorio ----------
 
   /** Cambia un campo del borrador del modal sin perder el resto. */
   function cambiaTramite(cambio: Partial<BorradorTramite>) {
@@ -422,29 +656,27 @@ export function AltasClient() {
   }
 
   /**
-   * Relee las altas del trabajador que se acaba de tramitar, pero solo si es el
-   * que hay elegido arriba: es lo que hace que el texto gris deje de decir «Alta
-   * nueva» en cuanto el alta existe. Si la relectura falla se dice, sin tapar el
-   * hecho de que el trámite sí se guardó.
+   * Relee las altas después de registrar una: es lo que hace que el texto gris
+   * deje de decir «Alta nueva» en cuanto el alta existe. Si la relectura falla se
+   * dice, sin tapar el hecho de que el trámite sí se guardó.
    */
-  async function recargarAltasDe(idTrabajador: string) {
-    if (!workerId || workerId !== idTrabajador) return;
+  async function recargarAltas() {
     try {
-      setAltas(await listarAltas(workerId));
+      setAltas(await listarAltas());
     } catch (err) {
-      setError(`El trámite se guardó, pero no se pudieron releer las altas del trabajador: ${mensaje(err)}`);
+      setError(`El trámite se guardó, pero no se pudieron releer las altas: ${mensaje(err)}`);
     }
   }
 
   /**
-   * Confirma el modal «Tramitar en A3». Según la decisión de arriba:
+   * Confirma el modal. Según la decisión de arriba:
    *  - "crear":   una sola llamada, `resolverSolicitudAlta` con `crear_alta`, que
    *               es transaccional en la base (o se mueve el estado y nace el alta, o nada).
    *  - "ampliar": PRIMERO se estira el alta existente y solo después se mueve el
    *               estado. Si la ampliación falla se para aquí: dejar la solicitud
    *               como «Tramitada» sobre un alta que sigue acabando antes sería la
    *               misma mentira que este módulo existe para evitar.
-   *  - "ninguno": solo número de A3 y estado, que es lo que había antes.
+   *  - "ninguno": solo número de A3 y estado.
    */
   async function confirmarTramite() {
     if (!peticionTramite) return;
@@ -494,7 +726,8 @@ export function AltasClient() {
 
       const payload: PayloadResolverAlta = {
         solicitud_id: solicitud.id,
-        estado: destino,
+        // Sin destino la solicitud no se mueve de sitio: el modal es para el ALTA.
+        estado: destino || null,
         a3_numero: numero,
         a3_empleado_codigo: empleado,
         version: solicitud.version
@@ -517,55 +750,22 @@ export function AltasClient() {
       }
       await resolverSolicitudAlta(payload);
 
+      const cambioEstado = destino ? ` y pasa a «${estadoSolicitudAltaLabels[destino]}»` : "";
       setAviso(
         registrar
-          ? `${solicitud.codigo} pasa a «${estadoSolicitudAltaLabels[destino]}» y ${
+          ? `${solicitud.codigo}: ${
               modo === "ampliar" ? `el alta ${numeroAltaReferencia(solicitud)} queda ampliada` : `el alta ${numero} queda registrada`
-            } en MerchanOps.`
-          : `${solicitud.codigo} pasa a «${estadoSolicitudAltaLabels[destino]}». No se ha registrado ningún alta.`
+            } en MerchanOps${cambioEstado}.`
+          : `${solicitud.codigo}: número de A3 guardado${cambioEstado}. No se ha registrado ningún alta.`
       );
       await cargarCola();
-      await recargarAltasDe(solicitud.worker_id);
+      await recargarAltas();
     } catch (err) {
       setError(`No se pudo tramitar ${solicitud.codigo}: ${mensaje(err)}`);
       await cargarCola();
     } finally {
       setGuardandoId("");
     }
-  }
-
-  async function aplicarEstado(solicitud: SolicitudAlta, destino: EstadoSolicitudAlta, motivoEscrito?: string) {
-    setGuardandoId(solicitud.id);
-    setError("");
-    setAviso("");
-    try {
-      const payload: PayloadResolverAlta = {
-        solicitud_id: solicitud.id,
-        estado: destino,
-        motivo: motivoEscrito?.trim() || null,
-        version: solicitud.version
-      };
-      await resolverSolicitudAlta(payload);
-      setAviso(`${solicitud.codigo} pasa a «${estadoSolicitudAltaLabels[destino]}».`);
-      await cargarCola();
-    } catch (err) {
-      setError(`No se pudo cambiar el estado de ${solicitud.codigo}: ${mensaje(err)}`);
-      await cargarCola();
-    } finally {
-      setGuardandoId("");
-    }
-  }
-
-  async function confirmarMotivo() {
-    if (!peticionMotivo) return;
-    if (!motivo.trim()) {
-      setErrorMotivo("El motivo es obligatorio: queda escrito en la auditoría.");
-      return;
-    }
-    const { solicitud, destino } = peticionMotivo;
-    setPeticionMotivo(null);
-    await aplicarEstado(solicitud, destino, motivo);
-    setMotivo("");
   }
 
   if (!session?.active) return <Gate texto="Inicia sesión en MerchanOps para acceder a RR.HH." />;
@@ -578,18 +778,27 @@ export function AltasClient() {
   const tramite = peticionTramite;
   const registraAlta = Boolean(tramite && tramite.modo !== "ninguno" && tramite.registrar);
   const camposDeAltaNueva = registraAlta && tramite?.modo === "crear";
+  const destinosTramite = tramite ? ESTADOS_TRAMITE.filter(estado => puedeTransicionar(tramite.solicitud.estado, estado)) : [];
+
+  const todoVisibleMarcado = visibles.length > 0 && visibles.every(trabajo => claves.has(claveTrabajo(trabajo)));
+  const todaLaColaMarcada = cola.length > 0 && cola.every(solicitud => clavesCola.has(solicitud.id));
+  const trabajandoCola = Boolean(progresoCola);
 
   return (
     <main className="min-h-screen bg-slate-100 p-4 text-slate-900">
-      <section className="mx-auto max-w-7xl space-y-4">
+      {/* El hueco de abajo deja sitio al contador flotante: nunca tapa una fila. */}
+      <section className="mx-auto max-w-7xl space-y-4 pb-28">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h1 className="text-3xl font-bold">Altas laborales</h1>
             <p className="text-sm text-slate-500">Alta en A3 e imputaciones por CECO de los trabajos pendientes.</p>
           </div>
           <button
-            onClick={() => void cargarCola()}
-            disabled={cargandoCola}
+            onClick={() => {
+              void cargarCarga(false);
+              void cargarCola();
+            }}
+            disabled={cargandoCola || cargandoCarga}
             className="rounded-2xl border bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
           >
             <RefreshCw className="mr-1 inline h-4 w-4" />
@@ -600,16 +809,41 @@ export function AltasClient() {
         {aviso && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{aviso}</div>}
         {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
-        {/* ---------- Tarjeta de trabajo ---------- */}
+        {/* ---------- Tarjeta de trabajo: TODA la carga, agrupada por trabajador ---------- */}
         <div className="rounded-3xl border bg-white p-4 shadow-sm">
-          <label className="block max-w-md text-sm">
-            <span className="font-medium">Trabajador</span>
-            <select
-              value={workerId}
-              onChange={event => setWorkerId(event.target.value)}
-              className="mt-1 w-full rounded-2xl border bg-white px-3 py-2 text-sm"
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-xl font-semibold">
+              Trabajos pendientes de alta · {visibles.length}
+              {visibles.length !== pendientes.length ? ` de ${pendientes.length}` : ""} · {grupos.length}{" "}
+              {grupos.length === 1 ? "trabajador" : "trabajadores"}
+            </h2>
+            <button
+              onClick={() => alternarLote(visibles, !todoVisibleMarcado)}
+              disabled={!visibles.length}
+              className="rounded-2xl border bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
             >
-              <option value="">Selecciona un trabajador...</option>
+              {todoVisibleMarcado ? "Desmarcar todo lo visible" : "Marcar todo lo visible"}
+            </button>
+          </div>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-[1fr_240px_auto]">
+            <label className="flex items-center gap-2 rounded-2xl border bg-white px-3 py-2">
+              <Search className="h-4 w-4 shrink-0 text-slate-400" />
+              <input
+                value={busqueda}
+                onChange={event => setBusqueda(event.target.value)}
+                placeholder="Buscar por trabajador, campaña o CECO..."
+                aria-label="Buscar en los trabajos pendientes"
+                className="w-full bg-transparent text-sm outline-none"
+              />
+            </label>
+            <select
+              value={enfocado}
+              onChange={event => irATrabajador(event.target.value)}
+              aria-label="Ir al grupo de un trabajador"
+              className="w-full rounded-2xl border bg-white px-3 py-2 text-sm"
+            >
+              <option value="">Ir a un trabajador...</option>
               {trabajadores.map(fila => (
                 <option key={fila.id} value={fila.id}>
                   {fila.name?.trim() || fila.id}
@@ -617,66 +851,145 @@ export function AltasClient() {
                 </option>
               ))}
             </select>
-          </label>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <input
+                type="date"
+                value={desde}
+                onChange={event => setDesde(event.target.value)}
+                aria-label="Trabajos desde"
+                className="rounded-2xl border bg-white px-3 py-2 text-sm"
+              />
+              <span className="text-slate-400">→</span>
+              <input
+                type="date"
+                value={hasta}
+                onChange={event => setHasta(event.target.value)}
+                aria-label="Trabajos hasta"
+                className="rounded-2xl border bg-white px-3 py-2 text-sm"
+              />
+              {(desde || hasta) && (
+                <button
+                  onClick={() => {
+                    setDesde("");
+                    setHasta("");
+                  }}
+                  className="rounded-2xl border bg-white px-3 py-2 text-sm font-semibold"
+                >
+                  Quitar fechas
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            El selector de trabajador no filtra: despliega su grupo y lleva la pantalla hasta él, para que lo marcado en otros
+            trabajadores no desaparezca de la vista.
+          </p>
 
-          <h2 className="mt-4 text-lg font-semibold">Trabajos pendientes de alta</h2>
+          {cargandoCarga && <p className="mt-3 text-sm text-slate-500">Cargando los trabajos pendientes de todos los trabajadores...</p>}
 
-          {!workerId && (
-            <p className="mt-2 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
-              Elige un trabajador para ver sus trabajos pendientes de alta.
-            </p>
-          )}
-
-          {workerId && cargandoTrabajador && <p className="mt-2 text-sm text-slate-500">Cargando trabajos pendientes...</p>}
-
-          {workerId && !cargandoTrabajador && pendientes.length === 0 && (
-            <div className="mt-2 rounded-2xl bg-slate-50 p-4">
-              <p className="font-semibold">Este trabajador no tiene trabajos pendientes de alta.</p>
+          {!cargandoCarga && pendientes.length === 0 && (
+            <div className="mt-3 rounded-2xl bg-slate-50 p-4">
+              <p className="font-semibold">No hay ningún trabajo pendiente de alta.</p>
               <p className="text-sm text-slate-500">
-                Aquí aparecen las campañas y servicios que ya tiene asignados y todavía no están respaldados por un alta. Si esperabas
-                ver alguno, revisa la asignación en su campaña o servicio de origen.
+                Aquí aparecen las campañas y servicios ya asignados que todavía no están respaldados por un alta ni por una solicitud
+                viva. Si esperabas ver alguno, revisa la asignación en su campaña o servicio de origen.
               </p>
             </div>
           )}
 
-          {workerId && !cargandoTrabajador && pendientes.length > 0 && (
-            <div className="mt-2 space-y-2">
-              {pendientes.map(trabajo => {
-                const clave = claveTrabajo(trabajo);
-                const marcado = seleccion.includes(clave);
+          {!cargandoCarga && pendientes.length > 0 && grupos.length === 0 && (
+            <div className="mt-3 rounded-2xl bg-slate-50 p-4">
+              <p className="font-semibold">Ningún trabajo encaja con estos filtros.</p>
+              <p className="text-sm text-slate-500">Prueba a vaciar el buscador o el rango de fechas.</p>
+            </div>
+          )}
+
+          {!cargandoCarga && grupos.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {grupos.map(grupo => {
+                const abierto = abiertos.includes(grupo.workerId);
+                const marcadosGrupo = grupo.trabajos.filter(trabajo => claves.has(claveTrabajo(trabajo))).length;
+                const todoElGrupo = marcadosGrupo === grupo.trabajos.length;
                 return (
-                  <label
-                    key={clave}
-                    className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 ${marcado ? "bg-slate-50" : "bg-white"}`}
+                  <div
+                    key={grupo.workerId}
+                    ref={nodo => {
+                      nodosGrupo.current[grupo.workerId] = nodo;
+                    }}
+                    className="rounded-2xl border"
                   >
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      checked={marcado}
-                      onChange={() => alternar(trabajo)}
-                      aria-label={`Seleccionar ${trabajo.campana || "trabajo"}`}
-                    />
-                    <span className="min-w-0">
-                      <span className="block font-semibold">{trabajo.campana || "Trabajo sin campaña"}</span>
-                      <span className="block text-sm text-slate-500">{lineaGris(trabajo)}</span>
-                    </span>
-                  </label>
+                    <div className={`flex items-center gap-3 rounded-2xl p-3 ${marcadosGrupo ? "bg-slate-50" : "bg-white"}`}>
+                      <Casilla
+                        marcada={todoElGrupo && marcadosGrupo > 0}
+                        parcial={marcadosGrupo > 0 && !todoElGrupo}
+                        onChange={() => alternarLote(grupo.trabajos, !todoElGrupo)}
+                        etiqueta={`Marcar los ${grupo.trabajos.length} trabajos de ${grupo.nombre}`}
+                      />
+                      <button
+                        onClick={() => abrirGrupo(grupo.workerId, !abierto)}
+                        aria-expanded={abierto}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                      >
+                        {abierto ? (
+                          <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+                        )}
+                        <span className="min-w-0">
+                          <span className="block truncate font-semibold">{grupo.nombre}</span>
+                          <span className="block text-sm text-slate-500">
+                            {grupo.trabajos.length} {grupo.trabajos.length === 1 ? "trabajo pendiente" : "trabajos pendientes"}
+                            {marcadosGrupo ? ` · ${marcadosGrupo} marcados` : ""}
+                          </span>
+                        </span>
+                      </button>
+                    </div>
+
+                    {abierto && (
+                      <div className="space-y-2 border-t p-3">
+                        {grupo.trabajos.map(trabajo => {
+                          const clave = claveTrabajo(trabajo);
+                          const marcado = claves.has(clave);
+                          return (
+                            <label
+                              key={clave}
+                              className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 ${marcado ? "bg-slate-50" : "bg-white"}`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="mt-1"
+                                checked={marcado}
+                                onChange={() => alternar(trabajo)}
+                                aria-label={`Seleccionar ${trabajo.campana || "trabajo"}`}
+                              />
+                              <span className="min-w-0">
+                                <span className="block font-semibold">{trabajo.campana || "Trabajo sin campaña"}</span>
+                                <span className="block text-sm text-slate-500">{lineaGris(trabajo)}</span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
           )}
 
-          {/* Barra de resultado: a la izquierda lo que CALCULA el sistema. */}
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-            <p className={`min-w-0 text-sm ${CLASE_TONO[resolucion.tono]}`}>{resolucion.texto}</p>
-            <button
-              onClick={() => void tramitar()}
-              disabled={!marcados.length || tramitando || !resolucion.resolucion}
-              className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              <Send className="mr-1 inline h-4 w-4" />
-              {tramitando ? "Tramitando..." : "Tramitar"}
-            </button>
+          {/* Lo que CALCULA el sistema, una línea por trabajador marcado. */}
+          <div className="mt-4 border-t pt-4">
+            {resoluciones.length === 0 ? (
+              <p className={`text-sm ${CLASE_TONO.vacio}`}>Marca trabajos para calcular las altas.</p>
+            ) : (
+              <ul className="space-y-1">
+                {resoluciones.map(({ grupo, resolucion }) => (
+                  <li key={grupo.workerId} className={`text-sm ${CLASE_TONO[resolucion.tono]}`}>
+                    <span className="font-semibold text-slate-700">{grupo.nombre}</span> · {resolucion.texto}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
 
@@ -722,22 +1035,63 @@ export function AltasClient() {
             </label>
           </div>
 
+          {/* Barra de acciones en bloque: solo cuando hay algo marcado. */}
+          {gestionaRrhh && marcadasCola.length > 0 && (
+            <div className="mt-3 rounded-2xl border bg-slate-50 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold">
+                  {marcadasCola.length} {marcadasCola.length === 1 ? "solicitud marcada" : "solicitudes marcadas"}
+                </span>
+                {ACCIONES_COLA.map(destino => (
+                  <button
+                    key={destino}
+                    onClick={() => pedirCambioEstado(marcadasCola, destino)}
+                    disabled={trabajandoCola}
+                    className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {destino === "rechazada" ? "Rechazar" : `Marcar como ${estadoSolicitudAltaLabels[destino]}`}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setSeleccionCola([])}
+                  disabled={trabajandoCola}
+                  className="rounded-2xl border bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                >
+                  Quitar marcas
+                </button>
+                {trabajandoCola && <span className="text-sm text-slate-500">Aplicando {progresoCola}</span>}
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                Marcar como tramitada mueve el estado y nada más. Mientras no se registre el alta real con «Registrar alta…», el sistema
+                seguirá proponiendo alta nueva para los próximos trabajos de ese trabajador.
+              </p>
+            </div>
+          )}
+
           {cargandoCola && <p className="mt-3 text-sm text-slate-500">Cargando cola de altas...</p>}
 
           {!cargandoCola && cola.length === 0 && (
             <div className="mt-3 rounded-2xl bg-slate-50 p-4">
               <p className="font-semibold">No hay solicitudes de alta con estos filtros.</p>
               <p className="text-sm text-slate-500">
-                Marca los trabajos pendientes de un trabajador y pulsa «Tramitar» para que aparezcan aquí.
+                Marca los trabajos pendientes de arriba y pulsa «Tramitar» para que aparezcan aquí.
               </p>
             </div>
           )}
 
           {!cargandoCola && cola.length > 0 && (
             <div className="mt-3 overflow-auto">
-              <table className="w-full min-w-[1100px] text-sm">
+              <table className="w-full min-w-[1200px] text-sm">
                 <thead>
                   <tr className="bg-slate-50">
+                    <th className="p-2 text-left">
+                      <input
+                        type="checkbox"
+                        checked={todaLaColaMarcada}
+                        onChange={() => alternarColaLote(cola, !todaLaColaMarcada)}
+                        aria-label="Marcar todas las solicitudes visibles"
+                      />
+                    </th>
                     <th className="p-2 text-left">Sol.</th>
                     <th className="p-2 text-left">Gestora</th>
                     <th className="bg-slate-100 p-2 text-left">A3</th>
@@ -747,6 +1101,7 @@ export function AltasClient() {
                     <th className="p-2 text-left">FI → FF</th>
                     <th className="p-2 text-left">Horas</th>
                     <th className="bg-slate-100 p-2 text-left">Estado</th>
+                    <th className="p-2 text-left">Alta real</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -757,6 +1112,15 @@ export function AltasClient() {
                     const guardando = guardandoId === solicitud.id;
                     return (
                       <tr key={solicitud.id} className="border-t align-top">
+                        <td className="p-2">
+                          <input
+                            type="checkbox"
+                            className="mt-2"
+                            checked={clavesCola.has(solicitud.id)}
+                            onChange={() => alternarCola(solicitud.id)}
+                            aria-label={`Marcar ${solicitud.codigo}`}
+                          />
+                        </td>
                         <td className="p-2">
                           <p className="font-mono font-semibold text-slate-700">{solicitud.codigo}</p>
                           <p className="text-xs text-slate-400">{formateaFechaCorta(solicitud.created_at)}</p>
@@ -787,16 +1151,14 @@ export function AltasClient() {
                         <td className="p-2 text-slate-500">
                           {formateaFechaCorta(solicitud.fecha_inicio) || "—"} → {formateaFechaCorta(solicitud.fecha_fin) || "—"}
                         </td>
-                        <td className="p-2 text-slate-500">
-                          {typeof solicitud.horas_dia === "number" ? `${numero(solicitud.horas_dia)} h` : "—"}
-                        </td>
+                        <td className="p-2 text-slate-500">{formateaHoras(solicitud.horas_dia) || "—"}</td>
                         {/* El desplegable conserva el color del badge: RR.HH. lee el estado de un vistazo. */}
                         <td className="bg-slate-50 p-2">
                           {gestionaRrhh && destinos.length > 0 ? (
                             <select
                               value={solicitud.estado}
-                              onChange={event => pedirCambioEstado(solicitud, event.target.value as EstadoSolicitudAlta)}
-                              disabled={guardando}
+                              onChange={event => pedirCambioEstado([solicitud], event.target.value as EstadoSolicitudAlta)}
+                              disabled={guardando || trabajandoCola}
                               aria-label={`Estado de ${solicitud.codigo}`}
                               className={`w-full min-w-[150px] rounded-2xl border px-3 py-2 text-sm font-semibold disabled:opacity-50 ${estadoSolicitudAltaClases[solicitud.estado]}`}
                             >
@@ -814,6 +1176,22 @@ export function AltasClient() {
                           )}
                           {solicitud.motivo && <p className="mt-1 text-xs text-slate-500">{solicitud.motivo}</p>}
                         </td>
+                        <td className="p-2">
+                          {gestionaRrhh ? (
+                            <button
+                              onClick={() => {
+                                setErrorTramite("");
+                                setPeticionTramite(borradorTramite(solicitud));
+                              }}
+                              disabled={guardando || trabajandoCola}
+                              className="rounded-2xl border bg-white px-3 py-2 text-xs font-semibold disabled:opacity-50"
+                            >
+                              Registrar alta…
+                            </button>
+                          ) : (
+                            <span className="text-xs text-slate-400">{solicitud.alta_id ? "Registrada" : "—"}</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -824,13 +1202,50 @@ export function AltasClient() {
         </div>
       </section>
 
+      {/* ---------- Contador flotante: siempre a la vista mientras haya marcas ---------- */}
+      {marcados.length > 0 && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center p-4">
+          <div className="pointer-events-auto flex flex-wrap items-center gap-3 rounded-2xl bg-slate-900 px-4 py-3 text-sm text-white shadow-lg">
+            <span className="font-semibold">
+              {marcados.length} {marcados.length === 1 ? "trabajo marcado" : "trabajos marcados"} · {gruposMarcados.length}{" "}
+              {gruposMarcados.length === 1 ? "trabajador" : "trabajadores"}
+            </span>
+            {marcadosOcultos > 0 && <span className="text-slate-300">{marcadosOcultos} fuera del filtro</span>}
+            <button
+              onClick={() => setSeleccion([])}
+              disabled={tramitando}
+              className="rounded-2xl border border-white/40 px-3 py-2 font-semibold disabled:opacity-50"
+            >
+              Quitar marcas
+            </button>
+            <button
+              onClick={() => void tramitarLote()}
+              disabled={tramitando}
+              className="rounded-2xl bg-white px-4 py-2 font-semibold text-slate-900 disabled:opacity-50"
+            >
+              <Send className="mr-1 inline h-4 w-4" />
+              {tramitando
+                ? `Tramitando ${progreso}`
+                : gruposMarcados.length === 1
+                  ? "Tramitar 1 solicitud"
+                  : `Tramitar ${gruposMarcados.length} solicitudes`}
+            </button>
+          </div>
+        </div>
+      )}
+
       {peticionMotivo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="w-full max-w-md rounded-3xl border bg-white p-4 shadow-sm">
             <h3 className="text-lg font-semibold">Motivo obligatorio</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Para pasar {peticionMotivo.solicitud.codigo} a «{estadoSolicitudAltaLabels[peticionMotivo.destino]}» hace falta una
-              explicación escrita: queda en la auditoría y no se puede deshacer.
+              Para pasar{" "}
+              {peticionMotivo.solicitudes.length === 1
+                ? peticionMotivo.solicitudes[0].codigo
+                : `${peticionMotivo.solicitudes.length} solicitudes`}{" "}
+              a «{estadoSolicitudAltaLabels[peticionMotivo.destino]}» hace falta una explicación escrita: queda en la auditoría y no se
+              puede deshacer.
+              {peticionMotivo.solicitudes.length > 1 && " El mismo motivo se guarda en todas."}
             </p>
             <textarea
               value={motivo}
@@ -866,11 +1281,11 @@ export function AltasClient() {
       {tramite && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-3xl border bg-white p-4 shadow-sm">
-            <h3 className="text-lg font-semibold">Tramitar en A3</h3>
+            <h3 className="text-lg font-semibold">Registrar el alta de A3</h3>
             <p className="mt-1 text-sm text-slate-500">
               {tramite.solicitud.codigo}
-              {tramite.solicitud.worker_nombre ? ` · ${tramite.solicitud.worker_nombre}` : ""} pasa a «
-              {estadoSolicitudAltaLabels[tramite.destino]}». Teclea el número que ha devuelto A3 y decide qué se guarda en MerchanOps.
+              {tramite.solicitud.worker_nombre ? ` · ${tramite.solicitud.worker_nombre}` : ""}. Este paso es opcional: sirve para que el
+              alta REAL quede en MerchanOps y las coberturas futuras se calculen contra ella.
             </p>
 
             {/* La decisión de arriba del todo: ¿aprende el sistema de este trámite? */}
@@ -914,6 +1329,23 @@ export function AltasClient() {
                   aria-label="Número de alta en A3"
                   className="mt-1 w-full rounded-2xl border px-3 py-2 text-sm font-semibold"
                 />
+              </label>
+
+              <label className="block text-sm">
+                <span className="font-medium">Estado al guardar</span>
+                <select
+                  value={tramite.destino}
+                  onChange={event => cambiaTramite({ destino: event.target.value as EstadoSolicitudAlta | "" })}
+                  aria-label="Estado de la solicitud al guardar"
+                  className="mt-1 w-full rounded-2xl border bg-white px-3 py-2 text-sm"
+                >
+                  <option value="">Dejarlo como está ({estadoSolicitudAltaLabels[tramite.solicitud.estado]})</option>
+                  {destinosTramite.map(estado => (
+                    <option key={estado} value={estado}>
+                      {estadoSolicitudAltaLabels[estado]}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label className="block text-sm">
@@ -1032,7 +1464,7 @@ export function AltasClient() {
                 onClick={() => void confirmarTramite()}
                 className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
               >
-                Guardar y tramitar
+                Guardar
               </button>
             </div>
           </div>
@@ -1055,20 +1487,63 @@ function Gate({ texto }: { texto: string }) {
   );
 }
 
-/** Identidad de un trabajo pendiente: el par polimórfico origen_tipo + origen_id. */
+/**
+ * Casilla de grupo con estado intermedio. `indeterminate` no es un atributo de
+ * HTML sino una propiedad del nodo, así que hay que ponerla a mano: sin ella,
+ * un grupo a medio marcar se vería igual que uno vacío.
+ */
+function Casilla({
+  marcada,
+  parcial,
+  onChange,
+  etiqueta
+}: {
+  marcada: boolean;
+  parcial: boolean;
+  onChange: () => void;
+  etiqueta: string;
+}) {
+  const nodo = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (nodo.current) nodo.current.indeterminate = parcial;
+  }, [parcial]);
+  return <input ref={nodo} type="checkbox" checked={marcada} onChange={onChange} aria-label={etiqueta} />;
+}
+
+/**
+ * Agrupa los trabajos por trabajador. El orden es por CARGA descendente —quien
+ * más trabajos acumula sale arriba, que es por donde se empieza a despachar— y a
+ * igualdad, alfabético. Como el primer grupo es el único que arranca desplegado,
+ * lo que se ve al abrir la pantalla es justo el montón más grande.
+ */
+function agrupaPorTrabajador(trabajos: TrabajoPendiente[], trabajadores: FilaTrabajador[]): GrupoTrabajador[] {
+  const nombres = new Map(trabajadores.map(fila => [fila.id, fila.name?.trim() || fila.id]));
+  const grupos = new Map<string, GrupoTrabajador>();
+  for (const trabajo of trabajos) {
+    const workerId = String(trabajo.worker_id ?? "");
+    if (!workerId) continue;
+    const grupo = grupos.get(workerId);
+    if (grupo) grupo.trabajos.push(trabajo);
+    // Un trabajo asignado a alguien que ya no está en `workers` no se esconde: se
+    // enseña con su id, porque el trabajo existe y alguien tendrá que resolverlo.
+    else grupos.set(workerId, { workerId, nombre: nombres.get(workerId) ?? workerId, trabajos: [trabajo] });
+  }
+  return Array.from(grupos.values()).sort((a, b) => {
+    if (a.trabajos.length !== b.trabajos.length) return b.trabajos.length - a.trabajos.length;
+    return a.nombre.localeCompare(b.nombre, "es");
+  });
+}
+
+/** Identidad de un trabajo pendiente: trabajador + el par polimórfico origen_tipo/origen_id. */
 function claveTrabajo(trabajo: TrabajoPendiente) {
-  return `${trabajo.origen_tipo}:${trabajo.origen_id}`;
+  return `${trabajo.worker_id}:${trabajo.origen_tipo}:${trabajo.origen_id}`;
 }
 
 /** «3136 · 28/07 → 29/07 · 3 h/día», saltando lo que no haya. */
 function lineaGris(trabajo: TrabajoPendiente) {
   const inicio = formateaFechaCorta(trabajo.fecha_inicio);
   const fin = formateaFechaCorta(trabajo.fecha_fin);
-  return [
-    String(trabajo.ceco ?? "").trim(),
-    inicio && fin ? `${inicio} → ${fin}` : inicio || fin,
-    trabajo.horas_dia === null || trabajo.horas_dia === undefined ? "" : `${numero(trabajo.horas_dia)} h/día`
-  ]
+  return [String(trabajo.ceco ?? "").trim(), inicio && fin ? `${inicio} → ${fin}` : inicio || fin, formateaHoras(trabajo.horas_dia)]
     .filter(Boolean)
     .join(" · ");
 }
@@ -1079,7 +1554,9 @@ function lineaGris(trabajo: TrabajoPendiente) {
  * queda corta respecto a ninguno de los trabajos que ampara.
  */
 function horasDeLaSeleccion(trabajos: TrabajoPendiente[]): number | null {
-  const horas = trabajos.map(trabajo => trabajo.horas_dia).filter((valor): valor is number => typeof valor === "number" && Number.isFinite(valor));
+  const horas = trabajos
+    .map(trabajo => trabajo.horas_dia)
+    .filter((valor): valor is number => typeof valor === "number" && Number.isFinite(valor));
   if (!horas.length) return null;
   return Math.max(...horas);
 }
@@ -1090,10 +1567,6 @@ function resumenLineas(lineas: LineaSolicitudAlta[] | undefined, campo: "ceco" |
   if (!valores.length) return { texto: "—", titulo: "" };
   const extra = valores.length - 1;
   return { texto: extra > 0 ? `${valores[0]} +${extra}` : valores[0], titulo: valores.join(" · ") };
-}
-
-function numero(valor: number) {
-  return new Intl.NumberFormat("es-ES", { maximumFractionDigits: 2 }).format(valor);
 }
 
 /** El CECO con el que se prerrellena el modal: el de la primera línea que traiga uno. */

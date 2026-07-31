@@ -29,9 +29,15 @@
  *    con el id del worker en crudo, sin castear.
  *  - Las fechas viajan como texto ISO `YYYY-MM-DD` de punta a punta. Ningún
  *    `new Date()` intermedio, y por tanto ningún desfase de zona horaria.
+ *  - Este fichero mira la sesión (`canManageRrhh`) en UN sitio y para UNA cosa:
+ *    elegir por dónde pregunta qué trabajos están ya solicitados. No es un
+ *    control de acceso —eso es la RLS— sino evitar leer una respuesta que la
+ *    RLS recortaría en silencio. Está explicado en `veTodasLasSolicitudes()`.
  */
 
+import { canManageRrhh, getCurrentAppSession } from "@/lib/access-control";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { horasDiaDerivadas } from "@/lib/rrhh/altas";
 import {
   AltaLaboral,
   Cadena,
@@ -345,62 +351,157 @@ export async function registrarAlta(payload: PayloadRegistrarAlta): Promise<{ al
 // TRABAJOS PENDIENTES DE ALTA
 // ===========================================================================
 
+/** Estados de solicitud que ya NO tapan un trabajo: murió la solicitud, vuelve el trabajo. */
+const ESTADOS_SOLICITUD_MUERTA = ["rechazada", "cancelada"];
+
+type FilaPunto = {
+  id: string;
+  campana_id: string | null;
+  instalador_id: string | null;
+  nombre_comercial: string | null;
+  provincia: string | null;
+  fecha_visita: string | null;
+};
+
+type FilaServicio = {
+  id: string;
+  worker_id: string | null;
+  campaign: string | null;
+  ceco: string | null;
+  province: string | null;
+  start_date: string | null;
+  deadline: string | null;
+  estimated_hours: number | null;
+};
+
+type DatosCampana = { nombre: string; ceco: string | null; horas_dia: number | null; fecha_inicio: string; fecha_fin: string };
+
+/** Clave de un trabajo ya pedido, siempre con el trabajador delante (v10_6:664 pregunta por trabajador). */
+function claveOrigen(workerId: string, origenTipo: string, origenId: string): string {
+  return `${workerId}:${origenTipo}:${origenId}`;
+}
+
 /**
- * Los trabajos de un trabajador que todavía NO están respaldados por ninguna
- * línea de solicitud: es la lista que el gestor marca en «Altas laborales».
+ * ¿Puede esta sesión ver TODAS las solicitudes de alta, o solo las suyas?
+ *
+ * No es una comprobación de permiso —esa la hace la RLS, y esta capa no la
+ * sustituye— sino la elección de POR DÓNDE se pregunta qué está ya pedido, que
+ * es un problema de corrección, no de seguridad: la policy `rrhh_sol_alta_read`
+ * (v10_6:606) enseña todas las solicitudes a administración y a RR.HH., pero a
+ * la gestora solo las que pidió ella. Leer la tabla directamente siendo gestora
+ * NO da error: da MENOS filas, y esas filas de menos se traducen en volver a
+ * ofrecer —y a pedir— un trabajo que ya solicitó una compañera. Por eso el
+ * camino rápido (una consulta para los 26 trabajadores) se reserva a quien lo
+ * ve todo y la gestora sigue yendo por el RPC, que es SECURITY DEFINER y
+ * contesta por el trabajador entero.
+ */
+function veTodasLasSolicitudes(): boolean {
+  return canManageRrhh(getCurrentAppSession());
+}
+
+/**
+ * Los orígenes que ya tienen una solicitud VIVA, como claves
+ * `worker_id:origen_tipo:origen_id`. Dos caminos, y el rápido primero:
+ *
+ *  a) Una sola consulta a `rrhh_solicitud_alta_lineas` uniendo su cabecera
+ *     (`!inner`) para quedarse con las solicitudes vivas. Un viaje para todos
+ *     los trabajadores en lugar de uno por cabeza.
+ *  b) `merchan_rrhh_origenes_solicitados` por trabajador (en paralelo) cuando la
+ *     sesión no ve todas las solicitudes, o cuando la consulta (a) falla —por
+ *     RLS, por una relación que PostgREST no sepa resolver o por lo que sea—.
+ *     El RPC es SECURITY DEFINER y contesta bien siempre; solo cuesta N viajes.
+ */
+async function origenesYaSolicitados(db: ClienteSupabase, workerIds: string[]): Promise<Set<string>> {
+  const claves = new Set<string>();
+  if (!workerIds.length) return claves;
+
+  if (veTodasLasSolicitudes()) {
+    let falloDirecto: string | null = null;
+    for (const lote of lotes(workerIds)) {
+      const { data, error } = await db
+        .from("rrhh_solicitud_alta_lineas")
+        .select("origen_tipo,origen_id,rrhh_solicitudes_alta!inner(worker_id,estado)")
+        .in("rrhh_solicitudes_alta.worker_id", lote)
+        .not("rrhh_solicitudes_alta.estado", "in", `(${ESTADOS_SOLICITUD_MUERTA.join(",")})`);
+      if (error) {
+        falloDirecto = error.message;
+        break;
+      }
+      for (const fila of (data ?? []) as unknown as Array<Record<string, unknown>>) {
+        // PostgREST devuelve el recurso incrustado como objeto o como lista de uno
+        // según cómo resuelva la relación; se aceptan las dos formas.
+        const bruto = fila.rrhh_solicitudes_alta;
+        const cabeceras = (Array.isArray(bruto) ? bruto : [bruto]) as Array<{ worker_id?: unknown } | null | undefined>;
+        for (const cabecera of cabeceras) {
+          const worker = String(cabecera?.worker_id ?? "");
+          if (!worker) continue;
+          claves.add(claveOrigen(worker, String(fila.origen_tipo ?? ""), String(fila.origen_id ?? "")));
+        }
+      }
+    }
+    if (!falloDirecto) return claves;
+    claves.clear();
+    // No se traga el fallo: se intenta el camino bueno, y si ese también falla,
+    // el error que ve la pantalla es el suyo (que es el informativo de verdad).
+  }
+
+  const porTrabajador = await Promise.all(
+    workerIds.map(async workerId => {
+      const { data, error } = await db.rpc("merchan_rrhh_origenes_solicitados", { p_worker: workerId });
+      if (error) throw new Error(`No se pudieron leer las solicitudes de alta ya enviadas: ${error.message}`);
+      // Cada elemento llega como "origen_tipo:origen_id".
+      return { workerId, origenes: (Array.isArray(data) ? data : []).map(clave => String(clave)) };
+    })
+  );
+  for (const { workerId, origenes } of porTrabajador) {
+    for (const origen of origenes) claves.add(`${workerId}:${origen}`);
+  }
+  return claves;
+}
+
+/**
+ * El motor común de las dos funciones públicas de abajo. Con `workerId` acota
+ * las consultas a ese trabajador; sin él las trae para TODOS de una sola pasada.
  *
  * Se reúne de dos sitios (D1, enlace polimórfico, priorizando Grandes Campañas):
- *  a) `puntos_venta_campana.instalador_id = workerId` (columna TEXT desde v7_5),
- *     con su gran campaña para nombre, CECO y horas/día (columnas de v10_5). La
- *     fecha del punto es `fecha_visita` si la tiene; si no, el rango de la campaña.
- *  b) `services.worker_id = workerId` con estado distinto de "Pagado" (un
- *     servicio ya pagado es historia cerrada, no da trabajo pendiente).
+ *  a) `puntos_venta_campana` con instalador (columna TEXT desde v7_5), con su
+ *     gran campaña para nombre, CECO y horas/día (columnas de v10_5). La fecha
+ *     del punto es `fecha_visita` si la tiene; si no, el rango de la campaña.
+ *  b) `services` con trabajador y estado distinto de "Pagado" (un servicio ya
+ *     pagado es historia cerrada, no da trabajo pendiente).
  *
- * Después se descartan los orígenes que ya aparecen en
- * `rrhh_solicitud_alta_lineas`: lo ya pedido no se vuelve a ofrecer.
- * Ordenado por fecha de inicio ascendente, que es como se lee un calendario.
+ * Después se descartan los orígenes que ya tienen solicitud viva: lo ya pedido
+ * no se vuelve a ofrecer. Ordenado por fecha de inicio ascendente, que es como
+ * se lee un calendario.
  */
-export async function trabajosPendientesDeAlta(workerId: string): Promise<TrabajoPendiente[]> {
+async function reunirTrabajosPendientes(workerId?: string): Promise<TrabajoPendiente[]> {
   const db = lectura();
-  if (!db || !texto(workerId)) return [];
+  if (!db) return [];
+  const uno = texto(workerId);
+  if (workerId !== undefined && !uno) return [];
 
-  const [puntosRes, serviciosRes] = await Promise.all([
-    db
-      .from("puntos_venta_campana")
-      .select("id,campana_id,nombre_comercial,provincia,fecha_visita")
-      .eq("instalador_id", workerId),
-    db
-      .from("services")
-      .select("id,campaign,ceco,province,start_date,deadline,estimated_hours,status")
-      .eq("worker_id", workerId)
-      .neq("status", "Pagado")
-  ]);
-  if (puntosRes.error) throw new Error(`No se pudieron leer los puntos de campaña del trabajador: ${puntosRes.error.message}`);
-  if (serviciosRes.error) throw new Error(`No se pudieron leer los servicios del trabajador: ${serviciosRes.error.message}`);
+  let consultaPuntos = db.from("puntos_venta_campana").select("id,campana_id,instalador_id,nombre_comercial,provincia,fecha_visita");
+  consultaPuntos = uno ? consultaPuntos.eq("instalador_id", uno) : consultaPuntos.not("instalador_id", "is", null);
 
-  const puntos = (puntosRes.data ?? []) as Array<{
-    id: string;
-    campana_id: string | null;
-    nombre_comercial: string | null;
-    provincia: string | null;
-    fecha_visita: string | null;
-  }>;
-  const servicios = (serviciosRes.data ?? []) as Array<{
-    id: string;
-    campaign: string | null;
-    ceco: string | null;
-    province: string | null;
-    start_date: string | null;
-    deadline: string | null;
-    estimated_hours: number | null;
-  }>;
+  let consultaServicios = db
+    .from("services")
+    .select("id,worker_id,campaign,ceco,province,start_date,deadline,estimated_hours,status")
+    .neq("status", "Pagado");
+  consultaServicios = uno ? consultaServicios.eq("worker_id", uno) : consultaServicios.not("worker_id", "is", null);
+
+  const [puntosRes, serviciosRes] = await Promise.all([consultaPuntos, consultaServicios]);
+  if (puntosRes.error) throw new Error(`No se pudieron leer los puntos de campaña asignados: ${puntosRes.error.message}`);
+  if (serviciosRes.error) throw new Error(`No se pudieron leer los servicios asignados: ${serviciosRes.error.message}`);
+
+  const puntos = ((puntosRes.data ?? []) as unknown as FilaPunto[]).filter(punto => texto(punto.instalador_id));
+  const servicios = ((serviciosRes.data ?? []) as unknown as FilaServicio[]).filter(servicio => texto(servicio.worker_id));
 
   // La campaña aporta el CECO y las horas/día que hereda cada línea (D3).
   const campanaIds = Array.from(new Set(puntos.map(punto => punto.campana_id).filter(Boolean))) as string[];
-  const campanas = new Map<string, { nombre: string; ceco: string | null; horas_dia: number | null; fecha_inicio: string; fecha_fin: string }>();
+  const campanas = new Map<string, DatosCampana>();
   for (const lote of lotes(campanaIds)) {
     const { data, error } = await db.from("grandes_campanas").select("id,nombre,ceco,horas_dia,fecha_inicio,fecha_fin").in("id", lote);
-    if (error) throw new Error(`No se pudieron leer las campañas del trabajador: ${error.message}`);
+    if (error) throw new Error(`No se pudieron leer las campañas de los trabajos asignados: ${error.message}`);
     for (const fila of (data ?? []) as Array<Record<string, unknown>>) {
       campanas.set(String(fila.id), {
         nombre: String(fila.nombre ?? ""),
@@ -426,13 +527,15 @@ export async function trabajosPendientesDeAlta(workerId: string): Promise<Trabaj
     trabajos.push({
       origen_tipo: "campana_punto",
       origen_id: String(punto.id),
-      worker_id: workerId,
+      worker_id: String(punto.instalador_id ?? ""),
       // Nombre visible: campaña · punto. El gestor reconoce el trabajo por el
       // punto, no por la campaña, cuando lleva varios de la misma.
       campana: [nombreCampana, nombrePunto].filter(Boolean).join(" · ") || "Punto de campaña",
       ceco: campana?.ceco ?? "",
       fecha_inicio: inicio,
       fecha_fin: fin,
+      // La campaña sí trae las horas/día ya repartidas: es un dato de jornada,
+      // no un total, así que se hereda tal cual.
       horas_dia: campana?.horas_dia ?? null,
       provincia: punto.provincia ?? null
     });
@@ -444,34 +547,68 @@ export async function trabajosPendientesDeAlta(workerId: string): Promise<Trabaj
     trabajos.push({
       origen_tipo: "servicio",
       origen_id: String(servicio.id),
-      worker_id: workerId,
+      worker_id: String(servicio.worker_id ?? ""),
       campana: String(servicio.campaign ?? "") || "Servicio",
       ceco: servicio.ceco ?? "",
       fecha_inicio: inicio,
       fecha_fin: fin,
-      // `estimated_hours` son horas TOTALES del servicio, no horas/día: no se
-      // puede deducir el reparto por jornada, así que se deja en null y lo
-      // teclea quien tramita (D3: horas/día editables por línea).
-      horas_dia: null,
+      // `estimated_hours` son las horas TOTALES del servicio, y de ahí SÍ salen
+      // las horas/día: se reparten entre los días naturales del trabajo
+      // (horasDiaDerivadas). Antes se dejaba en null "porque son totales", y lo
+      // que provocaba era teclear a mano un número que el sistema ya sabía.
+      // Quien tramita lo sigue pudiendo corregir línea a línea (D3).
+      horas_dia: horasDiaDerivadas(servicio.estimated_hours, inicio, fin),
       provincia: servicio.province ?? null
     });
   }
 
   if (!trabajos.length) return [];
 
-  // Lo ya pedido no se vuelve a ofrecer. La lista la da un RPC (SECURITY
-  // DEFINER) y no una consulta directa a rrhh_solicitud_alta_lineas, porque leer
-  // la tabla daría una respuesta equivocada dos veces: la gestora solo ve SUS
-  // líneas (volvería a pedir lo que ya pidió una compañera) y las líneas de una
-  // solicitud rechazada o cancelada seguirían tapando el trabajo para siempre.
-  const { data: yaPedidosRaw, error: errorPedidos } = await db.rpc("merchan_rrhh_origenes_solicitados", { p_worker: workerId });
-  if (errorPedidos) throw new Error(`No se pudieron leer las solicitudes de alta ya enviadas: ${errorPedidos.message}`);
-  // Cada elemento llega como "origen_tipo:origen_id".
-  const yaPedidos = new Set<string>((Array.isArray(yaPedidosRaw) ? yaPedidosRaw : []).map(clave => String(clave)));
+  const workerIds = Array.from(new Set(trabajos.map(trabajo => trabajo.worker_id).filter(Boolean)));
+  const yaPedidos = await origenesYaSolicitados(db, workerIds);
 
   return trabajos
-    .filter(trabajo => !yaPedidos.has(`${trabajo.origen_tipo}:${trabajo.origen_id}`))
+    .filter(trabajo => !yaPedidos.has(claveOrigen(trabajo.worker_id, trabajo.origen_tipo, trabajo.origen_id)))
     .sort((a, b) => (a.fecha_inicio < b.fecha_inicio ? -1 : a.fecha_inicio > b.fecha_inicio ? 1 : a.campana.localeCompare(b.campana, "es")));
+}
+
+/**
+ * Los trabajos de UN trabajador que todavía no están respaldados por ninguna
+ * solicitud viva. Se conserva porque hay pantallas que trabajan sobre un solo
+ * trabajador; acota las consultas por trabajador en lugar de traerlo todo y
+ * filtrar, que para un solo nombre es tirar red a la basura.
+ */
+export async function trabajosPendientesDeAlta(workerId: string): Promise<TrabajoPendiente[]> {
+  return reunirTrabajosPendientes(workerId);
+}
+
+/**
+ * Lo mismo, pero de TODOS los trabajadores en una sola pasada.
+ *
+ * Es la consulta que hace posible tramitar en bloque. La versión por trabajador
+ * costaba 3-4 viajes CADA UNO: con 26 trabajadores eso es un centenar de idas y
+ * venidas para pintar una pantalla, y por eso gestionar 173 trabajos salía más
+ * caro que una hoja de cálculo. Aquí son dos consultas (servicios y puntos), una
+ * por lote de campañas y una —o N, si la sesión no ve todas las solicitudes—
+ * para descontar lo ya pedido.
+ */
+export async function trabajosPendientesDeTodos(): Promise<TrabajoPendiente[]> {
+  return reunirTrabajosPendientes();
+}
+
+/**
+ * Cuántos trabajos pendientes lleva cada trabajador, para pintar el reparto de
+ * carga sin volver a preguntar a la base (Sara María 26, María Loya 18…). Es una
+ * función pura sobre lo que ya está en memoria: se cuenta lo que se ve.
+ */
+export function contarTrabajosPendientes(trabajos: TrabajoPendiente[]): Map<string, number> {
+  const cuenta = new Map<string, number>();
+  for (const trabajo of Array.isArray(trabajos) ? trabajos : []) {
+    const worker = String(trabajo?.worker_id ?? "");
+    if (!worker) continue;
+    cuenta.set(worker, (cuenta.get(worker) ?? 0) + 1);
+  }
+  return cuenta;
 }
 
 // ===========================================================================

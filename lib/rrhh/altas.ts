@@ -149,6 +149,58 @@ export function diasEntreFechas(a: unknown, b: unknown): number {
   return Math.round((Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / MILISEGUNDOS_POR_DIA);
 }
 
+/** La media hora es la unidad mínima con la que se habla de una jornada. */
+const MEDIA_HORA = 0.5;
+
+/**
+ * Horas por DÍA a partir de las horas TOTALES del trabajo.
+ *
+ * `services.estimated_hours` son las horas de TODO el servicio, no las de un día.
+ * Durante un tiempo esta columna se dejó en blanco por eso, y el resultado fue que
+ * la pantalla obligaba a teclear las horas de cada fila a mano —173 veces— cuando
+ * el dato estaba delante: un servicio de 6 h del 28/07 al 29/07 son 3 h/día. El
+ * reparto es entre los días NATURALES del trabajo, los dos extremos incluidos,
+ * porque es el mismo calendario con el que se cuenta el alta (un alta del 28 al 29
+ * cubre dos días, no uno).
+ *
+ * Se redondea a medias horas porque así se habla de las jornadas: nadie dice
+ * «3,33 h/día». Si el reparto exacto se queda por debajo de la media hora NO se
+ * devuelve 0 —un trabajo con horas no tiene jornadas de cero— sino la media hora,
+ * que es el mínimo que este módulo sabe nombrar.
+ *
+ * Devuelve null cuando no hay horas utilizables (null, 0, negativo o ilegible) o
+ * cuando alguna de las dos fechas no es legible: sin calendario no hay reparto.
+ * Un fin anterior al inicio es un dato incoherente y se trata como UN día, igual
+ * que hace `rangoDeTrabajos`, en vez de devolver un número imposible.
+ */
+export function horasDiaDerivadas(horasTotales: number | null | undefined, fechaInicio: string, fechaFin: string): number | null {
+  if (horasTotales === null || horasTotales === undefined) return null;
+  const total = Number(horasTotales);
+  if (!Number.isFinite(total) || total <= 0) return null;
+
+  const inicio = normalizaFecha(fechaInicio);
+  const fin = normalizaFecha(fechaFin);
+  if (!inicio || !fin) return null;
+
+  // `diasEntreFechas` cuenta saltos; el trabajo ocupa un día más que los saltos.
+  const dias = Math.max(1, diasEntreFechas(inicio, fin) + 1);
+  const enMediasHoras = Math.round((total / dias) * 2) / 2;
+  return enMediasHoras > 0 ? enMediasHoras : MEDIA_HORA;
+}
+
+/**
+ * «3 h/día», «4,5 h/día», "" si no hay horas. Coma decimal porque el módulo está
+ * en castellano y el número lo lee una persona, no una máquina.
+ */
+export function formateaHoras(horas: number | null): string {
+  if (horas === null || horas === undefined) return "";
+  const valor = Number(horas);
+  if (!Number.isFinite(valor) || valor <= 0) return "";
+  // Dos decimales son de sobra para medias horas, y así un 3 no sale como «3,00».
+  const redondeado = Math.round(valor * 100) / 100;
+  return `${String(redondeado).replace(".", ",")} h/día`;
+}
+
 /**
  * Rango que abarcan los trabajos marcados: min(fecha_inicio) → max(fecha_fin).
  * Las fechas ilegibles se ignoran campo a campo. Si no queda ningún inicio o
