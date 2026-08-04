@@ -44,7 +44,8 @@ type Props = {
   admin: boolean;
   cargando: boolean;
   saving: boolean;
-  onSolicitar: (borrador: BorradorRegularizacion) => Promise<void>;
+  /** Devuelve true si se registró. Con false el formulario NO se vacía. */
+  onSolicitar: (borrador: BorradorRegularizacion) => Promise<boolean>;
   onResolver: (fila: Regularizacion, estado: "aprobada" | "rechazada", opciones: { motivo?: string | null; refacturable?: boolean | null }) => Promise<void>;
 };
 
@@ -87,7 +88,11 @@ export function RegularizacionesPanel({ campanaId, regularizaciones, puntos, mes
     const motivo = validarRegularizacion(borrador, mesesCerrados);
     if (motivo) { setError(motivo); return; }
     setError("");
-    await onSolicitar(borrador);
+    // Solo se vacía y se cierra el formulario si la propuesta se registró: antes
+    // un fallo del RPC (mes cerrado, punto de otra gestora) borraba el importe,
+    // la fecha y la explicación que la persona acababa de escribir.
+    const ok = await onSolicitar(borrador);
+    if (!ok) return;
     setForm({ puntoId: "", conceptoTipo: "desplazamiento_extra", concepto: "", importe: "", fecha: hoyIso() });
     setAbierto(false);
   }
@@ -114,54 +119,6 @@ export function RegularizacionesPanel({ campanaId, regularizaciones, puntos, mes
     if (!motivo.trim()) { setError("Rechazar exige motivo."); return; }
     setError("");
     await onResolver(fila, "rechazada", { motivo: motivo.trim() });
-  }
-
-  function Fila({ fila }: { fila: Regularizacion }) {
-    return (
-      <tr>
-        <td>
-          <p className="font-semibold">{conceptoLabels[fila.concepto_tipo] || fila.concepto_tipo}</p>
-          <p className="text-xs" style={{ color: "var(--gc-muted)" }}>{fila.concepto}</p>
-          {fila.motivo_resolucion && (
-            <p className="mt-1 text-xs gc-alert-err">Motivo: {fila.motivo_resolucion}</p>
-          )}
-        </td>
-        <td>{fila.punto_nombre || <span style={{ color: "var(--gc-muted)" }}>Toda la campaña</span>}</td>
-        <td>{fila.trabajador_nombre || <span style={{ color: "var(--gc-muted)" }}>Sin trabajador</span>}</td>
-        <td>{formatDate(fila.fecha)}</td>
-        <td className="text-right font-semibold">{centimosAEuros(fila.importe_cents)}</td>
-        <td>
-          <span className={`gc-badge gc-badge-${fila.estado === "aprobada" ? "completado" : fila.estado === "rechazada" ? "cancelado" : "pendiente"}`}>
-            {estadoLabels[fila.estado]}
-          </span>
-          {fila.estado === "aprobada" && (
-            <p className="mt-1 text-xs" style={{ color: "var(--gc-muted)" }}>
-              {fila.refacturable ? "Se refactura al cliente" : "Lo asume la empresa"}
-            </p>
-          )}
-        </td>
-        <td className="text-xs" style={{ color: "var(--gc-muted)" }}>
-          {fila.solicitada_por_nombre || "—"}
-          {fila.resuelta_por_nombre && <><br />resuelta por {fila.resuelta_por_nombre}</>}
-        </td>
-        {admin && (
-          <td className="gc-no-print">
-            {fila.estado === "propuesta" ? (
-              <div className="flex gap-1">
-                <button className="gc-btn-outline" disabled={saving} onClick={() => aprobar(fila)} title="Crea la línea en Pagos">
-                  <Check className="h-4 w-4" /> Aprobar
-                </button>
-                <button className="gc-btn-outline gc-btn-danger" disabled={saving} onClick={() => rechazar(fila)}>
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            ) : (
-              <span style={{ color: "var(--gc-muted)" }}>—</span>
-            )}
-          </td>
-        )}
-      </tr>
-    );
   }
 
   if (cargando) return <div className="space-y-2"><div className="gc-skeleton h-24" /><div className="gc-skeleton h-40" /></div>;
@@ -267,13 +224,13 @@ export function RegularizacionesPanel({ campanaId, regularizaciones, puntos, mes
               <p className="mb-2 text-xs font-bold uppercase" style={{ color: "var(--gc-secondary)" }}>
                 Pendientes de aprobar ({pendientes.length})
               </p>
-              <Tabla filas={pendientes} admin={admin} Fila={Fila} />
+              <Tabla filas={pendientes} admin={admin} saving={saving} onAprobar={aprobar} onRechazar={rechazar} />
             </div>
           )}
           {resueltas.length > 0 && (
             <div>
               <p className="mb-2 text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>Resueltas</p>
-              <Tabla filas={resueltas} admin={admin} Fila={Fila} />
+              <Tabla filas={resueltas} admin={admin} saving={saving} onAprobar={aprobar} onRechazar={rechazar} />
             </div>
           )}
         </div>
@@ -282,7 +239,15 @@ export function RegularizacionesPanel({ campanaId, regularizaciones, puntos, mes
   );
 }
 
-function Tabla({ filas, admin, Fila }: { filas: Regularizacion[]; admin: boolean; Fila: (props: { fila: Regularizacion }) => JSX.Element }) {
+type TablaProps = {
+  filas: Regularizacion[];
+  admin: boolean;
+  saving: boolean;
+  onAprobar: (fila: Regularizacion) => void;
+  onRechazar: (fila: Regularizacion) => void;
+};
+
+function Tabla({ filas, admin, saving, onAprobar, onRechazar }: TablaProps) {
   return (
     <div className="gc-table-wrap">
       <table className="gc-table">
@@ -299,9 +264,72 @@ function Tabla({ filas, admin, Fila }: { filas: Regularizacion[]; admin: boolean
           </tr>
         </thead>
         <tbody>
-          {filas.map(fila => <Fila key={fila.id} fila={fila} />)}
+          {filas.map(fila => (
+            <Fila key={fila.id} fila={fila} admin={admin} saving={saving} onAprobar={onAprobar} onRechazar={onRechazar} />
+          ))}
         </tbody>
       </table>
     </div>
   );
 }
+
+/**
+ * Fuera del componente a propósito: declarada dentro, React la trataba como un
+ * tipo nuevo en cada render y desmontaba y remontaba TODAS las filas (garantizado
+ * cada 30 s por el refresco de la campaña).
+ */
+type FilaProps = {
+  fila: Regularizacion;
+  admin: boolean;
+  saving: boolean;
+  onAprobar: (fila: Regularizacion) => void;
+  onRechazar: (fila: Regularizacion) => void;
+};
+
+function Fila({ fila, admin, saving, onAprobar, onRechazar }: FilaProps) {
+    return (
+      <tr>
+        <td>
+          <p className="font-semibold">{conceptoLabels[fila.concepto_tipo] || fila.concepto_tipo}</p>
+          <p className="text-xs" style={{ color: "var(--gc-muted)" }}>{fila.concepto}</p>
+          {fila.motivo_resolucion && (
+            <p className="mt-1 text-xs gc-alert-err">Motivo: {fila.motivo_resolucion}</p>
+          )}
+        </td>
+        <td>{fila.punto_nombre || <span style={{ color: "var(--gc-muted)" }}>Toda la campaña</span>}</td>
+        <td>{fila.trabajador_nombre || <span style={{ color: "var(--gc-muted)" }}>Sin trabajador</span>}</td>
+        <td>{formatDate(fila.fecha)}</td>
+        <td className="text-right font-semibold">{centimosAEuros(fila.importe_cents)}</td>
+        <td>
+          <span className={`gc-badge gc-badge-${fila.estado === "aprobada" ? "completado" : fila.estado === "rechazada" ? "cancelado" : "pendiente"}`}>
+            {estadoLabels[fila.estado]}
+          </span>
+          {fila.estado === "aprobada" && (
+            <p className="mt-1 text-xs" style={{ color: "var(--gc-muted)" }}>
+              {fila.refacturable ? "Se refactura al cliente" : "Lo asume la empresa"}
+            </p>
+          )}
+        </td>
+        <td className="text-xs" style={{ color: "var(--gc-muted)" }}>
+          {fila.solicitada_por_nombre || "—"}
+          {fila.resuelta_por_nombre && <><br />resuelta por {fila.resuelta_por_nombre}</>}
+        </td>
+        {admin && (
+          <td className="gc-no-print">
+            {fila.estado === "propuesta" ? (
+              <div className="flex gap-1">
+                <button className="gc-btn-outline" disabled={saving} onClick={() => onAprobar(fila)} title="Crea la línea en Pagos">
+                  <Check className="h-4 w-4" /> Aprobar
+                </button>
+                <button className="gc-btn-outline gc-btn-danger" disabled={saving} onClick={() => onRechazar(fila)}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <span style={{ color: "var(--gc-muted)" }}>—</span>
+            )}
+          </td>
+        )}
+      </tr>
+    );
+  }

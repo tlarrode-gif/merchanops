@@ -116,6 +116,9 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   const [regularizaciones, setRegularizaciones] = useState<Regularizacion[]>([]);
   const [mesesCerrados, setMesesCerrados] = useState<string[]>([]);
   const [cargandoRegularizaciones, setCargandoRegularizaciones] = useState(false);
+  // Error de las pestañas nuevas, separado de `error`: el refresco de 30 s limpia
+  // `error` y se llevaba por delante el motivo de un fallo de carga o de acción.
+  const [errorPestana, setErrorPestana] = useState("");
   const admin = isAdminSession(session);
   const regularizacionesPendientes = regularizaciones.filter(fila => fila.estado === "propuesta").length;
 
@@ -213,7 +216,9 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
         sinGestor ? `sin gestor en ${sinGestor.split(",").join(", ")}` : ""
       ].filter(Boolean).join(" · ") + ".");
     }
-    const timer = setInterval(() => refresh(true), 30000);
+    // Las regularizaciones entran en el tic: si no, la insignia de «pendientes»
+    // nunca aparece para quien deja la campaña abierta toda la mañana.
+    const timer = setInterval(() => { refresh(true); cargarRegularizaciones(true); }, 30000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
@@ -258,9 +263,21 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     if (cargandoEventos || (eventosCargados && !forzar)) return;
     setCargandoEventos(true);
     const result = await fetchEventosCampana(params.id);
-    if (result.error) setError(`No se pudo cargar el historial: ${result.error}`);
-    setEventos(result.data);
-    setEventosCargados(true);
+    // Solo se marca como cargada si de verdad se cargó: si no, la pestaña se
+    // quedaba para siempre enseñando «no hay historial» sin forma de reintentar.
+    if (result.error) {
+      setErrorPestana(`No se pudo cargar el historial: ${result.error}`);
+    } else {
+      setErrorPestana("");
+      // La RLS de la bitácora filtra por provincia, pero la regla v10.2 de la
+      // aplicación es más estricta: un punto ya asignado solo lo ve su gestor.
+      // Se aplica el mismo filtro que a los puntos para no enseñar de refilón
+      // los movimientos de una compañera.
+      const visibles = new Set(puntos.map(punto => punto.id));
+      const sesion = getCurrentAppSession();
+      setEventos(isAdminSession(sesion) ? result.data : result.data.filter(evento => visibles.has(evento.punto_id)));
+      setEventosCargados(true);
+    }
     setCargandoEventos(false);
   }
 
@@ -269,19 +286,34 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     if (cargandoDocumentos || (documentosCargados && !forzar)) return;
     setCargandoDocumentos(true);
     const result = await fetchDocumentos(params.id, true);
-    if (result.error) setError(`No se pudieron cargar los documentos: ${result.error}`);
-    setDocumentos(result.data);
-    setDocumentosCargados(true);
+    if (result.error) {
+      setErrorPestana(`No se pudieron cargar los documentos: ${result.error}`);
+    } else {
+      setErrorPestana("");
+      setDocumentos(result.data);
+      setDocumentosCargados(true);
+    }
     setCargandoDocumentos(false);
   }
 
-  async function cargarRegularizaciones() {
-    setCargandoRegularizaciones(true);
+  /**
+   * `silencioso` = viene del refresco periódico: no toca el indicador de carga ni
+   * pisa un error de la pestaña, solo actualiza el contador de pendientes.
+   */
+  async function cargarRegularizaciones(silencioso = false) {
+    if (!silencioso) setCargandoRegularizaciones(true);
     const [filas, meses] = await Promise.all([fetchRegularizaciones(params.id), fetchMesesCerrados()]);
-    if (filas.error) setError(`No se pudieron cargar las regularizaciones: ${filas.error}`);
-    setRegularizaciones(filas.data);
-    setMesesCerrados(meses);
-    setCargandoRegularizaciones(false);
+    if (filas.error) {
+      if (!silencioso) setErrorPestana(`No se pudieron cargar las regularizaciones: ${filas.error}`);
+    } else {
+      setRegularizaciones(filas.data);
+    }
+    // Sin los meses cerrados el aviso previo desaparece: se dice, no se ignora.
+    if (meses.error && !silencioso) {
+      setErrorPestana(`No se pudo comprobar qué meses contables están cerrados (${meses.error}). Si el mes está cerrado, el aviso saldrá al enviar.`);
+    }
+    setMesesCerrados(meses.data);
+    if (!silencioso) setCargandoRegularizaciones(false);
   }
 
   function abrirTab(destino: TabKey) {
@@ -290,14 +322,19 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     if (destino === "documentos") cargarDocumentos();
   }
 
-  async function handleSolicitarRegularizacion(borrador: BorradorRegularizacion) {
+  /**
+   * Devuelve si la propuesta se registró. El panel lo necesita para NO vaciar el
+   * formulario cuando falla: antes se perdía todo lo tecleado.
+   */
+  async function handleSolicitarRegularizacion(borrador: BorradorRegularizacion): Promise<boolean> {
     setSaving(true);
-    setError("");
+    setErrorPestana("");
     const result = await solicitarRegularizacion(borrador, mesesCerrados);
-    if (result.error) setError(result.error);
+    if (result.error) setErrorPestana(result.error);
     else flash("Regularización registrada. Queda pendiente de que administración la apruebe.");
     await cargarRegularizaciones();
     setSaving(false);
+    return !result.error;
   }
 
   async function handleResolverRegularizacion(
@@ -306,9 +343,9 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     opciones: { motivo?: string | null; refacturable?: boolean | null }
   ) {
     setSaving(true);
-    setError("");
+    setErrorPestana("");
     const result = await resolverRegularizacion(fila.id, estado, opciones);
-    if (result.error) setError(result.error);
+    if (result.error) setErrorPestana(result.error);
     else if (estado === "aprobada") flash("Regularización aprobada: la línea ya está en Pagos.");
     else flash("Regularización rechazada. Quien la propuso verá el motivo.");
     await cargarRegularizaciones();
@@ -318,9 +355,9 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   async function handleSubirDocumento(
     archivo: File,
     opciones: { nombre: string; categoria: Documento["categoria"]; descripcion: string | null; puntoId: string | null; visibleInstalador: boolean; sustituyeA: string | null }
-  ) {
+  ): Promise<boolean> {
     setSaving(true);
-    setError("");
+    setErrorPestana("");
     const result = await subirDocumento({
       campanaId: params.id,
       puntoId: opciones.puntoId,
@@ -331,17 +368,18 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
       visibleInstalador: opciones.visibleInstalador,
       sustituyeA: opciones.sustituyeA
     });
-    if (result.error) setError(result.error);
+    if (result.error) setErrorPestana(result.error);
     else flash(opciones.sustituyeA ? "Versión nueva publicada. La anterior queda en el histórico." : "Documento subido.");
     await cargarDocumentos(true);
     setSaving(false);
+    return !result.error;
   }
 
   async function handleRetirarDocumento(documento: Documento) {
     if (!confirm(`¿Retirar «${documento.nombre}»?\n\nDeja de ofrecerse, pero su ficha se conserva en el histórico de la campaña.`)) return;
     setSaving(true);
     const result = await retirarDocumento(documento.id, session);
-    if (result.error) setError(result.error);
+    if (result.error) setErrorPestana(result.error);
     else flash("Documento retirado.");
     await cargarDocumentos(true);
     setSaving(false);
@@ -350,7 +388,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   async function handleVisibilidadDocumento(documento: Documento, visible: boolean) {
     setSaving(true);
     const result = await cambiarVisibilidadInstalador(documento.id, visible);
-    if (result.error) setError(result.error);
+    if (result.error) setErrorPestana(result.error);
     await cargarDocumentos(true);
     setSaving(false);
   }
@@ -629,7 +667,9 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   async function handleAddPunto() {
     if (!nuevoPunto.nombre_comercial.trim()) { setError("El punto necesita un nombre comercial."); return; }
     setSaving(true);
-    const result = await insertPuntosBatch(params.id, [{ ...nuevoPunto, nombre_comercial: nuevoPunto.nombre_comercial.trim() }]);
+    // "pantalla": este punto se teclea, no llega de un Excel. Sin decirlo, la
+    // bitácora lo registraba como «subiendo un archivo».
+    const result = await insertPuntosBatch(params.id, [{ ...nuevoPunto, nombre_comercial: nuevoPunto.nombre_comercial.trim() }], "pantalla");
     if (result.error) setError(result.error);
     else { flash("Punto añadido"); setNuevoPunto({ ...emptyNuevoPunto }); setNuevoAbierto(false); }
     await refresh(true);
@@ -683,6 +723,24 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
       <section className="mx-auto max-w-[1280px] space-y-4 p-4">
         {notice && <div className="gc-toast">{notice}</div>}
         {error && <div className="gc-toast gc-toast-error">{error}</div>}
+        {/* Error propio de Historial / Documentos / Regularizaciones: vive aparte
+            porque el refresco de 30 s limpia `error` y se lo llevaba por delante. */}
+        {errorPestana && (
+          <div className="gc-note gc-alert-err flex items-start justify-between gap-3 gc-no-print">
+            <span>{errorPestana}</span>
+            <button
+              className="gc-btn-outline shrink-0"
+              onClick={() => {
+                setErrorPestana("");
+                if (tab === "historial") cargarHistorial(true);
+                else if (tab === "documentos") cargarDocumentos(true);
+                else if (tab === "regularizaciones") cargarRegularizaciones();
+              }}
+            >
+              Reintentar
+            </button>
+          </div>
+        )}
 
         <div>
           <nav className="text-sm" style={{ color: "var(--gc-muted)" }}>

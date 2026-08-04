@@ -246,11 +246,19 @@ export async function fetchRegularizaciones(campanaId: string): Promise<Result<R
   return { data: (data || []) as Regularizacion[] };
 }
 
-/** Meses contables cerrados (v7.4). Se consultan para avisar antes de teclear. */
-export async function fetchMesesCerrados(): Promise<string[]> {
-  if (!supabase) return [];
-  const { data } = await supabase.from("economic_month_closures").select("mes_contable");
-  return ((data || []) as Array<{ mes_contable: string }>).map(fila => fila.mes_contable);
+/**
+ * Meses contables cerrados (v7.4). Se consultan para avisar ANTES de teclear.
+ *
+ * Devuelve el error en vez de tragárselo: `economic_month_closures` solo la lee
+ * quien tiene el permiso 'pagos', y sin distinguir «no hay meses cerrados» de «no
+ * he podido leerlos» la pantalla dejaba escribir toda la regularización para que
+ * el RPC la rechazara al final.
+ */
+export async function fetchMesesCerrados(): Promise<Result<string[]>> {
+  if (!supabase) return { data: [], error: "Supabase no está configurado." };
+  const { data, error } = await supabase.from("economic_month_closures").select("mes_contable");
+  if (error) return { data: [], error: error.message };
+  return { data: ((data || []) as Array<{ mes_contable: string }>).map(fila => fila.mes_contable) };
 }
 
 export async function solicitarRegularizacion(borrador: BorradorRegularizacion, mesesCerrados: string[] = []): Promise<Result<Regularizacion | null>> {
@@ -273,23 +281,41 @@ export async function solicitarRegularizacion(borrador: BorradorRegularizacion, 
   return { data: data as Regularizacion };
 }
 
+/**
+ * Motivo por el que una resolución no se puede enviar, o null si se puede.
+ * Función pura y exportada para poder probarla: es la que impide que una
+ * decisión de dinero se tome por descuido.
+ */
+export function validarResolucion(
+  estado: "aprobada" | "rechazada",
+  opciones: { motivo?: string | null; refacturable?: boolean | null }
+): string | null {
+  if (estado === "rechazada" && !String(opciones.motivo || "").trim()) {
+    return "Rechazar una regularización exige motivo: lo va a leer quien la propuso.";
+  }
+  // typeof y no `=== null`: con `undefined`, un Boolean() convertiría un
+  // «no lo he decidido» en «no se refactura», que es una decisión de dinero
+  // tomada por una coerción en vez de por administración.
+  if (estado === "aprobada" && typeof opciones.refacturable !== "boolean") {
+    return "Di si es refacturable al cliente o lo asume la empresa antes de aprobar.";
+  }
+  return null;
+}
+
 export async function resolverRegularizacion(
   id: string,
   estado: "aprobada" | "rechazada",
   opciones: { motivo?: string | null; refacturable?: boolean | null }
 ): Promise<Result<Regularizacion | null>> {
+  const motivo = validarResolucion(estado, opciones);
+  if (motivo) return { data: null, error: motivo };
   if (!supabase) return { data: null, error: "Supabase no está configurado." };
-  if (estado === "rechazada" && !String(opciones.motivo || "").trim()) {
-    return { data: null, error: "Rechazar una regularización exige motivo: lo va a leer quien la propuso." };
-  }
-  if (estado === "aprobada" && opciones.refacturable === null) {
-    return { data: null, error: "Di si es refacturable al cliente o lo asume la empresa antes de aprobar." };
-  }
   const { data, error } = await supabase.rpc("merchan_gc_regularizacion_resolver", {
     p_id: id,
     p_estado: estado,
     p_motivo: opciones.motivo?.trim() || null,
-    p_refacturable: estado === "aprobada" ? Boolean(opciones.refacturable) : null
+    // Sin Boolean(): si faltara, llega null y la excepción del RPC hace de red.
+    p_refacturable: estado === "aprobada" ? opciones.refacturable ?? null : null
   });
   if (error) return { data: null, error: error.message };
   return { data: data as Regularizacion };

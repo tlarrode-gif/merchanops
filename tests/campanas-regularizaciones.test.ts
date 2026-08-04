@@ -6,6 +6,7 @@ import {
   centimosAEuros,
   eurosACentimos,
   mesContableDe,
+  validarResolucion,
   resumirRegularizaciones,
   validarRegularizacion
 } from "@/lib/campana-regularizaciones";
@@ -69,6 +70,26 @@ describe("eurosACentimos", () => {
   it("acepta también un número ya numérico", () => {
     expect(eurosACentimos(30)).toBe(3000);
     expect(eurosACentimos(Number.NaN)).toBeNull();
+  });
+});
+
+describe("validarResolucion", () => {
+  // Regresión: el guard comparaba con `null` y luego se hacía Boolean(), así que
+  // un `undefined` se convertía en «no se refactura» — una decisión de dinero
+  // tomada por una coerción en vez de por administración.
+  it("rechaza aprobar sin decir si es refacturable, también con undefined", () => {
+    expect(validarResolucion("aprobada", {})).toContain("refacturable");
+    expect(validarResolucion("aprobada", { refacturable: null })).toContain("refacturable");
+  });
+
+  it("deja aprobar con las dos respuestas explícitas", () => {
+    expect(validarResolucion("aprobada", { refacturable: true })).toBeNull();
+    expect(validarResolucion("aprobada", { refacturable: false })).toBeNull();
+  });
+
+  it("rechazar exige motivo escrito", () => {
+    expect(validarResolucion("rechazada", { motivo: "   " })).toContain("motivo");
+    expect(validarResolucion("rechazada", { motivo: "Duplicada" })).toBeNull();
   });
 });
 

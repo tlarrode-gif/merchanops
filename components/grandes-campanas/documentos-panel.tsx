@@ -46,7 +46,8 @@ type Props = {
   session: AppSession | null;
   cargando: boolean;
   saving: boolean;
-  onSubir: (archivo: File, opciones: { nombre: string; categoria: CategoriaDocumento; descripcion: string | null; puntoId: string | null; visibleInstalador: boolean; sustituyeA: string | null }) => Promise<void>;
+  /** Devuelve true si se publicó. Con false NO se pierde el modo «versión nueva». */
+  onSubir: (archivo: File, opciones: { nombre: string; categoria: CategoriaDocumento; descripcion: string | null; puntoId: string | null; visibleInstalador: boolean; sustituyeA: string | null }) => Promise<boolean>;
   onRetirar: (documento: Documento) => Promise<void>;
   onVisibilidad: (documento: Documento, visible: boolean) => Promise<void>;
 };
@@ -70,11 +71,14 @@ export function DocumentosPanel({ documentos, puntos, session, cargando, saving,
   const nombrePunto = useMemo(() => new Map(puntos.map(punto => [punto.id, punto.nombre_comercial])), [puntos]);
 
   async function elegirArchivo(archivo: File | null | undefined) {
+    // El input se vacía SIEMPRE, incluso al rechazar: si no, volver a elegir el
+    // mismo fichero (ya corregido) no dispara `change` y parece que no pasa nada.
+    const limpiarInput = () => { if (inputRef.current) inputRef.current.value = ""; };
     if (!archivo) return;
     const motivo = validarArchivo(archivo);
-    if (motivo) { setErrorArchivo(motivo); return; }
+    if (motivo) { setErrorArchivo(motivo); limpiarInput(); return; }
     setErrorArchivo("");
-    await onSubir(archivo, {
+    const ok = await onSubir(archivo, {
       nombre: form.nombre.trim() || archivo.name,
       categoria: sustituyeA ? (sustituyeA.categoria as CategoriaDocumento) : form.categoria,
       descripcion: form.descripcion.trim() || null,
@@ -82,88 +86,23 @@ export function DocumentosPanel({ documentos, puntos, session, cargando, saving,
       visibleInstalador: sustituyeA ? sustituyeA.visible_instalador : form.visibleInstalador,
       sustituyeA: sustituyeA?.id || null
     });
+    limpiarInput();
+    // Si falla, se CONSERVA `sustituyeA`: perderlo convertía el reintento en un
+    // documento nuevo y dejaba dos planogramas vigentes.
+    if (!ok) return;
     setForm({ ...emptyForm });
     setSustituyeA(null);
-    if (inputRef.current) inputRef.current.value = "";
+  }
+
+  function pedirVersionNueva(documento: Documento) {
+    setSustituyeA(documento);
+    inputRef.current?.click();
   }
 
   async function descargar(documento: Documento) {
     const result = await urlDescarga(documento.storage_path);
     if (result.error || !result.data) { setErrorArchivo(`No se pudo abrir el archivo: ${result.error || "sin enlace"}`); return; }
     window.open(result.data, "_blank", "noopener");
-  }
-
-  function Ficha({ documento }: { documento: Documento }) {
-    const versiones = historialVersiones(documentos, documento.id);
-    const anteriores = versiones.slice(1);
-    const desplegado = abierto === documento.id;
-    return (
-      <div className="gc-worker-card">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className="flex items-center gap-2 font-semibold">
-              <FileText className="h-4 w-4 shrink-0" />
-              <span className="truncate">{documento.nombre}</span>
-              {documento.version > 1 && <span className="gc-pill">v{documento.version}</span>}
-            </p>
-            <p className="mt-1 text-xs" style={{ color: "var(--gc-muted)" }}>
-              {categoriaLabels[documento.categoria] || documento.categoria} · {formatearTamano(documento.tamano_bytes)} ·
-              {" "}subido por {documento.subido_por_nombre || "—"} el {formatDate(documento.created_at)}
-            </p>
-            {documento.descripcion && <p className="mt-1 text-sm">{documento.descripcion}</p>}
-          </div>
-          <div className="flex flex-wrap items-center gap-2 gc-no-print">
-            <button className="gc-btn-outline" onClick={() => descargar(documento)} title="Abrir con un enlace temporal">
-              <Download className="h-4 w-4" /> Abrir
-            </button>
-            <button
-              className="gc-btn-outline"
-              disabled={saving}
-              onClick={() => { setSustituyeA(documento); inputRef.current?.click(); }}
-              title="Sube un archivo nuevo: el actual pasa al histórico, no se pierde"
-            >
-              <Upload className="h-4 w-4" /> Subir versión nueva
-            </button>
-            {puedeBorrar(session, documento) && (
-              <button className="gc-btn-outline gc-btn-danger" disabled={saving} onClick={() => onRetirar(documento)}>
-                <Trash2 className="h-4 w-4" /> Retirar
-              </button>
-            )}
-          </div>
-        </div>
-
-        <label className="mt-2 flex items-center gap-2 text-xs gc-no-print" title="Lo leerá MerchanGO cuando exista; hoy no se envía a nadie">
-          <input
-            type="checkbox"
-            checked={documento.visible_instalador}
-            disabled={saving}
-            onChange={event => onVisibilidad(documento, event.target.checked)}
-          />
-          Visible para el instalador (preparado para MerchanGO)
-        </label>
-
-        {anteriores.length > 0 && (
-          <div className="mt-2 border-t pt-2">
-            <button className="flex items-center gap-1 text-xs font-semibold" style={{ color: "var(--gc-muted)" }} onClick={() => setAbierto(desplegado ? null : documento.id)}>
-              {desplegado ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              {anteriores.length} versión(es) anterior(es)
-            </button>
-            {desplegado && (
-              <ul className="mt-1 space-y-1 text-xs">
-                {anteriores.map(anterior => (
-                  <li key={anterior.id} className="flex items-center justify-between gap-2">
-                    <span style={{ color: "var(--gc-muted)" }}>
-                      v{anterior.version} · {formatDate(anterior.created_at)} · {anterior.subido_por_nombre || "—"}
-                    </span>
-                    <button className="underline" onClick={() => descargar(anterior)}>Abrir</button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-      </div>
-    );
   }
 
   if (cargando) return <div className="space-y-2"><div className="gc-skeleton h-24" /><div className="gc-skeleton h-40" /></div>;
@@ -233,7 +172,21 @@ export function DocumentosPanel({ documentos, puntos, session, cargando, saving,
         <p className="mb-2 text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>De la campaña</p>
         {agrupados.campana.length ? (
           <div className="grid gap-2 md:grid-cols-2">
-            {agrupados.campana.map(documento => <Ficha key={documento.id} documento={documento} />)}
+            {agrupados.campana.map(documento => (
+              <Ficha
+                key={documento.id}
+                documento={documento}
+                documentos={documentos}
+                session={session}
+                saving={saving}
+                abierto={abierto}
+                setAbierto={setAbierto}
+                onDescargar={descargar}
+                onRetirar={onRetirar}
+                onVisibilidad={onVisibilidad}
+                onVersionNueva={pedirVersionNueva}
+              />
+            ))}
           </div>
         ) : (
           <div className="gc-empty">
@@ -251,7 +204,21 @@ export function DocumentosPanel({ documentos, puntos, session, cargando, saving,
               <div key={grupo.puntoId}>
                 <p className="mb-1 text-sm font-semibold">{nombrePunto.get(grupo.puntoId) || "Punto"}</p>
                 <div className="grid gap-2 md:grid-cols-2">
-                  {grupo.documentos.map(documento => <Ficha key={documento.id} documento={documento} />)}
+                  {grupo.documentos.map(documento => (
+                    <Ficha
+                      key={documento.id}
+                      documento={documento}
+                      documentos={documentos}
+                      session={session}
+                      saving={saving}
+                      abierto={abierto}
+                      setAbierto={setAbierto}
+                      onDescargar={descargar}
+                      onRetirar={onRetirar}
+                      onVisibilidad={onVisibilidad}
+                      onVersionNueva={pedirVersionNueva}
+                    />
+                  ))}
                 </div>
               </div>
             ))}
@@ -260,4 +227,103 @@ export function DocumentosPanel({ documentos, puntos, session, cargando, saving,
       )}
     </div>
   );
+}
+
+/**
+ * Fuera del componente a propósito: declarada dentro, React desmontaba y
+ * remontaba todas las tarjetas en cada render de DocumentosPanel.
+ */
+type FichaProps = {
+  documento: Documento;
+  documentos: Documento[];
+  session: AppSession | null;
+  saving: boolean;
+  abierto: string | null;
+  setAbierto: (id: string | null) => void;
+  onDescargar: (documento: Documento) => void;
+  onRetirar: (documento: Documento) => Promise<void>;
+  onVisibilidad: (documento: Documento, visible: boolean) => Promise<void>;
+  onVersionNueva: (documento: Documento) => void;
+};
+
+function Ficha({ documento, documentos, session, saving, abierto, setAbierto, onDescargar, onRetirar, onVisibilidad, onVersionNueva }: FichaProps) {
+    const versiones = historialVersiones(documentos, documento.id);
+    // Mismo criterio que la policy gc_docs_update: si no puede, no se le ofrece.
+    const puedeEditar = puedeBorrar(session, documento);
+    const anteriores = versiones.slice(1);
+    const desplegado = abierto === documento.id;
+    return (
+      <div className="gc-worker-card">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 font-semibold">
+              <FileText className="h-4 w-4 shrink-0" />
+              <span className="truncate">{documento.nombre}</span>
+              {documento.version > 1 && <span className="gc-pill">v{documento.version}</span>}
+            </p>
+            <p className="mt-1 text-xs" style={{ color: "var(--gc-muted)" }}>
+              {categoriaLabels[documento.categoria] || documento.categoria} · {formatearTamano(documento.tamano_bytes)} ·
+              {" "}subido por {documento.subido_por_nombre || "—"} el {formatDate(documento.created_at)}
+            </p>
+            {documento.descripcion && <p className="mt-1 text-sm">{documento.descripcion}</p>}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 gc-no-print">
+            <button className="gc-btn-outline" onClick={() => onDescargar(documento)} title="Abrir con un enlace temporal">
+              <Download className="h-4 w-4" /> Abrir
+            </button>
+            {puedeEditar && (
+              <button
+                className="gc-btn-outline"
+                disabled={saving}
+                onClick={() => onVersionNueva(documento)}
+                title="Sube un archivo nuevo: el actual pasa al histórico, no se pierde"
+              >
+                <Upload className="h-4 w-4" /> Subir versión nueva
+              </button>
+            )}
+            {puedeEditar && (
+              <button className="gc-btn-outline gc-btn-danger" disabled={saving} onClick={() => onRetirar(documento)}>
+                <Trash2 className="h-4 w-4" /> Retirar
+              </button>
+            )}
+          </div>
+        </div>
+
+        <label
+          className="mt-2 flex items-center gap-2 text-xs gc-no-print"
+          title={puedeEditar
+            ? "Lo leerá MerchanGO cuando exista; hoy no se envía a nadie"
+            : "Solo administración o quien subió el documento puede cambiar esto"}
+        >
+          <input
+            type="checkbox"
+            checked={documento.visible_instalador}
+            disabled={saving || !puedeEditar}
+            onChange={event => onVisibilidad(documento, event.target.checked)}
+          />
+          Visible para el instalador (preparado para MerchanGO)
+        </label>
+
+        {anteriores.length > 0 && (
+          <div className="mt-2 border-t pt-2">
+            <button className="flex items-center gap-1 text-xs font-semibold" style={{ color: "var(--gc-muted)" }} onClick={() => setAbierto(desplegado ? null : documento.id)}>
+              {desplegado ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              {anteriores.length} versión(es) anterior(es)
+            </button>
+            {desplegado && (
+              <ul className="mt-1 space-y-1 text-xs">
+                {anteriores.map(anterior => (
+                  <li key={anterior.id} className="flex items-center justify-between gap-2">
+                    <span style={{ color: "var(--gc-muted)" }}>
+                      v{anterior.version} · {formatDate(anterior.created_at)} · {anterior.subido_por_nombre || "—"}
+                    </span>
+                    <button className="underline" onClick={() => onDescargar(anterior)}>Abrir</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+    );
 }

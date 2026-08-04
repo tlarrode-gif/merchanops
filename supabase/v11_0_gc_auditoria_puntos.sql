@@ -47,6 +47,22 @@
 -- D6  El importe se guarda como texto igual que el resto de valores. La
 --     bitácora es para leerla, no para sumarla: quien suma dinero es el ledger.
 --
+-- D7  Aquí viven dos helpers que usan también v11_1 y v11_2, por eso están en la
+--     primera migración de la serie:
+--       merchan_gc_puede_operar_campana(): administración, o gestora asignada a
+--         la campaña o con provincias en ella. Deja fuera a los perfiles
+--         'almacen' y 'rrhh', que desde v9_11b/v10_4 VEN las campañas pero no
+--         tienen por qué escribir en ellas.
+--       merchan_gc_campana_editable(): espejo en la base de assertCampanaEditable()
+--         (lib/campanas.ts), para que una campaña completada, cancelada o
+--         archivada tampoco admita documentos ni regularizaciones nuevas.
+--
+-- D8  `origen_ultimo_cambio` es PEGAJOSA: un UPDATE que no la fije hereda el
+--     origen del cambio anterior. El único escritor que no pasa por la
+--     aplicación es merchan_stamp_campaign_picking (v10_2), así que se recrea
+--     aquí sellando 'logistica'. Sin eso, la fecha de picking aparecía en la
+--     bitácora con el origen del último cambio de otra persona, que es mentir.
+--
 -- ============================================================================
 -- QUIÉN VE QUÉ
 -- ============================================================================
@@ -84,6 +100,9 @@
 --   drop function if exists public.merchan_gc_eventos_inmutables();
 --   drop table if exists public.campana_punto_eventos;
 --   alter table public.puntos_venta_campana drop column if exists origen_ultimo_cambio;
+--   drop function if exists public.merchan_gc_puede_operar_campana(uuid);
+--   drop function if exists public.merchan_gc_campana_editable(uuid);
+--   -- merchan_stamp_campaign_picking: restaurar el cuerpo de v10_2 (sin origen_ultimo_cambio).
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -235,3 +254,104 @@ create policy gc_eventos_read on public.campana_punto_eventos
 
 grant select on public.campana_punto_eventos to authenticated;
 revoke insert, update, delete on public.campana_punto_eventos from authenticated, anon;
+
+-- ---------------------------------------------------------------------------
+-- 6. Helpers compartidos por v11_1 y v11_2 (D7)
+-- ---------------------------------------------------------------------------
+-- SECURITY DEFINER a propósito: es el propio control de acceso, así que tiene que
+-- poder mirar por encima de la RLS. Nunca devuelve datos, solo un booleano.
+create or replace function public.merchan_gc_puede_operar_campana(p_campana uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select
+    public.merchan_is_admin()
+    or (
+      public.merchan_has_profile()
+      -- Almacén y RR.HH. ven campañas (v9_11b, v10_4) pero no operan en ellas.
+      and not public.merchan_is_almacen()
+      and not public.merchan_is_rrhh()
+      and exists (
+        select 1 from public.grandes_campanas c
+         where c.id = p_campana
+           and (
+             exists (
+               select 1 from public.campana_gestores g
+                where g.campana_id = c.id
+                  and g.gestor_id = (public.merchan_auth_profile()).id
+             )
+             or exists (
+               select 1 from public.puntos_venta_campana p
+                where p.campana_id = c.id
+                  and p.provincia is not null
+                  and public.merchan_norm_province(p.provincia) = any (public.merchan_province_scope())
+             )
+           )
+      )
+    );
+$$;
+
+comment on function public.merchan_gc_puede_operar_campana(uuid) is
+  'True si quien llama puede TRABAJAR la campaña: administración, o gestora asignada o con provincias en ella. Almacén y RR.HH. quedan fuera aunque la vean.';
+
+revoke all on function public.merchan_gc_puede_operar_campana(uuid) from public, anon;
+grant execute on function public.merchan_gc_puede_operar_campana(uuid) to authenticated, service_role;
+
+-- Espejo en la base de assertCampanaEditable() (lib/campanas.ts): una campaña
+-- cerrada es de solo lectura, y eso no puede depender solo del navegador.
+create or replace function public.merchan_gc_campana_editable(p_campana uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.grandes_campanas c
+     where c.id = p_campana
+       and c.estado not in ('completada', 'cancelada', 'archivada')
+  );
+$$;
+
+comment on function public.merchan_gc_campana_editable(uuid) is
+  'False si la campaña está completada, cancelada o archivada. Espejo de assertCampanaEditable() de la aplicación.';
+
+revoke all on function public.merchan_gc_campana_editable(uuid) from public, anon;
+grant execute on function public.merchan_gc_campana_editable(uuid) to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 7. El cierre de picking sella su propio origen (D8)
+-- ---------------------------------------------------------------------------
+-- Copia literal de v10_2 con una sola línea añadida: origen_ultimo_cambio.
+-- Sin ella, la fecha de picking entraba en la bitácora heredando el origen del
+-- cambio anterior (p. ej. "subiendo un archivo"), que es sencillamente falso.
+create or replace function public.merchan_stamp_campaign_picking(p_picking_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path to ''
+as $$
+declare
+  v_count integer := 0;
+begin
+  if p_picking_id is null then return 0; end if;
+  with afectados as (
+    select distinct r.source_id
+      from public.logistics_material_requirements r
+     where r.picking_id = p_picking_id
+       and r.source_type = 'campaign'
+       and r.source_id is not null
+  )
+  update public.puntos_venta_campana p
+     set picking_cerrado_at = now(),
+         origen_ultimo_cambio = 'logistica',
+         updated_at = now()
+   where p.id::text in (select source_id from afectados);
+  get diagnostics v_count = row_count;
+  return v_count;
+end $$;
+
+grant execute on function public.merchan_stamp_campaign_picking(uuid) to authenticated, service_role;

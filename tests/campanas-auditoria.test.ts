@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   PuntoEvento,
   agruparEventosPorDia,
+  diaLocalEvento,
+  horaEvento,
   describirEvento,
   describirOrigen,
   esCampoSensible,
@@ -125,6 +127,25 @@ describe("agruparEventosPorDia", () => {
 
   it("devuelve lista vacía sin eventos", () => {
     expect(agruparEventosPorDia([])).toEqual([]);
+  });
+
+  it("agrupa por el MISMO huso con el que se pinta la hora", () => {
+    // Regresión: se agrupaba por el día UTC y se pintaba la hora local, así que
+    // un cambio de madrugada en España caía bajo la cabecera del día anterior.
+    const evento = { id: "x", created_at: "2026-08-04T23:30:00.000Z" } as PuntoEvento;
+    const dias = agruparEventosPorDia([evento]);
+    expect(dias[0].dia).toBe(diaLocalEvento(evento));
+    // La hora pintada pertenece de verdad al día del grupo.
+    const local = new Date(evento.created_at);
+    expect(horaEvento(evento)).toBe(
+      `${String(local.getHours()).padStart(2, "0")}:${String(local.getMinutes()).padStart(2, "0")}`
+    );
+  });
+
+  it("no se rompe con una fecha ilegible", () => {
+    const roto = { id: "y", created_at: "no-es-fecha" } as PuntoEvento;
+    expect(() => agruparEventosPorDia([roto])).not.toThrow();
+    expect(horaEvento(roto)).toBe("--:--");
   });
 });
 

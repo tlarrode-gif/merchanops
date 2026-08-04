@@ -44,16 +44,41 @@
 --     tope que el importador de Excel) y lista blanca de tipos. Sin esto el
 --     contenedor acaba con vídeos de WhatsApp.
 --
+-- D7  NADA DE ESTE FICHERO PUEDE LLAMAR A merchan_auth_profile() DESDE CÓDIGO QUE
+--     EJECUTE EL LLAMANTE. Esa función perdió el EXECUTE para `authenticated` en
+--     v9_9 (cerraba una fuga del hash de contraseña) y v9_10 la excluye
+--     explícitamente del re-grant masivo. Una primera versión de esta migración
+--     la usaba en el RPC (SECURITY INVOKER) y en la policy de UPDATE, y el
+--     resultado era que NINGUNA subida, retirada ni cambio de visibilidad
+--     funcionaba: `ERROR: permission denied for function merchan_auth_profile`,
+--     ni siquiera para administración (el permiso de la función se comprueba al
+--     inicializar el InitPlan, antes de evaluar el OR con merchan_is_admin()).
+--     Se usa `merchan_my_app_user_id()` (v9_11), que es el wrapper SECURITY
+--     DEFINER creado justo para esto y sí tiene grant.
+--
+-- D8  El RPC pasa a SECURITY DEFINER y comprueba el ámbito por dentro
+--     (merchan_gc_puede_operar_campana + merchan_gc_campana_editable, ambos de
+--     v11_0), igual que hacen los RPC de v11_2. Con SECURITY INVOKER, jubilar la
+--     versión anterior fallaba en cuanto el documento original lo había subido
+--     otra persona, y el mensaje que salía era el falso «ya no existe».
+--
+-- D9  Escribir documentos exige poder OPERAR la campaña, no solo verla. Almacén
+--     y RR.HH. ven las campañas desde v9_11b/v10_4 y con la primera versión de
+--     estas policies podían subir y leer documentación de cualquier campaña de
+--     España, incluidas las tarifas.
+--
 -- ============================================================================
 -- QUIÉN PUEDE QUÉ
 -- ============================================================================
---   Ve los documentos quien ve la campaña: la policy se apoya en una subconsulta
---   sobre `grandes_campanas`, cuya RLS por provincia hace el filtrado.
---   Sube documentos cualquiera que vea la campaña (el gestor sube el reporte de
---   su zona; administración, el briefing).
---   Borra (lógicamente) administración o quien lo subió. Nadie más.
+--   Ve y sube documentos quien puede OPERAR la campaña: administración, o la
+--   gestora asignada a la campaña o con provincias en ella
+--   (merchan_gc_puede_operar_campana, v11_0). Almacén y RR.HH. quedan fuera: ven
+--   las campañas pero no su documentación.
+--   Retira (borrado lógico) y cambia la visibilidad administración o quien lo
+--   subió; jubilar la versión anterior lo hace el RPC, que es SECURITY DEFINER.
 --   Ese mismo reparto se repite en las policies de storage.objects, porque un
---   fichero al que se llega por URL no pasa por la tabla.
+--   fichero al que se llega por URL no pasa por la tabla. En el DELETE de Storage
+--   se añade el dueño del objeto, para que la limpieza del huérfano funcione.
 --
 -- ============================================================================
 -- VERIFICACIÓN (tras aplicar)
@@ -142,37 +167,31 @@ alter table public.campana_documentos add constraint campana_documentos_mime_per
 -- ---------------------------------------------------------------------------
 alter table public.campana_documentos enable row level security;
 
--- Lectura: quien ve la campaña. La RLS de grandes_campanas filtra la subconsulta.
+-- Lectura: quien puede OPERAR la campaña (D9). Verla no basta: almacén y RR.HH.
+-- ven todas las campañas y no tienen por qué leer briefings ni tarifas.
 drop policy if exists gc_docs_read on public.campana_documentos;
 create policy gc_docs_read on public.campana_documentos
   for select to authenticated
-  using (
-    (select public.merchan_is_admin())
-    or exists (select 1 from public.grandes_campanas c where c.id = campana_documentos.campana_id)
-  );
+  using ((select public.merchan_gc_puede_operar_campana(campana_documentos.campana_id)));
 
--- Alta: la misma puerta que la lectura. Quien puede trabajar la campaña puede
--- aportar documentación.
+-- Alta: la misma puerta que la lectura.
 drop policy if exists gc_docs_insert on public.campana_documentos;
 create policy gc_docs_insert on public.campana_documentos
   for insert to authenticated
-  with check (
-    (select public.merchan_is_admin())
-    or exists (select 1 from public.grandes_campanas c where c.id = campana_documentos.campana_id)
-  );
+  with check ((select public.merchan_gc_puede_operar_campana(campana_documentos.campana_id)));
 
--- Cambio: sirve para marcar `vigente = false` al publicar una versión nueva y
--- para el borrado lógico. Administración, o quien lo subió.
+-- Cambio: marca `vigente = false` al publicar una versión nueva y hace el borrado
+-- lógico. Administración, o quien lo subió. `merchan_my_app_user_id()` y NO
+-- `merchan_auth_profile()`: ver D7, con la segunda esta policy no deja pasar a nadie.
 drop policy if exists gc_docs_update on public.campana_documentos;
 create policy gc_docs_update on public.campana_documentos
   for update to authenticated
   using (
     (select public.merchan_is_admin())
-    or subido_por = (select (public.merchan_auth_profile()).id)
+    or subido_por = (select public.merchan_my_app_user_id())
   )
   with check (
-    (select public.merchan_is_admin())
-    or subido_por = (select (public.merchan_auth_profile()).id)
+    (select public.merchan_gc_puede_operar_campana(campana_documentos.campana_id))
   );
 
 -- Sin policy de DELETE: los documentos no se borran físicamente (D5).
@@ -182,13 +201,13 @@ grant select, insert, update on public.campana_documentos to authenticated;
 -- ---------------------------------------------------------------------------
 -- 3. Publicar documento / nueva versión, en una sola transacción (D4)
 -- ---------------------------------------------------------------------------
--- SECURITY INVOKER a propósito: las policies de arriba ya dicen quién puede
--- escribir, así que el RPC no necesita más poder que quien lo llama. Su valor es
--- la ATOMICIDAD: publicar la v2 y jubilar la v1 no pueden quedar a medias.
+-- SECURITY DEFINER (D7, D8): tiene que poder leer el perfil del JWT y jubilar la
+-- versión anterior aunque la subiera otra persona. Comprueba el ámbito por dentro,
+-- que es exactamente lo que hacen los RPC de v11_2.
 create or replace function public.merchan_gc_documento_publicar(p_doc jsonb)
 returns public.campana_documentos
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
@@ -197,8 +216,9 @@ declare
   v_perfil public.app_users;
   v_version integer := 1;
   v_sustituye uuid := nullif(p_doc ->> 'sustituye_a', '')::uuid;
+  v_campana uuid := nullif(p_doc ->> 'campana_id', '')::uuid;
 begin
-  if nullif(p_doc ->> 'campana_id', '') is null then
+  if v_campana is null then
     raise exception 'Falta la campaña del documento.';
   end if;
   if nullif(p_doc ->> 'nombre', '') is null then
@@ -208,6 +228,14 @@ begin
     raise exception 'Falta la ruta del fichero subido.';
   end if;
 
+  -- El ámbito se comprueba AQUÍ porque el RPC es SECURITY DEFINER (D8).
+  if not public.merchan_gc_puede_operar_campana(v_campana) then
+    raise exception 'Esta campaña no está en tu ámbito: no puedes subir documentos en ella.';
+  end if;
+  if not public.merchan_gc_campana_editable(v_campana) then
+    raise exception 'La campaña está cerrada (completada, cancelada o archivada): su documentación es de solo lectura.';
+  end if;
+
   v_perfil := public.merchan_auth_profile();
 
   if v_sustituye is not null then
@@ -215,10 +243,23 @@ begin
     if not found then
       raise exception 'El documento al que sustituye ya no existe.';
     end if;
-    if v_anterior.campana_id <> (p_doc ->> 'campana_id')::uuid then
+    if v_anterior.campana_id <> v_campana then
       raise exception 'Una versión nueva tiene que ser de la misma campaña que la anterior.';
     end if;
-    v_version := v_anterior.version + 1;
+    -- Sin estas dos comprobaciones, dos personas podían publicar cada una su «v2»
+    -- sobre el mismo v1 y quedaban DOS documentos vigentes con la misma versión.
+    if v_anterior.deleted_at is not null then
+      raise exception 'Ese documento está retirado: no se le pueden colgar versiones nuevas.';
+    end if;
+    if not v_anterior.vigente then
+      raise exception 'Ese documento ya fue sustituido por una versión posterior. Parte de la versión vigente.';
+    end if;
+    -- La versión sale del máximo de la cadena, no del +1 de la fila leída.
+    select coalesce(max(d.version), v_anterior.version) + 1
+      into v_version
+      from public.campana_documentos d
+     where d.campana_id = v_anterior.campana_id
+       and (d.id = v_anterior.id or d.sustituye_a = v_anterior.id);
   end if;
 
   insert into public.campana_documentos (
@@ -226,7 +267,7 @@ begin
     tamano_bytes, version, sustituye_a, vigente, visible_instalador, visible_gestor,
     subido_por, subido_por_nombre
   ) values (
-    (p_doc ->> 'campana_id')::uuid,
+    v_campana,
     nullif(p_doc ->> 'punto_id', '')::uuid,
     p_doc ->> 'nombre',
     nullif(p_doc ->> 'descripcion', ''),
@@ -277,13 +318,7 @@ begin
       for select to authenticated
       using (
         bucket_id = 'campana-documentos'
-        and (
-          (select public.merchan_is_admin())
-          or exists (
-            select 1 from public.grandes_campanas c
-             where c.id::text = (storage.foldername(name))[1]
-          )
-        )
+        and (select public.merchan_gc_puede_operar_campana(((storage.foldername(name))[1])::uuid))
       );
   $pol$;
 
@@ -293,13 +328,7 @@ begin
       for insert to authenticated
       with check (
         bucket_id = 'campana-documentos'
-        and (
-          (select public.merchan_is_admin())
-          or exists (
-            select 1 from public.grandes_campanas c
-             where c.id::text = (storage.foldername(name))[1]
-          )
-        )
+        and (select public.merchan_gc_puede_operar_campana(((storage.foldername(name))[1])::uuid))
       );
   $pol$;
 
@@ -313,11 +342,18 @@ begin
       with check (bucket_id = 'campana-documentos' and (select public.merchan_is_admin()));
   $pol$;
 
+  -- Borrar: administración, y ADEMÁS quien acaba de subir el objeto. Sin esa
+  -- segunda rama, cuando el alta de la ficha falla, la limpieza del fichero
+  -- huérfano que hace lib/campana-documentos.ts era imposible para una gestora y
+  -- el fichero se quedaba en el bucket para siempre sin que nadie se enterase.
   execute $pol$
     drop policy if exists gc_docs_storage_delete on storage.objects;
     create policy gc_docs_storage_delete on storage.objects
       for delete to authenticated
-      using (bucket_id = 'campana-documentos' and (select public.merchan_is_admin()));
+      using (
+        bucket_id = 'campana-documentos'
+        and ((select public.merchan_is_admin()) or owner = (select auth.uid()))
+      );
   $pol$;
 exception
   when insufficient_privilege then

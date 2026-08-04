@@ -34,13 +34,24 @@
 --     es la que pinta la pantalla. El test `informe respeta el catálogo de la
 --     base` cubre que no se separen.
 --
+-- D5  UN INFORME INTERNO ES SOLO DE ADMINISTRACIÓN. La primera versión de
+--     `gc_informes_read` dejaba leer cualquier informe a quien viera la campaña,
+--     así que un informe con `incluye_costes = true` (margen, presupuesto, pagos
+--     por trabajador) quedaba al alcance de cualquier gestora. El candado de
+--     emisión no sirve de nada si la lectura no distingue.
+--
+-- D6  El informe emitido tampoco se BORRA. La primera versión daba DELETE a
+--     administración, lo que contradice su propio principio de copia congelada
+--     (y el borrado lógico de v11_1, y el «nada se borra» de v8_0).
+--
 -- ============================================================================
 -- QUIÉN PUEDE QUÉ
 -- ============================================================================
---   Plantillas: las lee cualquiera con acceso a la campaña, las escribe SOLO
---   administración (los gestores de cuentas son perfil admin).
---   Informes emitidos: los ve quien ve la campaña; los emite administración.
---   Nadie los edita: son copias congeladas.
+--   Plantillas: las lee cualquier perfil interno (no llevan cifras), las escribe
+--   SOLO administración (los gestores de cuentas son perfil admin).
+--   Informes emitidos: los de CLIENTE los ve quien puede operar la campaña; los
+--   INTERNOS (incluye_costes) solo administración. Los emite administración.
+--   Nadie los edita ni los borra: son copias congeladas.
 --
 -- ============================================================================
 -- VERIFICACIÓN (tras aplicar)
@@ -116,6 +127,8 @@ create index if not exists idx_gc_plantillas_cliente on public.campana_informe_p
 
 alter table public.campana_informe_plantillas enable row level security;
 
+-- Las plantillas no llevan cifras, solo qué bloques se pintan; se leen con
+-- cualquier perfil interno para que la pantalla pueda ofrecerlas.
 drop policy if exists gc_plantillas_read on public.campana_informe_plantillas;
 create policy gc_plantillas_read on public.campana_informe_plantillas
   for select to authenticated
@@ -169,7 +182,10 @@ begin
     raise exception 'Un informe emitido no se edita: emite uno nuevo. Lo mandado a un cliente tiene que poder defenderse tal cual se mandó.';
   end if;
 
-  if jsonb_typeof(new.datos -> 'bloques') <> 'array' then
+  -- coalesce OBLIGATORIO: si `datos` no trae la clave 'bloques',
+  -- `jsonb_typeof(NULL)` devuelve NULL y `NULL <> 'array'` es NULL, no true, así
+  -- que el IF no entraba y el informe se guardaba sin pasar por el candado.
+  if coalesce(jsonb_typeof(new.datos -> 'bloques'), 'ausente') <> 'array' then
     raise exception 'El informe necesita datos.bloques como lista.';
   end if;
 
@@ -198,12 +214,17 @@ create trigger campana_informes_guard
 -- ---------------------------------------------------------------------------
 alter table public.campana_informes enable row level security;
 
+-- D5: un informe INTERNO lleva coste, margen y pagos por trabajador. Solo
+-- administración. Los de cliente, quien pueda operar la campaña.
 drop policy if exists gc_informes_read on public.campana_informes;
 create policy gc_informes_read on public.campana_informes
   for select to authenticated
   using (
     (select public.merchan_is_admin())
-    or exists (select 1 from public.grandes_campanas c where c.id = campana_informes.campana_id)
+    or (
+      not incluye_costes
+      and (select public.merchan_gc_puede_operar_campana(campana_informes.campana_id))
+    )
   );
 
 -- Emitir es cosa de administración: es lo que sale hacia el cliente.
@@ -212,11 +233,7 @@ create policy gc_informes_insert on public.campana_informes
   for insert to authenticated
   with check ((select public.merchan_is_admin()));
 
-drop policy if exists gc_informes_delete on public.campana_informes;
-create policy gc_informes_delete on public.campana_informes
-  for delete to authenticated
-  using ((select public.merchan_is_admin()));
-
-grant select, insert, delete on public.campana_informes to authenticated;
--- Sin UPDATE para nadie: el trigger ya lo impide, pero se quita también el permiso.
-revoke update on public.campana_informes from authenticated, anon;
+grant select, insert on public.campana_informes to authenticated;
+-- Ni UPDATE ni DELETE para nadie (D3, D6): un informe emitido es una copia
+-- congelada. El trigger ya bloquea el UPDATE; aquí se retiran además los permisos.
+revoke update, delete on public.campana_informes from authenticated, anon;

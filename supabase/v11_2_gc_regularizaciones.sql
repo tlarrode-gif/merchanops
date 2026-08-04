@@ -53,6 +53,14 @@
 --     no se toca aquí (queda pendiente): esta es una puerta controlada, con el
 --     permiso comprobado por dentro, no un agujero.
 --
+-- D8  El ámbito se comprueba a DOS niveles: la campaña (merchan_gc_puede_operar_campana)
+--     y el PUNTO (merchan_gc_puede_operar_punto). Una gestora puede tener la
+--     campaña en su ámbito y aun así no ser la responsable de ese punto concreto:
+--     con solo el primer nivel podía generar un pago sobre el punto de otra.
+--
+-- D9  Ni se propone ni se aprueba nada contra una campaña cerrada: es el mismo
+--     candado que assertCampanaEditable() aplica en toda la operativa del módulo.
+--
 -- ============================================================================
 -- VERIFICACIÓN (tras aplicar)
 -- ============================================================================
@@ -76,6 +84,7 @@
 -- ============================================================================
 --   drop function if exists public.merchan_gc_regularizacion_resolver(uuid, text, text, boolean);
 --   drop function if exists public.merchan_gc_regularizacion_solicitar(jsonb);
+--   drop function if exists public.merchan_gc_puede_operar_punto(uuid);
 --   drop view if exists public.v_campana_regularizaciones;
 --   drop table if exists public.campana_regularizaciones;
 --   -- las obligaciones ya creadas NO se borran: se anulan con motivo desde Pagos.
@@ -124,25 +133,16 @@ create index if not exists idx_gc_reg_estado on public.campana_regularizaciones 
 create index if not exists idx_gc_reg_punto on public.campana_regularizaciones (punto_id) where punto_id is not null;
 
 -- ---------------------------------------------------------------------------
--- 2. Ámbito: se lee, no se escribe a mano (D7)
+-- 2. Ámbito del punto (D8)
 -- ---------------------------------------------------------------------------
-alter table public.campana_regularizaciones enable row level security;
-
-drop policy if exists gc_reg_read on public.campana_regularizaciones;
-create policy gc_reg_read on public.campana_regularizaciones
-  for select to authenticated
-  using (
-    (select public.merchan_is_admin())
-    or exists (select 1 from public.grandes_campanas c where c.id = campana_regularizaciones.campana_id)
-  );
-
-grant select on public.campana_regularizaciones to authenticated;
-revoke insert, update, delete on public.campana_regularizaciones from authenticated, anon;
-
--- ---------------------------------------------------------------------------
--- 3. Puede operar esta campaña
--- ---------------------------------------------------------------------------
-create or replace function public.merchan_gc_puede_operar_campana(p_campana uuid)
+-- merchan_gc_puede_operar_campana() y merchan_gc_campana_editable() viven en
+-- v11_0, porque las comparten esta migración y v11_1.
+--
+-- Este helper es el espejo en la base de sessionCanSeePunto() (lib/campanas.ts):
+-- un punto YA asignado a una gestora solo lo trabaja esa gestora; los que aún no
+-- tienen gestor los ve quien cubre la provincia. Sin él, una gestora podía
+-- regularizar (y por tanto generar un pago sobre) puntos de una compañera.
+create or replace function public.merchan_gc_puede_operar_punto(p_punto uuid)
 returns boolean
 language sql
 stable
@@ -153,32 +153,53 @@ as $$
     public.merchan_is_admin()
     or (
       public.merchan_has_profile()
+      and not public.merchan_is_almacen()
+      and not public.merchan_is_rrhh()
       and exists (
-        select 1 from public.grandes_campanas c
-         where c.id = p_campana
+        select 1 from public.puntos_venta_campana p
+         where p.id = p_punto
            and (
-             -- Gestora asignada a la campaña...
-             exists (
-               select 1 from public.campana_gestores g
-                where g.campana_id = c.id
-                  and g.gestor_id = (public.merchan_auth_profile()).id
-             )
-             -- ...o que cubre alguna de sus provincias.
-             or exists (
-               select 1 from public.puntos_venta_campana p
-                where p.campana_id = c.id
-                  and p.provincia is not null
-                  and public.merchan_norm_province(p.provincia) = any (public.merchan_province_scope())
+             p.gestor_id = (public.merchan_auth_profile()).id
+             or (
+               p.gestor_id is null
+               and p.provincia is not null
+               and public.merchan_norm_province(p.provincia) = any (public.merchan_province_scope())
              )
            )
       )
     );
 $$;
 
-comment on function public.merchan_gc_puede_operar_campana(uuid) is
-  'True si quien llama es administración o una gestora con la campaña asignada o con provincias en ella. SECURITY DEFINER: comprueba a propósito por encima de la RLS, porque es el propio control de acceso.';
+comment on function public.merchan_gc_puede_operar_punto(uuid) is
+  'Espejo en la base de sessionCanSeePunto(): un punto asignado solo lo trabaja su gestora; los libres, quien cubre la provincia.';
 
-grant execute on function public.merchan_gc_puede_operar_campana(uuid) to authenticated, service_role;
+revoke all on function public.merchan_gc_puede_operar_punto(uuid) from public, anon;
+grant execute on function public.merchan_gc_puede_operar_punto(uuid) to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 3. Ámbito de lectura: se lee, no se escribe a mano (D7)
+-- ---------------------------------------------------------------------------
+alter table public.campana_regularizaciones enable row level security;
+
+-- Ámbito real, no «ve la campaña»: una regularización lleva importe y nombre de
+-- trabajador. Almacén y RR.HH. quedan fuera (no tienen permiso 'pagos'), y una
+-- gestora solo ve las de sus puntos, más las de campaña que ella misma propuso.
+drop policy if exists gc_reg_read on public.campana_regularizaciones;
+create policy gc_reg_read on public.campana_regularizaciones
+  for select to authenticated
+  using (
+    (select public.merchan_is_admin())
+    or (
+      (select public.merchan_gc_puede_operar_campana(campana_regularizaciones.campana_id))
+      and (
+        (punto_id is not null and (select public.merchan_gc_puede_operar_punto(campana_regularizaciones.punto_id)))
+        or (punto_id is null and solicitada_por = (select public.merchan_my_app_user_id()))
+      )
+    )
+  );
+
+grant select on public.campana_regularizaciones to authenticated;
+revoke insert, update, delete on public.campana_regularizaciones from authenticated, anon;
 
 -- ---------------------------------------------------------------------------
 -- 4. El gestor propone (D1)
@@ -209,6 +230,10 @@ begin
   if not public.merchan_gc_puede_operar_campana(v_campana) then
     raise exception 'Esta campaña no está en tu ámbito: no puedes registrar regularizaciones en ella.';
   end if;
+  -- Espejo de assertCampanaEditable(): una campaña cerrada no genera pagos nuevos.
+  if not public.merchan_gc_campana_editable(v_campana) then
+    raise exception 'La campaña está cerrada (completada, cancelada o archivada): no admite regularizaciones.';
+  end if;
   if v_importe is null or v_importe = 0 then
     raise exception 'La regularización necesita un importe distinto de cero.';
   end if;
@@ -233,6 +258,10 @@ begin
     end if;
     if v_punto_row.campana_id <> v_campana then
       raise exception 'Ese punto no pertenece a la campaña indicada.';
+    end if;
+    -- La campaña puede ser tuya y el punto de otra gestora (D8).
+    if not public.merchan_gc_puede_operar_punto(v_punto) then
+      raise exception 'Ese punto está asignado a otra gestora o fuera de tus provincias: no puedes regularizarlo.';
     end if;
   end if;
 
@@ -322,6 +351,10 @@ begin
     raise exception 'Al aprobar hay que decir si es refacturable al cliente o lo asume la empresa: es la decisión que se pierde si no se toma ahora.';
   end if;
 
+  if not public.merchan_gc_campana_editable(v_reg.campana_id) then
+    raise exception 'La campaña se cerró después de proponerse esta regularización: reábrela o recházala.';
+  end if;
+
   -- El mes pudo cerrarse entre la propuesta y la aprobación.
   if exists (select 1 from public.economic_month_closures m where m.mes_contable = v_reg.mes_contable) then
     raise exception 'El mes contable % se cerró después de proponerse: rechaza esta regularización y vuelve a proponerla con fecha del mes en curso.', v_reg.mes_contable;
@@ -329,8 +362,12 @@ begin
 
   -- ¿Hay línea original del punto a la que engancharse? (D5)
   if v_reg.punto_id is not null then
+    -- 'anulado' fuera: enganchar un ajuste a una obligación anulada crearía una
+    -- línea negativa contra un pago que ya no existe. Si no hay original válida,
+    -- cae en la rama de pago suelto, que ya explica qué hacer.
     select * into v_original from public.payment_obligations
-     where obligation_key = 'gran_campana:' || v_reg.punto_id::text || ':installation';
+     where obligation_key = 'gran_campana:' || v_reg.punto_id::text || ':installation'
+       and status <> 'anulado';
   end if;
 
   -- Se comprueba el id y no `found`: si el punto era null no se ejecutó ninguna

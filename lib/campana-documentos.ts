@@ -290,9 +290,15 @@ export async function subirDocumento(subida: SubidaDocumento): Promise<Result<Do
   });
 
   if (error) {
-    // Sin ficha el fichero es invisible para la aplicación: se retira.
-    await supabase.storage.from(BUCKET_DOCUMENTOS).remove([ruta]);
-    return { data: null, error: `El archivo no se registró: ${error.message}` };
+    // Sin ficha, el fichero es invisible para la aplicación: se retira. Si la
+    // limpieza tampoco puede hacerse, se DICE: un huérfano silencioso ocupa
+    // espacio para siempre y nadie llega a saber que existe.
+    const { data: borrados, error: limpiezaError } = await supabase.storage.from(BUCKET_DOCUMENTOS).remove([ruta]);
+    const huerfano = Boolean(limpiezaError) || !(borrados || []).length;
+    const aviso = huerfano
+      ? ` El archivo se quedó subido sin ficha (${ruta}); avisa a administración para que lo retire.`
+      : "";
+    return { data: null, error: `El archivo no se registró: ${error.message}.${aviso}` };
   }
   return { data: data as Documento };
 }
@@ -305,24 +311,42 @@ export async function urlDescarga(storagePath: string, segundos = 300): Promise<
   return { data: data?.signedUrl || "" };
 }
 
-/** Borrado lógico (D5): la ficha se conserva, el enlace deja de ofrecerse. */
+/**
+ * Borrado lógico (D5): la ficha se conserva, el enlace deja de ofrecerse.
+ *
+ * Se pide `.select("id")` a propósito: cuando la RLS filtra la fila, el UPDATE no
+ * da error, simplemente no afecta a ninguna. Sin comprobarlo, la pantalla
+ * anunciaba «Documento retirado» de algo que seguía ahí.
+ */
 export async function retirarDocumento(documentoId: string, session: AppSession | null): Promise<Result<boolean>> {
   if (!supabase) return { data: false, error: "Supabase no está configurado." };
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("campana_documentos")
     .update({
       deleted_at: new Date().toISOString(),
       deleted_por_nombre: session?.display_name || "Operaciones",
       vigente: false
     })
-    .eq("id", documentoId);
+    .eq("id", documentoId)
+    .select("id");
   if (error) return { data: false, error: error.message };
+  if (!(data || []).length) {
+    return { data: false, error: "No se pudo retirar: solo administración o quien lo subió puede hacerlo." };
+  }
   return { data: true };
 }
 
+/** Mismo motivo que arriba para el `.select`: un UPDATE de 0 filas no es un éxito. */
 export async function cambiarVisibilidadInstalador(documentoId: string, visible: boolean): Promise<Result<boolean>> {
   if (!supabase) return { data: false, error: "Supabase no está configurado." };
-  const { error } = await supabase.from("campana_documentos").update({ visible_instalador: visible }).eq("id", documentoId);
+  const { data, error } = await supabase
+    .from("campana_documentos")
+    .update({ visible_instalador: visible })
+    .eq("id", documentoId)
+    .select("id");
   if (error) return { data: false, error: error.message };
+  if (!(data || []).length) {
+    return { data: false, error: "No se pudo cambiar la visibilidad: solo administración o quien lo subió puede hacerlo." };
+  }
   return { data: true };
 }

@@ -131,14 +131,26 @@ export function describirOrigen(origen?: string | null): string {
 export type DiaEventos = { dia: string; eventos: PuntoEvento[] };
 
 /**
- * Agrupa por día (más reciente primero) conservando dentro de cada día el orden
- * que traiga la consulta. Trabaja sobre el texto ISO: comparar cadenas ISO es
- * comparar fechas y así no aparece ningún desfase de zona horaria.
+ * Día LOCAL del evento en ISO. Tiene que ser local porque la hora que se pinta al
+ * lado también lo es: cortando el ISO en UTC, un cambio hecho a la 01:30 en
+ * España aparecía bajo la cabecera del día anterior con la hora «01:30».
+ */
+export function diaLocalEvento(evento: Pick<PuntoEvento, "created_at">): string {
+  const fecha = new Date(evento.created_at);
+  if (Number.isNaN(fecha.getTime())) return String(evento.created_at || "").slice(0, 10);
+  const mes = String(fecha.getMonth() + 1).padStart(2, "0");
+  const dia = String(fecha.getDate()).padStart(2, "0");
+  return `${fecha.getFullYear()}-${mes}-${dia}`;
+}
+
+/**
+ * Agrupa por día local (más reciente primero) conservando dentro de cada día el
+ * orden que traiga la consulta.
  */
 export function agruparEventosPorDia(eventos: PuntoEvento[]): DiaEventos[] {
   const mapa = new Map<string, PuntoEvento[]>();
   for (const evento of eventos) {
-    const dia = String(evento.created_at || "").slice(0, 10);
+    const dia = diaLocalEvento(evento);
     const lista = mapa.get(dia);
     if (lista) lista.push(evento);
     else mapa.set(dia, [evento]);

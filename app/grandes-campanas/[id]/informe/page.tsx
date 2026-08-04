@@ -93,9 +93,10 @@ export default function InformeCampanaPage({ params }: { params: { id: string } 
       setRegularizaciones(regsR.data);
       setPlantillas(plantillasR.data);
       setEmitidos(informesR.data);
-      if (campanaR.data && !titulo) {
-        setTitulo(`Informe de avance · ${campanaR.data.nombre}`);
-      }
+      // Solo se propone el título si sigue vacío. `titulo` no está en las
+      // dependencias del efecto a propósito: el efecto se ejecuta una vez por
+      // campaña y no debe pisar lo que la persona haya escrito.
+      setTitulo(actual => actual || (campanaR.data ? `Informe de avance · ${campanaR.data.nombre}` : ""));
       setLoading(false);
     }
     cargar();
@@ -132,8 +133,15 @@ export default function InformeCampanaPage({ params }: { params: { id: string } 
     if (!nombre?.trim()) return;
     setSaving(true);
     setError("");
+    setNotice("");
+    // Si el nombre es el de la plantilla elegida, se ACTUALIZA esa; si se cambia,
+    // nace una nueva. Sin esto, «Guardar» sobre una plantilla existente creaba un
+    // duplicado con el mismo nombre en cada pasada.
+    const seleccionada = plantillas.find(p => p.id === plantillaId);
+    const esLaMisma = Boolean(seleccionada && seleccionada.nombre.trim() === nombre.trim());
     const result = await guardarPlantilla(
       {
+        id: esLaMisma ? plantillaId : undefined,
         nombre: nombre.trim(),
         cliente_marca: campana?.cliente_marca || null,
         bloques: seleccion,
@@ -144,7 +152,7 @@ export default function InformeCampanaPage({ params }: { params: { id: string } 
     );
     if (result.error) setError(result.error);
     else {
-      setNotice("Plantilla guardada: la próxima vez es un clic.");
+      setNotice(esLaMisma ? "Plantilla actualizada." : "Plantilla guardada: la próxima vez es un clic.");
       const recargadas = await fetchPlantillas();
       setPlantillas(recargadas.data);
       if (result.data) setPlantillaId(result.data.id);
@@ -157,6 +165,8 @@ export default function InformeCampanaPage({ params }: { params: { id: string } 
     const plantilla = plantillas.find(p => p.id === plantillaId);
     if (!plantilla || !confirm(`¿Borrar la plantilla «${plantilla.nombre}»?`)) return;
     setSaving(true);
+    setError("");
+    setNotice("");
     const result = await borrarPlantilla(plantillaId);
     if (result.error) setError(result.error);
     else {
@@ -172,6 +182,7 @@ export default function InformeCampanaPage({ params }: { params: { id: string } 
     if (!entrada) return;
     setSaving(true);
     setError("");
+    setNotice("");
     const result = await emitirInforme(entrada, {
       titulo,
       encabezado: encabezado || null,
@@ -193,6 +204,9 @@ export default function InformeCampanaPage({ params }: { params: { id: string } 
   if (!canAccessModule(session, "servicios")) return <Gate texto="No tienes permiso para ver Grandes Campañas." />;
   if (!admin) return <Gate texto="El informe de cliente lo prepara administración." />;
   if (loading) return <main className="gc-module"><section className="mx-auto max-w-[1100px] space-y-3 p-4"><div className="gc-skeleton h-24" /><div className="gc-skeleton h-64" /></section></main>;
+  // Sin campaña no hay informe posible: se dice, en vez de dejar «Emitir» activo
+  // sobre una pantalla vacía que no haría nada al pulsarlo.
+  if (!campana) return <Gate texto={error || "No se ha encontrado esta campaña, o no está en tu ámbito."} />;
 
   return (
     <main className="gc-module">
@@ -205,10 +219,10 @@ export default function InformeCampanaPage({ params }: { params: { id: string } 
             <button className="gc-btn-outline" onClick={() => window.print()}>
               <Printer className="h-4 w-4" /> Imprimir / PDF
             </button>
-            <button className="gc-btn-outline" disabled={saving || Boolean(motivoBloqueo)} onClick={handleGuardarPlantilla}>
+            <button className="gc-btn-outline" disabled={saving || !entrada || Boolean(motivoBloqueo)} onClick={handleGuardarPlantilla}>
               <Save className="h-4 w-4" /> Guardar como plantilla
             </button>
-            <button className="gc-btn-dark" disabled={saving || Boolean(motivoBloqueo)} onClick={handleEmitir}>
+            <button className="gc-btn-dark" disabled={saving || !entrada || Boolean(motivoBloqueo)} onClick={handleEmitir}>
               <Send className="h-4 w-4" /> Emitir informe
             </button>
           </div>

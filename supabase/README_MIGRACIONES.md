@@ -91,7 +91,7 @@ Se aplican **en este orden**. `v11_2` y `v11_3` son independientes entre sí, pe
 
 | Fichero | Qué hace |
 |---|---|
-| `v11_0_gc_auditoria_puntos.sql` | Bitácora append-only `campana_punto_eventos` (una fila por CAMPO cambiado) y su trigger sobre `puntos_venta_campana`. Nueva columna `puntos_venta_campana.origen_ultimo_cambio`, que la aplicación rellena en el propio UPDATE para distinguir «lo cambió alguien» de «lo cambió un Excel». El actor sale del JWT, nunca del cliente. Contenido de la pestaña «Historial». |
+| `v11_0_gc_auditoria_puntos.sql` | Bitácora append-only `campana_punto_eventos` (una fila por CAMPO cambiado) y su trigger sobre `puntos_venta_campana`. Nueva columna `puntos_venta_campana.origen_ultimo_cambio`, que la aplicación rellena en el propio UPDATE para distinguir «lo cambió alguien» de «lo cambió un Excel». El actor sale del JWT, nunca del cliente. Contenido de la pestaña «Historial». **Crea además los dos helpers que comparten v11_1 y v11_2** (`merchan_gc_puede_operar_campana`, `merchan_gc_campana_editable`) y recrea `merchan_stamp_campaign_picking` para que el cierre de picking selle su propio origen. |
 | `v11_1_gc_documentos.sql` | `campana_documentos` (ámbito campaña/punto, versionado con `sustituye_a`, `visible_instalador` para MerchanGO, borrado lógico) y **el primer bucket de Storage del proyecto**: `campana-documentos`, privado, 25 MB, con policies por campaña. RPC `merchan_gc_documento_publicar`. Contenido de la pestaña «Documentos». |
 | `v11_2_gc_regularizaciones.sql` | `campana_regularizaciones` con concepto tipificado y `refacturable`. RPC `merchan_gc_regularizacion_solicitar` (gestora, deja la propuesta) y `merchan_gc_regularizacion_resolver` (admin; aprobar CREA la línea en `payment_obligations` en la misma transacción). Helper `merchan_gc_puede_operar_campana`. Vista `v_campana_regularizaciones` con `security_invoker = true`. |
 | `v11_3_gc_informes.sql` | `campana_informe_plantillas` (reutilizables) y `campana_informes` (copias congeladas e inmutables). `merchan_gc_bloques_internos()` y el trigger que impide emitir un informe de cliente con bloques de coste. |
@@ -102,6 +102,18 @@ rol que no es propietario del esquema `storage`, el resto de la migración entra
 igual y las cuatro policies (`gc_docs_storage_*`) hay que crearlas a mano con el
 rol propietario. Su contenido está en el cuerpo del fichero.
 
+**Nota sobre `merchan_auth_profile()`.** Esa función perdió el EXECUTE para
+`authenticated` en `v9_9` (cerraba la fuga del hash de contraseña) y `v9_10` la
+excluye a propósito del re-grant masivo. Por tanto **no puede llamarse desde
+código que ejecute el llamante**: ni desde un RPC `SECURITY INVOKER`, ni desde la
+expresión de una policy. Una primera versión de `v11_1` lo hacía en los dos
+sitios y el módulo de Documentos quedaba inservible (`permission denied for
+function merchan_auth_profile`, también para administración: el permiso de la
+función se comprueba al inicializar el InitPlan, antes de evaluar el `OR` con
+`merchan_is_admin()`). Para el id del usuario en contexto INVOKER se usa
+`merchan_my_app_user_id()` (`v9_11`); para el perfil completo, un RPC
+`SECURITY DEFINER`.
+
 **Nota sobre `v11_2` y la RLS de pagos.** Los dos RPC son `SECURITY DEFINER`
 porque `payment_obligations` tiene la policy `pagos_scope`, que hoy solo deja
 escribir a administración las líneas que no son de ISDIN. Esa policy **no se toca
@@ -111,12 +123,16 @@ controlada que comprueba el permiso por dentro, no un agujero.
 
 Las cuatro llevan en su cabecera el problema, las decisiones, cómo verificarlas y
 su ROLLBACK. Se han validado sobre un PostgreSQL 16 limpio con un andamio del
-esquema del proyecto: aplican sin error, son idempotentes (segunda pasada sin
-cambios) y se ha comprobado el comportamiento — la bitácora registra un cambio de
-importe y rechaza UPDATE/DELETE, la aprobación de una regularización crea su línea
-de pago y no se puede resolver dos veces, una regularización negativa sin línea
-original se rechaza con instrucciones, el mes contable cerrado bloquea, el candado
-del informe impide emitir coste a un cliente, un informe emitido no se edita, y
-una versión nueva de un documento jubila a la anterior sin borrarla.
+esquema del proyecto **que reproduce los permisos reales** (incluido el EXECUTE
+revocado de `merchan_auth_profile`): aplican sin error, son idempotentes (segunda
+pasada sin cambios) y se ha comprobado el comportamiento, incluidos los rechazos —
+la bitácora registra un cambio de importe y rechaza UPDATE/DELETE, el alta y la
+modificación de documentos funcionan con el rol `authenticated`, una segunda «v2»
+sobre el mismo documento se rechaza, una campaña cerrada no admite documentos ni
+regularizaciones, la aprobación de una regularización crea su línea de pago y no
+se puede resolver dos veces, una negativa sin línea original válida (o contra una
+anulada) se rechaza con instrucciones, el mes contable cerrado bloquea, el candado
+del informe salta tanto con un bloque de coste como cuando falta la clave
+`bloques`, y un informe emitido no se edita ni se borra.
 
 **La próxima migración libre es `v11_4`.**

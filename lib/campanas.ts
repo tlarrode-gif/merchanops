@@ -494,7 +494,7 @@ async function campanaIdDePunto(puntoId: string): Promise<{ campanaId: string | 
 //  * importes negativos rechazados (P-7);
 //  * deduplicación por código dentro del lote y contra la campaña (C5): reimportar
 //    el mismo archivo no duplica puntos; devuelve cuántos se omitieron.
-export async function insertPuntosBatch(campanaId: string, puntos: PuntoInput[]): Promise<Result<number> & { omitidos?: number }> {
+export async function insertPuntosBatch(campanaId: string, puntos: PuntoInput[], origen: OrigenCambio = "importacion"): Promise<Result<number> & { omitidos?: number }> {
   if (!supabase) return { data: 0, error: "Supabase no está configurado." };
   if (!puntos.length) return { data: 0 };
   const bloqueada = await assertCampanaEditable(campanaId);
@@ -524,7 +524,9 @@ export async function insertPuntosBatch(campanaId: string, puntos: PuntoInput[])
       fecha_visita: punto.fecha_visita || null,
       importe: punto.importe ?? null,
       datos_extra: punto.datos_extra || {},
-      origen_ultimo_cambio: "importacion" satisfies OrigenCambio
+      // El alta de UN punto desde el formulario no es una importación: si se sella
+      // igual, la bitácora dice «subiendo un archivo» de algo que se tecleó a mano.
+      origen_ultimo_cambio: origen
     });
   }
   if (!rows.length) return { data: 0, omitidos };
