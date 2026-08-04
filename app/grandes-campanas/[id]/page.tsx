@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Euro, FileDown, Info, MapPin, MessageCircle, Package, Pencil, Plus, Upload, UserCheck, Users } from "lucide-react";
+import { Euro, FileDown, FileText, Info, MapPin, MessageCircle, Package, Pencil, Plus, Upload, UserCheck, Users } from "lucide-react";
 import { FILE_ACCEPT_ATTR, parseImportFile } from "@/lib/csv-parser";
 import { supabase } from "@/lib/supabase";
 import { CampanaBadgeEstado, IncidenciaBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
@@ -16,6 +16,19 @@ import { CampanaColumna, fetchCampanaColumnas } from "@/lib/campana-columnas";
 import { agruparPuntosParaMaterial, mismaProvincia, provinciasConVariosTrabajadores, sugerirGestoresPorPunto, sugerirTrabajadoresPorPunto } from "@/lib/campana-asignacion";
 import { addWorkerAddress, formatDireccionEnvio } from "@/lib/direcciones-envio";
 import { IncidenciaRow, resumenVolcado, syncCampanaObligations } from "@/lib/payments/campana-obligations";
+import { PuntoEvento, fetchEventosCampana } from "@/lib/campana-auditoria";
+import { HistorialPanel } from "@/components/grandes-campanas/historial-panel";
+import { Documento, cambiarVisibilidadInstalador, fetchDocumentos, retirarDocumento, subirDocumento } from "@/lib/campana-documentos";
+import { DocumentosPanel } from "@/components/grandes-campanas/documentos-panel";
+import {
+  BorradorRegularizacion,
+  Regularizacion,
+  fetchMesesCerrados,
+  fetchRegularizaciones,
+  resolverRegularizacion,
+  solicitarRegularizacion
+} from "@/lib/campana-regularizaciones";
+import { RegularizacionesPanel } from "@/components/grandes-campanas/regularizaciones-panel";
 import {
   Campana,
   CampanaGestor,
@@ -55,6 +68,7 @@ const tabs = [
   ["incidencias", "Incidencias"],
   ["documentos", "Documentos"],
   ["historial", "Historial"],
+  ["regularizaciones", "Regularizaciones"],
   ["pagos", "Pagos"]
 ] as const;
 type TabKey = typeof tabs[number][0];
@@ -88,7 +102,22 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   const [logisticaPuntos, setLogisticaPuntos] = useState<Record<string, { request_id: string | null; status: string | null }>>({});
   const [matPara, setMatPara] = useState<PuntoVenta[] | null>(null);
   const [matForm, setMatForm] = useState({ name: "", cantidad: 1, notas: "" });
+  // v11.0 · Bitácora de los puntos. Se carga al abrir la pestaña «Historial» y no
+  // antes: es la consulta más pesada de la pantalla y casi nadie la mira.
+  const [eventos, setEventos] = useState<PuntoEvento[]>([]);
+  const [eventosCargados, setEventosCargados] = useState(false);
+  const [cargandoEventos, setCargandoEventos] = useState(false);
+  // v11.1 · Documentos. Misma idea: se cargan al abrir su pestaña.
+  const [documentos, setDocumentos] = useState<Documento[]>([]);
+  const [documentosCargados, setDocumentosCargados] = useState(false);
+  const [cargandoDocumentos, setCargandoDocumentos] = useState(false);
+  // v11.2 · Regularizaciones. El contador de pendientes se pinta en la pestaña,
+  // así que estas SÍ se cargan con la pantalla: si no, nadie ve que hay trabajo.
+  const [regularizaciones, setRegularizaciones] = useState<Regularizacion[]>([]);
+  const [mesesCerrados, setMesesCerrados] = useState<string[]>([]);
+  const [cargandoRegularizaciones, setCargandoRegularizaciones] = useState(false);
   const admin = isAdminSession(session);
+  const regularizacionesPendientes = regularizaciones.filter(fila => fila.estado === "propuesta").length;
 
   useEffect(() => {
     if (supabase) supabase.from("workers").select("id,name,province,phone").order("name").then(({ data }) => setWorkers((data || []) as Array<{ id: string; name: string; province?: string | null; phone?: string | null }>));
@@ -170,6 +199,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
 
   useEffect(() => {
     refresh();
+    cargarRegularizaciones();
     const search = new URLSearchParams(window.location.search);
     const importados = search.get("importados");
     if (importados) {
@@ -217,6 +247,111 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     setError("");
     const mensaje = await volcarPagos(puntos, `campana:${params.id}`);
     if (mensaje) flash(mensaje);
+    setSaving(false);
+  }
+
+  /**
+   * Carga la bitácora la primera vez que se abre «Historial». Se recarga a mano
+   * (no en el refresco de 30 s) porque es historia: no cambia sola mientras se lee.
+   */
+  async function cargarHistorial(forzar = false) {
+    if (cargandoEventos || (eventosCargados && !forzar)) return;
+    setCargandoEventos(true);
+    const result = await fetchEventosCampana(params.id);
+    if (result.error) setError(`No se pudo cargar el historial: ${result.error}`);
+    setEventos(result.data);
+    setEventosCargados(true);
+    setCargandoEventos(false);
+  }
+
+  /** Carga los documentos la primera vez que se abre «Documentos». */
+  async function cargarDocumentos(forzar = false) {
+    if (cargandoDocumentos || (documentosCargados && !forzar)) return;
+    setCargandoDocumentos(true);
+    const result = await fetchDocumentos(params.id, true);
+    if (result.error) setError(`No se pudieron cargar los documentos: ${result.error}`);
+    setDocumentos(result.data);
+    setDocumentosCargados(true);
+    setCargandoDocumentos(false);
+  }
+
+  async function cargarRegularizaciones() {
+    setCargandoRegularizaciones(true);
+    const [filas, meses] = await Promise.all([fetchRegularizaciones(params.id), fetchMesesCerrados()]);
+    if (filas.error) setError(`No se pudieron cargar las regularizaciones: ${filas.error}`);
+    setRegularizaciones(filas.data);
+    setMesesCerrados(meses);
+    setCargandoRegularizaciones(false);
+  }
+
+  function abrirTab(destino: TabKey) {
+    setTab(destino);
+    if (destino === "historial") cargarHistorial();
+    if (destino === "documentos") cargarDocumentos();
+  }
+
+  async function handleSolicitarRegularizacion(borrador: BorradorRegularizacion) {
+    setSaving(true);
+    setError("");
+    const result = await solicitarRegularizacion(borrador, mesesCerrados);
+    if (result.error) setError(result.error);
+    else flash("Regularización registrada. Queda pendiente de que administración la apruebe.");
+    await cargarRegularizaciones();
+    setSaving(false);
+  }
+
+  async function handleResolverRegularizacion(
+    fila: Regularizacion,
+    estado: "aprobada" | "rechazada",
+    opciones: { motivo?: string | null; refacturable?: boolean | null }
+  ) {
+    setSaving(true);
+    setError("");
+    const result = await resolverRegularizacion(fila.id, estado, opciones);
+    if (result.error) setError(result.error);
+    else if (estado === "aprobada") flash("Regularización aprobada: la línea ya está en Pagos.");
+    else flash("Regularización rechazada. Quien la propuso verá el motivo.");
+    await cargarRegularizaciones();
+    setSaving(false);
+  }
+
+  async function handleSubirDocumento(
+    archivo: File,
+    opciones: { nombre: string; categoria: Documento["categoria"]; descripcion: string | null; puntoId: string | null; visibleInstalador: boolean; sustituyeA: string | null }
+  ) {
+    setSaving(true);
+    setError("");
+    const result = await subirDocumento({
+      campanaId: params.id,
+      puntoId: opciones.puntoId,
+      archivo,
+      nombre: opciones.nombre,
+      descripcion: opciones.descripcion,
+      categoria: opciones.categoria,
+      visibleInstalador: opciones.visibleInstalador,
+      sustituyeA: opciones.sustituyeA
+    });
+    if (result.error) setError(result.error);
+    else flash(opciones.sustituyeA ? "Versión nueva publicada. La anterior queda en el histórico." : "Documento subido.");
+    await cargarDocumentos(true);
+    setSaving(false);
+  }
+
+  async function handleRetirarDocumento(documento: Documento) {
+    if (!confirm(`¿Retirar «${documento.nombre}»?\n\nDeja de ofrecerse, pero su ficha se conserva en el histórico de la campaña.`)) return;
+    setSaving(true);
+    const result = await retirarDocumento(documento.id, session);
+    if (result.error) setError(result.error);
+    else flash("Documento retirado.");
+    await cargarDocumentos(true);
+    setSaving(false);
+  }
+
+  async function handleVisibilidadDocumento(documento: Documento, visible: boolean) {
+    setSaving(true);
+    const result = await cambiarVisibilidadInstalador(documento.id, visible);
+    if (result.error) setError(result.error);
+    await cargarDocumentos(true);
     setSaving(false);
   }
 
@@ -570,6 +705,8 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
               <button className="gc-btn-outline" onClick={() => downloadXlsx(`campana_${campana.nombre.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}.xlsx`, puntosCsvRows(puntos))}><FileDown className="h-4 w-4" />Exportar</button>
               <button className="gc-btn-outline" onClick={abrirWhatsApp}><MessageCircle className="h-4 w-4" />WhatsApp</button>
               <Link href={`/grandes-campanas/${campana.id}/asignacion`} className="gc-btn-outline"><Users className="h-4 w-4" />Asignación rápida</Link>
+              {/* v11.3 · El informe que se manda al cliente. Solo administración: es lo que sale fuera. */}
+              {admin && <Link href={`/grandes-campanas/${campana.id}/informe`} className="gc-btn-outline"><FileText className="h-4 w-4" />Informe de cliente</Link>}
               {canManageCampaigns(session) && <Link href={`/grandes-campanas/${campana.id}/editar`} className="gc-btn-outline"><Pencil className="h-4 w-4" />Editar</Link>}
               {canManageCampaigns(session) && (
                 <>
@@ -660,9 +797,11 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
 
         <div className="gc-tabs gc-no-print">
           {tabs.map(([key, label]) => (
-            <button key={key} className={`gc-tab ${tab === key ? "gc-tab-active" : ""}`} onClick={() => setTab(key)}>
+            <button key={key} className={`gc-tab ${tab === key ? "gc-tab-active" : ""}`} onClick={() => abrirTab(key)}>
               {label}
               {key === "incidencias" && Number(kpis?.incidencias_abiertas || 0) > 0 && <span className="ml-1 rounded-full px-1.5 text-xs font-bold" style={{ background: "#fbe9ec", color: "var(--gc-secondary)" }}>{kpis?.incidencias_abiertas}</span>}
+              {/* Sin este contador, una regularización pendiente se queda esperando para siempre. */}
+              {key === "regularizaciones" && regularizacionesPendientes > 0 && <span className="ml-1 rounded-full px-1.5 text-xs font-bold" style={{ background: "#fbe9ec", color: "var(--gc-secondary)" }}>{regularizacionesPendientes}</span>}
             </button>
           ))}
         </div>
@@ -850,8 +989,33 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
           )
         )}
 
-        {(tab === "documentos" || tab === "historial") && (
-          <div className="gc-empty"><b>Próximamente.</b> Esta pestaña se activará cuando haya datos de {tab === "documentos" ? "documentación" : "historial de cambios"} para esta campaña.</div>
+        {tab === "historial" && <HistorialPanel eventos={eventos} cargando={cargandoEventos} />}
+
+        {tab === "regularizaciones" && (
+          <RegularizacionesPanel
+            campanaId={params.id}
+            regularizaciones={regularizaciones}
+            puntos={puntos}
+            mesesCerrados={mesesCerrados}
+            admin={admin}
+            cargando={cargandoRegularizaciones}
+            saving={saving}
+            onSolicitar={handleSolicitarRegularizacion}
+            onResolver={handleResolverRegularizacion}
+          />
+        )}
+
+        {tab === "documentos" && (
+          <DocumentosPanel
+            documentos={documentos}
+            puntos={puntos}
+            session={session}
+            cargando={cargandoDocumentos}
+            saving={saving}
+            onSubir={handleSubirDocumento}
+            onRetirar={handleRetirarDocumento}
+            onVisibilidad={handleVisibilidadDocumento}
+          />
         )}
 
         {admin && (

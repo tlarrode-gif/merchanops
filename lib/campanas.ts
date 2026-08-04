@@ -5,6 +5,12 @@ import { normalizeProvince, provinceScopeValues } from "@/lib/provinces";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { csvSafeCell } from "@/lib/sanitize";
 
+/**
+ * v11.0 · Por donde entro un cambio en un punto. Lo consume el trigger de
+ * auditoria (`merchan_gc_punto_auditoria`), que lo copia a la bitacora tal cual.
+ */
+export type OrigenCambio = "pantalla" | "importacion" | "masiva" | "logistica" | "sistema";
+
 export type CampanaEstado = "borrador" | "planificada" | "activa" | "pausada" | "completada" | "cancelada" | "archivada";
 export type PuntoEstado = "pendiente" | "completado" | "incidencia" | "cancelado";
 export type IncidenciaEstado = "abierta" | "en_gestion" | "resuelta";
@@ -78,6 +84,10 @@ export type PuntoVenta = {
   // v10.2: fecha en que Almacen cerro el picking del material de este punto.
   // La escribe logistics_close_picking; en Grandes Campanas es de solo lectura.
   picking_cerrado_at?: string | null;
+  // v11.0: por donde entro el ultimo cambio. Viaja EN el propio UPDATE porque el
+  // trigger de auditoria la lee de `new`; un GUC de transaccion no sobrevive al
+  // pool de conexiones de supabase-js. No se audita a si misma.
+  origen_ultimo_cambio?: OrigenCambio | null;
   datos_extra?: Record<string, unknown> | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -513,7 +523,8 @@ export async function insertPuntosBatch(campanaId: string, puntos: PuntoInput[])
       campana_id: campanaId,
       fecha_visita: punto.fecha_visita || null,
       importe: punto.importe ?? null,
-      datos_extra: punto.datos_extra || {}
+      datos_extra: punto.datos_extra || {},
+      origen_ultimo_cambio: "importacion" satisfies OrigenCambio
     });
   }
   if (!rows.length) return { data: 0, omitidos };
@@ -575,6 +586,8 @@ export async function updatePuntosPorCodigo(
       if (texto !== String(actual ?? "").trim()) patch[campo] = campo === "fecha_visita" ? (dateOnly(texto) || valor) : valor;
     }
     if (!Object.keys(patch).length) { resumen.sinCambios += 1; continue; }
+    // La bitácora tiene que poder distinguir «lo cambió alguien» de «lo cambió un Excel».
+    patch.origen_ultimo_cambio = "importacion" satisfies OrigenCambio;
     patch.updated_at = new Date().toISOString();
     const { error } = await supabase.from("puntos_venta_campana").update(patch).eq("id", existente.id);
     if (error) return { data: resumen, error: `Actualizados ${resumen.actualizados} antes de un error: ${error.message}` };
@@ -615,6 +628,7 @@ export async function bulkAssignPuntos(
   const patch = {
     gestor_id: gestor?.id || null,
     gestor_nombre: gestor?.nombre || null,
+    origen_ultimo_cambio: "masiva" satisfies OrigenCambio,
     updated_at: new Date().toISOString()
   };
   for (let index = 0; index < permitidos.length; index += 200) {
@@ -643,9 +657,10 @@ async function aplicarReparto(
   }
   let aplicados = 0;
   for (const [personaId, { nombre, ids }] of Array.from(porPersona.entries())) {
+    const origen = "masiva" satisfies OrigenCambio;
     const patch = campo === "gestor"
-      ? { gestor_id: personaId, gestor_nombre: nombre, updated_at: new Date().toISOString() }
-      : { instalador_id: personaId, instalador_nombre: nombre, updated_at: new Date().toISOString() };
+      ? { gestor_id: personaId, gestor_nombre: nombre, origen_ultimo_cambio: origen, updated_at: new Date().toISOString() }
+      : { instalador_id: personaId, instalador_nombre: nombre, origen_ultimo_cambio: origen, updated_at: new Date().toISOString() };
     for (let index = 0; index < ids.length; index += 200) {
       const { data, error } = await supabase
         .from("puntos_venta_campana")
@@ -669,7 +684,7 @@ export async function aplicarSugerenciasInstalador(sugerencias: Array<{ punto_id
   return aplicarReparto(sugerencias, "instalador");
 }
 
-export async function updatePunto(id: string, patch: Partial<PuntoVenta>): Promise<Result<boolean>> {
+export async function updatePunto(id: string, patch: Partial<PuntoVenta>, origen: OrigenCambio = "pantalla"): Promise<Result<boolean>> {
   if (!supabase) return { data: false, error: "Supabase no está configurado." };
   if (patch.importe !== undefined && Number(patch.importe ?? 0) < 0) return { data: false, error: "El importe no puede ser negativo." };
   const punto = await campanaIdDePunto(id);
@@ -678,7 +693,8 @@ export async function updatePunto(id: string, patch: Partial<PuntoVenta>): Promi
     const bloqueada = await assertCampanaEditable(punto.campanaId);
     if (bloqueada) return { data: false, error: bloqueada };
   }
-  const { error } = await supabase.from("puntos_venta_campana").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
+  // v11.0: el origen viaja en el mismo UPDATE para que el trigger lo copie a la bitácora.
+  const { error } = await supabase.from("puntos_venta_campana").update({ ...patch, origen_ultimo_cambio: origen, updated_at: new Date().toISOString() }).eq("id", id);
   if (error) return { data: false, error: error.message };
   return { data: true };
 }
@@ -779,7 +795,7 @@ export async function bulkSetDireccionEnvio(
       .map(punto => punto.id);
     if (!ids.length) return { data: 0, error: "Ninguno de los puntos de ese trabajador está dentro de tu ámbito." };
   }
-  const patch = { direccion_envio: direccionEnvio || null, direccion_envio_id: direccionEnvioId || null, updated_at: new Date().toISOString() };
+  const patch = { direccion_envio: direccionEnvio || null, direccion_envio_id: direccionEnvioId || null, origen_ultimo_cambio: "masiva" satisfies OrigenCambio, updated_at: new Date().toISOString() };
   const query = supabase.from("puntos_venta_campana").update(patch);
   const { data, error } = ids
     ? await query.in("id", ids).select("id")
