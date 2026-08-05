@@ -1,0 +1,901 @@
+/*
+  MerchanOps · Sistema visual (capa 2 de 3: superficies)
+  =====================================================
+  Esta capa reviste TODA la aplicación sin tocar una línea de JSX.
+
+  Por qué así: la app tiene ~840 KB de TSX repartidos en 40 pantallas con
+  cientos de botones, filtros, modales y ediciones en línea. Reescribir ese
+  marcado para maquetarlo de nuevo es la forma más segura de perder acciones
+  por el camino, que es justo lo que no puede pasar. En cambio el marcado usa
+  un vocabulario Tailwind muy repetido y muy consistente:
+
+      tarjeta   ->  .rounded-{xl,2xl,3xl}.border.bg-white
+      primario  ->  button.bg-slate-900.text-white
+      secundario->  button.border
+      apagado   ->  .text-slate-500 / .text-slate-400
+      hundido   ->  .bg-slate-50 / .bg-slate-100
+      estado    ->  .bg-red-50 / .bg-emerald-50 / .bg-amber-50 / .bg-blue-50 ...
+
+  Reescribiendo ESOS patrones se rediseña la aplicación entera de una vez, y
+  cualquier botón que exista hoy sigue existiendo mañana: no se ha tocado.
+
+  Todo cuelga de `.mo-app`, la clase que el AppShell pone en su raíz, así que
+  la especificidad gana a las utilidades de Tailwind (0,2,0 frente a 0,1,0)
+  sin necesidad de !important salvo donde se indica.
+*/
+
+/* ====================================================================== */
+/* 1. Lienzo y contenedores de página                                     */
+/* ====================================================================== */
+
+/* Los <main> de la app traen su propio fondo (bg-slate-100). El lienzo lo
+   pone ahora el armazón, así que aquí se vuelven transparentes. */
+.mo-app main.min-h-screen,
+.mo-app main.gc-module,
+.mo-app main.isdin-page {
+  min-height: 0;
+  background: transparent;
+  color: var(--mo-text);
+}
+
+/* La app respira mejor con más ancho útil: los mockups son de 1440. */
+.mo-app .mx-auto.max-w-7xl,
+.mo-app .mx-auto.max-w-\[1400px\],
+.mo-app .mx-auto.max-w-\[1280px\] {
+  max-width: 1520px;
+}
+
+/* Ritmo vertical uniforme entre bloques de una pantalla. */
+.mo-app section.mx-auto.space-y-3 > * + *,
+.mo-app section.mx-auto.space-y-4 > * + *,
+.mo-app section.mx-auto.space-y-5 > * + * {
+  margin-top: 1.125rem;
+}
+
+/* ====================================================================== */
+/* 1 bis. Cabecera de pantalla                                            */
+/* ====================================================================== */
+
+/*
+  Antes cada pantalla abría con una banda blanca fija que repetía su nombre.
+  Ahora ese nombre lo pone la topbar, así que la banda se queda solo con lo que
+  aporta: los botones de acción. Se vuelve transparente y deja de ser sticky
+  (dos barras pegajosas apiladas comían media pantalla).
+
+  Ningún botón se toca: solo cambia el fondo de la banda que los contiene.
+*/
+.mo-app main > header.sticky,
+.mo-app main > section > header.sticky {
+  position: static;
+  z-index: auto;
+  background: transparent;
+  border-bottom: 0;
+  backdrop-filter: none;
+}
+
+.mo-app main > header.sticky > .mx-auto,
+.mo-app main > section > header.sticky > .mx-auto {
+  padding-top: 1rem;
+  padding-bottom: 0.25rem;
+}
+
+/* El h1 que repetía el título de la topbar. Se marca en el JSX con
+   `mo-page-title` (solo se añadió una clase, no se movió nada) y se oculta:
+   dos <h1> con el mismo texto son ruido visual y también un problema de
+   accesibilidad. Los h1 que son CONTENIDO —el nombre de la campaña, el título
+   del informe, el de la pantalla de login— no llevan la marca y siguen ahí. */
+.mo-app .mo-page-title { display: none; }
+
+/* Al ocultar el título, el subtítulo que lo acompañaba se convierte en la
+   entradilla de la pantalla. */
+.mo-app .mo-page-title + p {
+  margin-top: 0;
+  font-size: 0.8125rem;
+  color: var(--mo-text-muted);
+}
+
+/* ====================================================================== */
+/* 2. Tipografía de pantalla                                              */
+/* ====================================================================== */
+
+/* Los títulos —de página y de tarjeta— pasan a serif: es la voz del sistema. */
+.mo-app h1,
+.mo-app h2,
+.mo-app h3 {
+  font-family: var(--mo-font-display);
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  color: var(--mo-text);
+}
+
+.mo-app h1 { font-size: 1.5rem; line-height: 1.2; }
+.mo-app h2 { font-size: 1.0625rem; line-height: 1.25; }
+.mo-app h3 { font-size: 0.9375rem; line-height: 1.3; }
+
+/* El texto apagado de la app (subtítulos, ayudas, metadatos). */
+.mo-app .text-slate-500 { color: var(--mo-text-muted); }
+.mo-app .text-slate-400 { color: var(--mo-text-faint); }
+.mo-app .text-slate-600 { color: var(--mo-text-muted); }
+.mo-app .text-slate-700 { color: #4b5563; }
+.mo-app .text-slate-900 { color: var(--mo-text); }
+
+/* Cualquier cifra en mono queda tabular: las columnas de importes cuadran. */
+.mo-app .font-mono,
+.mo-app [class*="font-mono"] {
+  font-family: var(--mo-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Los inputs numéricos y de fecha también, para que no bailen al escribir. */
+.mo-app input[type="date"],
+.mo-app input[type="month"],
+.mo-app input[type="number"],
+.mo-app input[type="time"] {
+  font-family: var(--mo-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cifras grandes: las tarjetas de KPI de toda la app usan text-2xl/3xl. */
+.mo-app .text-2xl,
+.mo-app .text-3xl {
+  font-family: var(--mo-font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ====================================================================== */
+/* 3. Tarjetas                                                            */
+/* ====================================================================== */
+
+/* Solo contenedores: los <button> y <a> con las mismas clases son botones y
+   se tratan en el bloque 5. */
+.mo-app :is(div, section, article, form, aside, header, footer, li, details, label).rounded-3xl.border.bg-white,
+.mo-app :is(div, section, article, form, aside, header, footer, li, details, label).rounded-2xl.border.bg-white,
+.mo-app :is(div, section, article, form, aside, header, footer, li, details, label).rounded-xl.border.bg-white {
+  border-radius: var(--mo-radius-card);
+  border-color: var(--mo-border);
+  background: var(--mo-surface);
+  box-shadow: var(--mo-shadow-card);
+  transition: box-shadow 0.2s var(--mo-ease), border-color 0.2s var(--mo-ease);
+}
+
+.mo-app :is(div, section, article).rounded-3xl.border.bg-white:hover,
+.mo-app :is(div, section, article).rounded-2xl.border.bg-white:hover {
+  box-shadow: var(--mo-shadow-card-hover);
+}
+
+/* Superficies hundidas dentro de una tarjeta (bloques de resumen, avisos). */
+.mo-app .bg-slate-50 {
+  background: var(--mo-surface-muted);
+}
+
+.mo-app :is(div, section, li, label).rounded-2xl.bg-slate-50,
+.mo-app :is(div, section, li, label).rounded-xl.bg-slate-50,
+.mo-app :is(div, section, li, label).rounded-2xl.bg-slate-100,
+.mo-app :is(div, section, li, label).rounded-xl.bg-slate-100 {
+  border-radius: var(--mo-radius-control);
+  background: var(--mo-surface-muted);
+  border: 1px solid var(--mo-border-soft);
+}
+
+/* Bordes internos: separadores dentro de tarjeta, más suaves que el marco. */
+.mo-app .border-t,
+.mo-app .border-b,
+.mo-app .border-l,
+.mo-app .border-r { border-color: var(--mo-border-soft); }
+
+.mo-app .divide-y > * + * { border-top-color: var(--mo-border-soft); }
+
+/* ====================================================================== */
+/* 4. Tarjetas de KPI                                                     */
+/* ====================================================================== */
+
+/*
+  El filete de color superior es la firma de los KPI en el mockup. Se aplica
+  con la clase explícita `mo-kpi` (o `mo-kpi-grid` en el contenedor) en vez de
+  adivinar qué rejilla es de KPIs: adivinarlo pintaría rayas en rejillas que
+  no lo son.
+*/
+.mo-app .mo-kpi,
+.mo-app .mo-kpi-grid > * {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--mo-radius-card);
+  border: 1px solid var(--mo-border);
+  background: var(--mo-surface);
+  box-shadow: var(--mo-shadow-card);
+  padding: 0.9375rem 1.0625rem 1.0625rem;
+}
+
+.mo-app .mo-kpi::before,
+.mo-app .mo-kpi-grid > *::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--mo-coral);
+}
+
+/* Acentos por naturaleza del dato, en el orden en que aparecen en el mockup. */
+.mo-app .mo-kpi--risk::before,
+.mo-app .mo-kpi-grid > .mo-kpi--risk::before { background: var(--mo-burgundy); }
+.mo-app .mo-kpi--ok::before,
+.mo-app .mo-kpi-grid > .mo-kpi--ok::before { background: var(--mo-green); }
+.mo-app .mo-kpi--gold::before,
+.mo-app .mo-kpi-grid > .mo-kpi--gold::before { background: var(--mo-gold); }
+.mo-app .mo-kpi--ink::before,
+.mo-app .mo-kpi-grid > .mo-kpi--ink::before { background: var(--mo-ink); }
+
+/* Etiqueta diminuta + cifra en serif, sin depender del marcado de cada página. */
+.mo-app .mo-kpi__label {
+  font-size: var(--mo-eyebrow-size);
+  font-weight: 500;
+  letter-spacing: var(--mo-eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--mo-text-faint);
+  display: block;
+  margin-bottom: 0.375rem;
+}
+
+.mo-app .mo-kpi__value {
+  font-family: var(--mo-font-display);
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  color: var(--mo-text);
+  font-variant-numeric: tabular-nums;
+  display: block;
+}
+
+.mo-app .mo-kpi--risk .mo-kpi__value { color: var(--mo-burgundy); }
+
+.mo-app .mo-kpi__hint {
+  margin-top: 0.3125rem;
+  font-size: 0.75rem;
+  color: var(--mo-text-muted);
+  display: block;
+}
+
+/* Cuando el KPI es un enlace o botón, que se note que se puede pulsar. */
+.mo-app a.mo-kpi,
+.mo-app button.mo-kpi {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mo-app a.mo-kpi:hover,
+.mo-app button.mo-kpi:hover,
+.mo-app .mo-kpi-grid > a:hover,
+.mo-app .mo-kpi-grid > button:hover {
+  box-shadow: var(--mo-shadow-card-hover);
+  border-color: var(--mo-border-strong);
+}
+
+/* ====================================================================== */
+/* 5. Botones                                                             */
+/* ====================================================================== */
+
+.mo-app :is(button, a).rounded-3xl,
+.mo-app :is(button, a).rounded-2xl,
+.mo-app :is(button, a).rounded-xl,
+.mo-app :is(button, a).rounded-lg {
+  border-radius: var(--mo-radius-control);
+  font-weight: 500;
+  transition: background-color 0.16s var(--mo-ease), border-color 0.16s var(--mo-ease),
+              color 0.16s var(--mo-ease), box-shadow 0.16s var(--mo-ease);
+}
+
+/* Primario: tinta sólida. */
+.mo-app :is(button, a).bg-slate-900 {
+  background: var(--mo-ink);
+  border-color: var(--mo-ink);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 31, 0.12);
+}
+
+.mo-app :is(button, a).bg-slate-900:hover:not(:disabled) {
+  background: #23232f;
+  border-color: #23232f;
+  box-shadow: var(--mo-shadow-raised);
+}
+
+.mo-app :is(button, a).bg-slate-900:disabled,
+.mo-app :is(button, a).bg-slate-900[aria-disabled="true"] {
+  background: #9aa0a8;
+  border-color: #9aa0a8;
+  box-shadow: none;
+}
+
+/* Secundario: blanco con borde. */
+.mo-app :is(button, a).border:not(.bg-slate-900):not([class*="bg-red"]):not([class*="bg-emerald"]):not([class*="bg-green"]):not([class*="bg-amber"]):not([class*="bg-orange"]):not([class*="bg-blue"]):not([class*="bg-purple"]) {
+  background: var(--mo-surface);
+  border-color: var(--mo-border);
+  color: var(--mo-text);
+}
+
+.mo-app :is(button, a).border:not(.bg-slate-900):not([class*="bg-red"]):not([class*="bg-emerald"]):not([class*="bg-green"]):not([class*="bg-amber"]):not([class*="bg-orange"]):not([class*="bg-blue"]):not([class*="bg-purple"]):hover:not(:disabled) {
+  background: var(--mo-surface-muted);
+  border-color: var(--mo-border-strong);
+}
+
+/* Acción destructiva: burdeos, nunca rojo semáforo. */
+.mo-app :is(button, a).text-red-600,
+.mo-app :is(button, a).text-red-700 { color: var(--mo-burgundy); }
+
+.mo-app :is(button, a).text-red-600:hover,
+.mo-app :is(button, a).text-red-700:hover { color: #6f1425; }
+
+.mo-app :is(button, a).bg-red-600,
+.mo-app :is(button, a).bg-red-700 {
+  background: var(--mo-burgundy);
+  border-color: var(--mo-burgundy);
+  color: #fff;
+}
+
+.mo-app :is(button, a).bg-red-600:hover:not(:disabled),
+.mo-app :is(button, a).bg-red-700:hover:not(:disabled) { background: #741526; }
+
+/* Confirmación en verde de marca. */
+.mo-app :is(button, a).bg-emerald-600,
+.mo-app :is(button, a).bg-green-600 {
+  background: var(--mo-green);
+  border-color: var(--mo-green);
+  color: #fff;
+}
+
+.mo-app :is(button, a).bg-emerald-600:hover:not(:disabled),
+.mo-app :is(button, a).bg-green-600:hover:not(:disabled) { background: #12692f; }
+
+.mo-app button:focus-visible,
+.mo-app a:focus-visible,
+.mo-app [role="button"]:focus-visible {
+  outline: 2px solid var(--mo-coral);
+  outline-offset: 2px;
+}
+
+/* Enlaces de texto. */
+.mo-app .hover\:underline:hover { text-decoration-color: var(--mo-coral); }
+
+/* ====================================================================== */
+/* 6. Chips de filtro                                                     */
+/* ====================================================================== */
+
+/*
+  Los filtros de la app son <button> con rounded-xl/2xl. El mockup los quiere
+  en píldora: el activo en tinta sólida, el resto blancos con su contador.
+  Se marca con `mo-chips` en el contenedor de filtros para no convertir en
+  píldora cualquier botón pequeño de la pantalla.
+*/
+.mo-app .mo-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mo-app .mo-chips :is(button, a) {
+  border-radius: var(--mo-radius-pill);
+  padding: 0.375rem 0.8125rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.mo-app .mo-chips :is(button, a):not(.bg-slate-900) {
+  background: var(--mo-surface);
+  border: 1px solid var(--mo-border);
+  color: var(--mo-text-muted);
+}
+
+.mo-app .mo-chips :is(button, a):not(.bg-slate-900):hover {
+  border-color: var(--mo-border-strong);
+  color: var(--mo-text);
+}
+
+.mo-app .mo-chips :is(button, a).bg-slate-900 {
+  background: var(--mo-ink);
+  border: 1px solid var(--mo-ink);
+  color: #fff;
+}
+
+/* Contador dentro del chip. */
+.mo-app .mo-chip-count {
+  margin-left: 0.4375rem;
+  font-family: var(--mo-font-mono);
+  font-size: 0.75rem;
+  color: var(--mo-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.mo-app .mo-chips .bg-slate-900 .mo-chip-count { color: rgba(255, 255, 255, 0.65); }
+
+/* ====================================================================== */
+/* 7. Controles de formulario                                             */
+/* ====================================================================== */
+
+.mo-app input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+.mo-app select,
+.mo-app textarea {
+  border-radius: var(--mo-radius-control);
+  border: 1px solid var(--mo-border);
+  background: var(--mo-surface);
+  color: var(--mo-text);
+  transition: border-color 0.16s var(--mo-ease), box-shadow 0.16s var(--mo-ease), background-color 0.16s var(--mo-ease);
+}
+
+.mo-app input::placeholder,
+.mo-app textarea::placeholder { color: var(--mo-text-faint); }
+
+.mo-app input:focus,
+.mo-app select:focus,
+.mo-app textarea:focus {
+  outline: none;
+  border-color: var(--mo-coral);
+  box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.13);
+}
+
+.mo-app input:disabled,
+.mo-app select:disabled,
+.mo-app textarea:disabled {
+  background: var(--mo-surface-muted);
+  color: var(--mo-text-faint);
+  cursor: not-allowed;
+}
+
+.mo-app textarea[readonly] {
+  background: var(--mo-tint-gold);
+  border-color: var(--mo-tint-gold-border);
+  color: var(--mo-tint-gold-text);
+}
+
+.mo-app select { cursor: pointer; }
+
+.mo-app input[type="checkbox"],
+.mo-app input[type="radio"] {
+  accent-color: var(--mo-coral);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+/* La etiqueta que precede a un control. */
+.mo-app label > span:first-child {
+  display: block;
+  margin-bottom: 0.3125rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--mo-text-muted);
+}
+
+/* ====================================================================== */
+/* 8. Tablas                                                              */
+/* ====================================================================== */
+
+.mo-app table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.mo-app thead tr,
+.mo-app thead.bg-slate-50,
+.mo-app thead .bg-slate-50 {
+  background: transparent;
+}
+
+.mo-app th {
+  font-family: var(--mo-font-sans);
+  font-size: var(--mo-eyebrow-size);
+  font-weight: 500;
+  letter-spacing: var(--mo-eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--mo-text-faint);
+  border-bottom: 1px solid var(--mo-border);
+  padding-top: 0.6875rem;
+  padding-bottom: 0.6875rem;
+  white-space: nowrap;
+  background: transparent;
+}
+
+.mo-app td {
+  border-bottom: 1px solid var(--mo-border-soft);
+  padding-top: 0.6875rem;
+  padding-bottom: 0.6875rem;
+  color: var(--mo-text);
+  vertical-align: middle;
+}
+
+.mo-app tbody tr { transition: background-color 0.14s var(--mo-ease); }
+.mo-app tbody tr:hover { background: var(--mo-surface-muted); }
+.mo-app tbody tr:last-child td { border-bottom: 0; }
+
+.mo-app :is(th, td):first-child { padding-left: 1rem; }
+.mo-app :is(th, td):last-child { padding-right: 1rem; }
+
+/* Fila de riesgo: tinte rosa y filete burdeos a la izquierda. Es la señal más
+   importante de la app —vencido, incidencia, sin conciliar— y en el mockup se
+   lee de un vistazo. */
+.mo-app tr[class*="bg-red-50"],
+.mo-app tr.mo-row-risk {
+  background: var(--mo-tint-risk);
+  box-shadow: inset 3px 0 0 var(--mo-burgundy);
+}
+
+.mo-app tr[class*="bg-red-50"]:hover,
+.mo-app tr.mo-row-risk:hover { background: #f8dfe4; }
+
+.mo-app tr[class*="bg-amber-50"],
+.mo-app tr[class*="bg-orange-50"],
+.mo-app tr.mo-row-warn {
+  background: var(--mo-tint-warn);
+  box-shadow: inset 3px 0 0 var(--mo-gold);
+}
+
+.mo-app tr[class*="bg-emerald-50"],
+.mo-app tr[class*="bg-green-50"],
+.mo-app tr.mo-row-ok {
+  background: var(--mo-tint-ok);
+  box-shadow: inset 3px 0 0 var(--mo-green);
+}
+
+/* Controles embebidos en celda: alto uniforme para que la fila no salte. */
+.mo-app td :is(input, select, button, a).rounded-xl,
+.mo-app td :is(input, select, button, a).rounded-lg,
+.mo-app td :is(input, select, button, a).rounded-2xl {
+  min-height: 32px;
+}
+
+/* El contenedor con scroll de una tabla ancha hereda el radio de la tarjeta. */
+.mo-app .overflow-auto,
+.mo-app .overflow-x-auto { border-radius: var(--mo-radius-card); }
+
+/* ====================================================================== */
+/* 9. Estados: del semáforo de Tailwind a la paleta de marca               */
+/* ====================================================================== */
+
+/*
+  La app pinta estados con las paletas por defecto de Tailwind. Aquí se
+  remapean a los seis colores del sistema. Se usa !important porque muchas de
+  estas clases conviven con utilidades de texto de la misma especificidad y el
+  orden de cascada entre ellas no está garantizado.
+*/
+
+/* Riesgo · burdeos */
+.mo-app .bg-red-50, .mo-app .bg-rose-50 { background-color: var(--mo-tint-risk) !important; }
+.mo-app .text-red-700, .mo-app .text-red-800,
+.mo-app .text-rose-700, .mo-app .text-rose-800 { color: var(--mo-tint-risk-text) !important; }
+.mo-app .border-red-200, .mo-app .border-red-300,
+.mo-app .border-rose-200 { border-color: var(--mo-tint-risk-border) !important; }
+
+/* Validado · verde */
+.mo-app .bg-emerald-50, .mo-app .bg-green-50 { background-color: var(--mo-tint-ok) !important; }
+.mo-app .text-emerald-700, .mo-app .text-emerald-800,
+.mo-app .text-green-700, .mo-app .text-green-800 { color: var(--mo-tint-ok-text) !important; }
+.mo-app .border-emerald-200, .mo-app .border-green-200 { border-color: var(--mo-tint-ok-border) !important; }
+
+/* Pendiente / atención · oro */
+.mo-app .bg-amber-50, .mo-app .bg-orange-50, .mo-app .bg-yellow-50 { background-color: var(--mo-tint-warn) !important; }
+.mo-app .text-amber-700, .mo-app .text-amber-800,
+.mo-app .text-orange-700, .mo-app .text-orange-800,
+.mo-app .text-yellow-700, .mo-app .text-yellow-800 { color: var(--mo-tint-warn-text) !important; }
+.mo-app .border-amber-200, .mo-app .border-orange-200, .mo-app .border-yellow-200 { border-color: var(--mo-tint-warn-border) !important; }
+
+/* En curso / informativo · azul */
+.mo-app .bg-blue-50, .mo-app .bg-sky-50, .mo-app .bg-indigo-50 { background-color: var(--mo-tint-info) !important; }
+.mo-app .text-blue-700, .mo-app .text-blue-800,
+.mo-app .text-sky-700, .mo-app .text-indigo-700, .mo-app .text-indigo-800 { color: var(--mo-tint-info-text) !important; }
+.mo-app .border-blue-200, .mo-app .border-sky-200, .mo-app .border-indigo-200 { border-color: var(--mo-tint-info-border) !important; }
+
+/* Categoría / auditoría · violeta apagado, el único tinte fuera de los seis
+   colores; se conserva porque la app lo usa para distinguir una familia de
+   eventos y fundirlo con el azul haría ilegible esa distinción. */
+.mo-app .bg-purple-50, .mo-app .bg-violet-50, .mo-app .bg-fuchsia-50 { background-color: #f2edf8 !important; }
+.mo-app .text-purple-700, .mo-app .text-purple-800,
+.mo-app .text-violet-700, .mo-app .text-fuchsia-700 { color: #5c4880 !important; }
+.mo-app .border-purple-200, .mo-app .border-violet-200 { border-color: #ddd2ec !important; }
+
+/* Neutro */
+.mo-app .bg-slate-100 { background-color: var(--mo-surface-sunken); }
+
+/* Rellenos sólidos de estado (barras de progreso, puntos, badges macizos). */
+.mo-app .bg-emerald-600, .mo-app .bg-green-600 { background-color: var(--mo-green); }
+.mo-app .bg-red-600, .mo-app .bg-red-500 { background-color: var(--mo-burgundy); }
+.mo-app .bg-amber-500, .mo-app .bg-orange-500, .mo-app .bg-yellow-500 { background-color: var(--mo-gold); }
+.mo-app .bg-blue-600, .mo-app .bg-blue-500 { background-color: #3355a8; }
+
+/* Píldora de estado: la forma canónica del mockup. */
+.mo-app .mo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  border-radius: var(--mo-radius-pill);
+  padding: 0.1875rem 0.5625rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  line-height: 1.35;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  background: var(--mo-tint-neutral);
+  color: var(--mo-tint-neutral-text);
+  border-color: var(--mo-tint-neutral-border);
+}
+
+.mo-app .mo-badge--risk { background: var(--mo-tint-risk); color: var(--mo-tint-risk-text); border-color: var(--mo-tint-risk-border); }
+.mo-app .mo-badge--ok { background: var(--mo-tint-ok); color: var(--mo-tint-ok-text); border-color: var(--mo-tint-ok-border); }
+.mo-app .mo-badge--warn { background: var(--mo-tint-warn); color: var(--mo-tint-warn-text); border-color: var(--mo-tint-warn-border); }
+.mo-app .mo-badge--info { background: var(--mo-tint-info); color: var(--mo-tint-info-text); border-color: var(--mo-tint-info-border); }
+.mo-app .mo-badge--gold { background: var(--mo-tint-gold); color: var(--mo-tint-gold-text); border-color: var(--mo-tint-gold-border); }
+.mo-app .mo-badge--ink { background: var(--mo-ink); color: #fff; border-color: var(--mo-ink); }
+
+/* Las píldoras ya existentes en la app (rounded-full con tinte) adoptan el
+   tamaño y el tracking del sistema sin perder su color. */
+.mo-app .rounded-full.text-xs[class*="bg-"],
+.mo-app .rounded-full.text-\[11px\][class*="bg-"] {
+  border-radius: var(--mo-radius-pill);
+  letter-spacing: 0.045em;
+  font-weight: 500;
+  padding: 0.1875rem 0.5625rem;
+}
+
+/* ====================================================================== */
+/* 10. Barras de progreso                                                 */
+/* ====================================================================== */
+
+.mo-app .h-2.rounded-full.bg-slate-100,
+.mo-app .h-2.overflow-hidden.rounded-full.bg-slate-100,
+.mo-app .h-1\.5.rounded-full.bg-slate-100,
+.mo-app .h-3.rounded-full.bg-slate-100 {
+  height: 6px;
+  background: var(--mo-surface-sunken);
+  border-radius: var(--mo-radius-pill);
+  overflow: hidden;
+}
+
+.mo-app .h-full.bg-slate-900,
+.mo-app .h-2.rounded-full.bg-slate-900 {
+  background: var(--mo-ink);
+  border-radius: var(--mo-radius-pill);
+}
+
+/* ====================================================================== */
+/* 11. Modales y capas flotantes                                          */
+/* ====================================================================== */
+
+.mo-app .fixed.inset-0.z-50 {
+  background: rgba(20, 20, 31, 0.42);
+  backdrop-filter: blur(4px);
+}
+
+.mo-app .fixed.inset-0.z-50 > :is(div, form, section) {
+  border-radius: 14px;
+  border: 1px solid var(--mo-border-soft);
+  box-shadow: var(--mo-shadow-overlay);
+}
+
+/* Aviso flotante (toast) de la app. */
+.mo-app .fixed.right-4.top-24,
+.mo-app .fixed.right-4.top-6 {
+  border: 0;
+  background: var(--mo-ink);
+  color: #fff;
+  border-radius: var(--mo-radius-control);
+  box-shadow: var(--mo-shadow-raised);
+}
+
+/* ====================================================================== */
+/* 12. Bloques de aviso                                                   */
+/* ====================================================================== */
+
+/* Banda informativa de cabecera (p. ej. «Solo consulta» en Logística). */
+.mo-app .mo-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  border-radius: var(--mo-radius-card);
+  border: 1px solid var(--mo-tint-gold-border);
+  background: var(--mo-tint-gold);
+  color: var(--mo-tint-gold-text);
+  padding: 0.75rem 0.9375rem;
+  font-size: 0.8125rem;
+}
+
+.mo-app .mo-notice__icon { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; }
+
+.mo-app .mo-notice--risk { border-color: var(--mo-tint-risk-border); background: var(--mo-tint-risk); color: var(--mo-tint-risk-text); }
+.mo-app .mo-notice--info { border-color: var(--mo-tint-info-border); background: var(--mo-tint-info); color: var(--mo-tint-info-text); }
+.mo-app .mo-notice--ok { border-color: var(--mo-tint-ok-border); background: var(--mo-tint-ok); color: var(--mo-tint-ok-text); }
+
+/* ====================================================================== */
+/* 13. Estado vacío                                                       */
+/* ====================================================================== */
+
+.mo-app .mo-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 2.5rem 1.25rem;
+  text-align: center;
+  color: var(--mo-text-muted);
+}
+
+.mo-app .mo-empty__title {
+  font-family: var(--mo-font-display);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--mo-text);
+}
+
+.mo-app .mo-empty__hint { font-size: 0.8125rem; color: var(--mo-text-faint); max-width: 44ch; }
+
+/* ====================================================================== */
+/* 13 bis. Rincones que el barrido general no alcanza                     */
+/* ====================================================================== */
+
+/*
+  Lo de abajo salió de recorrer las 24 rutas buscando dónde seguía asomando la
+  paleta por defecto de Tailwind. Son casos concretos, cada uno con su razón.
+*/
+
+/* Los cuatro modales del Home usan z-[80], no z-50: sin esto se quedaban con
+   el velo gris de Tailwind mientras el resto ya tenía el de marca. */
+.mo-app .fixed.inset-0.z-\[80\] {
+  background: rgba(20, 20, 31, 0.42);
+  backdrop-filter: blur(4px);
+}
+
+.mo-app .fixed.inset-0.z-\[80\] > :is(div, form, section) {
+  border-radius: 14px;
+  border: 1px solid var(--mo-border-soft);
+  box-shadow: var(--mo-shadow-overlay);
+}
+
+/* Paneles laterales: el detalle de un vinilo y el de una llamada. */
+.mo-app .fixed.inset-0.z-40 > .absolute.inset-0,
+.mo-app .fixed.inset-0.z-50 > .absolute.inset-0 { background: rgba(20, 20, 31, 0.34); }
+
+.mo-app .fixed.inset-0.z-40 aside,
+.mo-app .fixed.inset-0.z-50 aside {
+  border-left: 1px solid var(--mo-border);
+  box-shadow: var(--mo-shadow-overlay);
+}
+
+/* `ring-*` es un canal aparte del de `border-*`: las píldoras de estado de
+   Servicios, ISDIN y Llamadas se dibujan con anillo, así que sin remapearlo
+   quedaba un halo azul o rojo de Tailwind alrededor del tinte de marca. */
+.mo-app .ring-red-200, .mo-app .ring-rose-200 { --tw-ring-color: var(--mo-tint-risk-border) !important; }
+.mo-app .ring-emerald-200, .mo-app .ring-green-200 { --tw-ring-color: var(--mo-tint-ok-border) !important; }
+.mo-app .ring-amber-200, .mo-app .ring-orange-200 { --tw-ring-color: var(--mo-tint-warn-border) !important; }
+.mo-app .ring-blue-200, .mo-app .ring-sky-200 { --tw-ring-color: var(--mo-tint-info-border) !important; }
+.mo-app .ring-slate-200, .mo-app .ring-zinc-200 { --tw-ring-color: var(--mo-tint-neutral-border) !important; }
+.mo-app .ring-violet-200, .mo-app .ring-purple-200 { --tw-ring-color: #ddd2ec !important; }
+
+/* Tintes sueltos que solo aparecen en una o dos pantallas. */
+.mo-app .bg-zinc-100 { background-color: var(--mo-tint-neutral) !important; }
+.mo-app .bg-rose-50\/60 { background-color: var(--mo-tint-risk) !important; }
+.mo-app .bg-rose-100 { background-color: #f6d9e0 !important; }
+.mo-app .text-zinc-800 { color: #3f4046 !important; }
+
+/* Cabecera de tabla oscura heredada (Llamadas, Dashboard, Facturación): en el
+   mockup la cabecera es clara con la etiqueta diminuta. */
+.mo-app thead.bg-slate-900,
+.mo-app thead .bg-slate-900 { background: transparent !important; }
+
+.mo-app thead.bg-slate-900 th,
+.mo-app thead .bg-slate-900 th { color: var(--mo-text-faint) !important; }
+
+/* En una tabla, lo alineado a la derecha es siempre una cifra. */
+.mo-app td.text-right,
+.mo-app td[class*="text-right"] {
+  font-family: var(--mo-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Subnavegación propia de Logística: es una sub-navegación dentro del módulo,
+   no una segunda barra lateral, así que se lee como tarjeta y su elemento
+   activo repite el filete coral de la sidebar global. */
+.mo-app .sticky.top-20 {
+  border-radius: var(--mo-radius-card);
+  border-color: var(--mo-border);
+  box-shadow: var(--mo-shadow-card);
+}
+
+.mo-app .sticky.top-20 .rounded-xl.bg-slate-900 {
+  position: relative;
+  background: var(--mo-ink-active);
+  border-radius: 8px;
+}
+
+.mo-app .sticky.top-20 .rounded-xl.bg-slate-900::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 17px;
+  border-radius: 0 3px 3px 0;
+  background: var(--mo-coral);
+}
+
+/*
+  El menú de acciones de una campaña se monta con createPortal sobre <body>,
+  fuera del árbol de `.mo-app`, para que el overflow de la tabla no lo recorte.
+  Por eso sus reglas van SIN el prefijo: con él no le aplicarían nunca.
+*/
+.gc-menu {
+  border-radius: var(--mo-radius-card);
+  border-color: var(--mo-border);
+  box-shadow: var(--mo-shadow-overlay);
+  font-family: var(--mo-font-sans);
+}
+
+.gc-menu a,
+.gc-menu button { font-weight: 500; border-radius: 8px; }
+.gc-menu a:hover,
+.gc-menu button:hover { background: var(--mo-surface-muted); }
+.gc-menu .gc-menu-danger { color: var(--mo-burgundy); }
+.gc-menu-sep { border-top-color: var(--mo-border-soft); }
+
+/* Igual que el menú: el modal de gestión de campañas también vive fuera. */
+.gc-modal-backdrop { background: rgba(20, 20, 31, 0.45); backdrop-filter: blur(4px); }
+.gc-modal { border-radius: 14px; box-shadow: var(--mo-shadow-overlay); }
+.gc-toast { border-radius: var(--mo-radius-card); box-shadow: var(--mo-shadow-raised); }
+
+/* ====================================================================== */
+/* 14. Comportamiento responsive                                          */
+/* ====================================================================== */
+
+/*
+  Reglas rescatadas de responsive-visual.css, que se borró con el resto de la
+  capa de parches. Estas sí valían: sin ellas las tablas densas dejan de poder
+  desplazarse en móvil y los controles dentro de celda se vuelven inusables.
+  Reescritas contra `.mo-app` en vez de contra `body main`.
+*/
+
+.mo-app .overflow-auto,
+.mo-app .overflow-x-auto {
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Una tabla ancha se desplaza dentro de su contenedor en vez de estrujar las
+   columnas hasta hacerlas ilegibles. */
+.mo-app .overflow-auto > table,
+.mo-app .overflow-x-auto > table { min-width: max-content; }
+
+/* Controles dentro de celda: por debajo de este ancho no se puede ni leer lo
+   que hay seleccionado. */
+.mo-app td :is(input, select, textarea) { min-width: 110px; }
+.mo-app td button { white-space: nowrap; }
+
+/* Los grupos de botones densos respiran al saltar de línea. */
+.mo-app .flex.flex-wrap.gap-2 { row-gap: 0.5rem; }
+
+@media (max-width: 900px) {
+  .mo-app table { font-size: 0.8125rem; }
+  .mo-app :is(th, td) { padding-left: 0.625rem; padding-right: 0.625rem; }
+}
+
+@media (max-width: 768px) {
+  .mo-app section.mx-auto,
+  .mo-app main > header .mx-auto { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .mo-app h1 { font-size: 1.3rem; }
+  .mo-app h2 { font-size: 1rem; }
+}
+
+@media (max-width: 640px) {
+  /* Objetivo táctil mínimo. */
+  .mo-app :is(button, a[class*="rounded"]) { min-height: 36px; }
+  .mo-app .grid { gap: 0.75rem; }
+  .mo-app :is(div, section, article).rounded-3xl.border.bg-white,
+  .mo-app :is(div, section, article).rounded-2xl.border.bg-white { padding: 0.9375rem; }
+}

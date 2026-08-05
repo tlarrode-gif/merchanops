@@ -77,7 +77,7 @@ export default function AvisosPage() {
     <main className="min-h-screen bg-slate-100 p-4 text-slate-900">
       <section className="mx-auto max-w-6xl space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h1 className="text-3xl font-bold">Avisos del sistema</h1>
+          <h1 className="mo-page-title text-3xl font-bold">Avisos del sistema</h1>
           <button onClick={refresh} className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold"><RefreshCw className="mr-1 inline h-4 w-4" />Actualizar</button>
         </div>
         {notice && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}

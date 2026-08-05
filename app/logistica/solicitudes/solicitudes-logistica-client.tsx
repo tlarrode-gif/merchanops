@@ -10,6 +10,7 @@ import { cancelLogisticsRequest, updateLogisticsRequest } from "@/lib/logistics-
 import { loadLogisticsState } from "@/lib/logistics-store";
 import { acceptRequestAndReserve, materialDisplay, sourceHref } from "@/lib/logistics-sync";
 import { AppSession, canAccessModule, getCurrentAppSession, merchanopsSessionChangeEvent } from "@/lib/access-control";
+import { MoKpi } from "@/components/ui/mo";
 
 type Request = LogisticsState["requests"][number];
 type Requirement = LogisticsState["requirements"][number];
@@ -263,7 +264,7 @@ function AccessGate({ text }: { text: string }) {
 }
 
 function Kpi({ label, value }: { label: string; value: number }) {
-  return <div className="rounded-2xl border bg-white p-4 shadow-sm"><p className="text-sm text-slate-500">{label}</p><p className="text-3xl font-bold">{value}</p></div>;
+  return <MoKpi label={label} value={value} />;
 }
 function Read({ label, value }: { label: string; value: React.ReactNode }) {
   return <div className="border-b py-2 text-sm"><p className="text-xs font-semibold text-slate-500">{label}</p><div>{value}</div></div>;

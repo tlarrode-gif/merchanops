@@ -88,7 +88,7 @@ export default function GrandesCampanasPage() {
           </a>
           <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 className="text-3xl font-extrabold">Grandes Campañas</h1>
+              <h1 className="mo-page-title text-3xl font-extrabold">Grandes Campañas</h1>
               <p className="text-sm" style={{ color: "var(--gc-muted)" }}>Gestión masiva de puntos, instaladores, incidencias y pagos por trabajador.</p>
               <p className="mt-2 inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold" style={{ borderColor: "var(--gc-border)", background: "#fff" }}>
                 <Eye className="h-3.5 w-3.5" style={{ color: "var(--gc-secondary)" }} />

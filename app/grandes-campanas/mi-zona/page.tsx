@@ -41,7 +41,7 @@ export default function MiZonaPage() {
     <main className="gc-module">
       <section className="mx-auto max-w-[1200px] space-y-4 p-4">
         <div>
-          <h1 className="text-2xl font-extrabold"><MapPin className="mr-1 inline h-5 w-5" />Mi zona</h1>
+          <h1 className="mo-page-title text-2xl font-extrabold"><MapPin className="mr-1 inline h-5 w-5" />Mi zona</h1>
           <p className="text-sm" style={{ color: "var(--gc-muted)" }}>
             {admin ? "Vista de gestor (como administrador ves todas las campañas). " : <>Ámbito: <b>{sessionProvinceLabel(session)}</b>. </>}
             Campañas con puntos en tu zona para asignar por provincia · <b>{totalSinAsignar.toLocaleString("es-ES")}</b> puntos sin asignar.

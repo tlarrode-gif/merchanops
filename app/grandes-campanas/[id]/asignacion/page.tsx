@@ -270,7 +270,7 @@ export default function AsignacionRapidaPage({ params }: { params: { id: string 
           </nav>
           <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-extrabold">Asignación rápida</h1>
+              <h1 className="mo-page-title text-2xl font-extrabold">Asignación rápida</h1>
               <p className="text-sm" style={{ color: "var(--gc-muted)" }}>
                 Selecciona puntos y asígnalos en bloque. Ámbito: <b>{sessionProvinceLabel(session)}</b> · <b>{sinAsignar.toLocaleString("es-ES")}</b> puntos sin asignar de {puntos.length.toLocaleString("es-ES")} visibles.
               </p>

@@ -150,7 +150,7 @@ export default function ObligacionesPage() {
       <section className="mx-auto max-w-7xl space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h1 className="text-3xl font-bold">Aprobación de pagos</h1>
+            <h1 className="mo-page-title text-3xl font-bold">Aprobación de pagos</h1>
             <p className="text-sm text-slate-500">
               {admin ? "Administración: visibilidad de todas las provincias." : "Apruebas los pagos de tus provincias asignadas."}
             </p>

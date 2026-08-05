@@ -351,7 +351,7 @@ export function CadenasClient() {
       <section className="mx-auto max-w-7xl space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h1 className="text-3xl font-bold">Cadenas y centros</h1>
+            <h1 className="mo-page-title text-3xl font-bold">Cadenas y centros</h1>
             <p className="text-sm text-slate-500">Cómo tramita los accesos cada cadena y con cuánta antelación.</p>
           </div>
           <button

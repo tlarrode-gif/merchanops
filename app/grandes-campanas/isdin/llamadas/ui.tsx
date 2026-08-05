@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Clipboard, ExternalLink, MoreHorizontal, Save, X } from "lucide-react";
+import { MoKpi } from "@/components/ui/mo";
 import { EstadoLogistico } from "@/components/logistics/estado-logistico";
 import { LogisticsState, seedLogistics } from "@/lib/logistics";
 import { loadLogisticsState } from "@/lib/logistics-store";
@@ -482,12 +483,7 @@ function Card({ children }: { children: React.ReactNode }) {
 }
 
 function Kpi({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <Card>
-      <p className="text-sm text-slate-500">{label}</p>
-      <p className="text-2xl font-bold">{value}</p>
-    </Card>
-  );
+  return <MoKpi label={label} value={value} />;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

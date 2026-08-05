@@ -373,7 +373,7 @@ export default function IsdinCallsPage() {
       <header className="sticky top-0 z-10 border-b bg-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold">ISDIN · Llamadas Backoffice</h1>
+            <h1 className="mo-page-title text-3xl font-bold">ISDIN · Llamadas Backoffice</h1>
             <p className="text-sm text-slate-500">Gestión preventiva de llamadas previas a instalación</p>
           </div>
           <div className="flex flex-wrap gap-2">
