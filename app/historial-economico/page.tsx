@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AppSession, canAccessModule, getCurrentAppSession, isAdminSession, sessionProvinceLabel } from "@/lib/access-control";
+import { MoKpi } from "@/components/ui/mo";
 import {
   EconomicEvent,
   EconomicEventOrigen,
@@ -231,7 +232,7 @@ export default function HistorialEconomicoPage() {
     <main className="min-h-screen bg-slate-100 p-4 text-slate-900">
       <section className="mx-auto max-w-7xl space-y-5">
         <div>
-          <h1 className="text-3xl font-bold">Historial económico</h1>
+          <h1 className="mo-page-title text-3xl font-bold">Historial económico</h1>
           <p className="text-sm text-slate-500">
             Registro contable de pagos a trabajadores{admin ? ", facturación a cliente y extras" : ""} generado desde los cambios de estado. Vista: {sessionProvinceLabel(session)}.
             {!admin && " Como gestor ves únicamente los pagos de tus provincias."}
@@ -270,12 +271,12 @@ export default function HistorialEconomicoPage() {
         </div>
 
         <div className="grid gap-3 md:grid-cols-6">
-          <K label="Pagos (neto)" value={eur(summary.pagos)} />
-          {admin && <K label="Facturación (neto)" value={eur(summary.facturacion)} />}
-          {admin && <K label="Extras (neto)" value={eur(summary.extras)} />}
-          <K label="Eventos" value={summary.total} />
-          <K label="Reversos" value={summary.reversos} />
-          <K label="En revisión" value={summary.enRevision} />
+          <K label="Pagos (neto)" value={eur(summary.pagos)} accent="gold" />
+          {admin && <K label="Facturación (neto)" value={eur(summary.facturacion)} accent="gold" />}
+          {admin && <K label="Extras (neto)" value={eur(summary.extras)} accent="gold" />}
+          <K label="Eventos" value={summary.total} accent="ink" />
+          <K label="Reversos" value={summary.reversos} accent="risk" />
+          <K label="En revisión" value={summary.enRevision} accent="risk" />
         </div>
 
         {admin && (
@@ -339,4 +340,4 @@ export default function HistorialEconomicoPage() {
   );
 }
 
-function K({ label, value }: { label: string; value: any }) { return <div className="rounded-3xl border bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">{label}</p><p className="text-2xl font-bold">{value}</p></div>; }
+function K({ label, value, accent }: { label: string; value: any; accent?: "coral" | "risk" | "ok" | "gold" | "ink" }) { return <MoKpi label={label} value={value} accent={accent} />; }

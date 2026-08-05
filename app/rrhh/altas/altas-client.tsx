@@ -790,7 +790,7 @@ export function AltasClient() {
       <section className="mx-auto max-w-7xl space-y-4 pb-28">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h1 className="text-3xl font-bold">Altas laborales</h1>
+            <h1 className="mo-page-title text-3xl font-bold">Altas laborales</h1>
             <p className="text-sm text-slate-500">Alta en A3 e imputaciones por CECO de los trabajos pendientes.</p>
           </div>
           <button

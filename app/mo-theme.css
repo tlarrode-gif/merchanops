@@ -1,0 +1,194 @@
+/*
+  MerchanOps · Sistema visual (capa 1 de 3: tokens y base)
+  =======================================================
+  Traducción literal del sistema definido en el PowerPoint de rediseño:
+
+    Tipografía   Source Serif 4  · títulos y cifras (la voz seria del producto)
+                 DM Sans         · interfaz, tablas y navegación
+                 DM Mono         · importes y datos tabulares
+
+    Paleta       Tinta    #14141F     Burdeos (riesgo)   #8B1A2F
+                 Coral    #E94560     Oro (económico)    #B9AA83
+                 Verde    #15803D     Lienzo             #F0F2F5
+
+  Los valores neutros están muestreados píxel a píxel de los mockups, no
+  inventados: el lienzo, el borde de tarjeta y el tinte de fila de riesgo
+  salen del histograma de las capturas del PowerPoint.
+
+  Esta capa NO pinta nada por sí sola salvo la base del documento. Las capas
+  mo-shell.css (navegación) y mo-surfaces.css (tarjetas, tablas, controles)
+  consumen estos tokens.
+*/
+
+:root {
+  /* --- Marca ------------------------------------------------------------ */
+  --mo-ink: #14141f;
+  --mo-ink-raised: #1c1723;   /* hover dentro de la sidebar */
+  --mo-ink-active: #2f1a27;   /* píldora del enlace activo */
+  --mo-burgundy: #8b1a2f;     /* riesgo, fuera de plazo, importes en negativo */
+  --mo-coral: #e94560;        /* acento de marca */
+  --mo-gold: #b9aa83;         /* económico */
+  --mo-green: #15803d;        /* validado */
+
+  /* --- Superficies ------------------------------------------------------ */
+  --mo-canvas: #f0f2f5;
+  --mo-surface: #ffffff;
+  --mo-surface-muted: #f8f9fa;
+  --mo-surface-sunken: #eceef2;
+  --mo-border: #dfe3e9;
+  --mo-border-soft: #eceef2;
+  --mo-border-strong: #cbd1da;
+
+  /* --- Texto ------------------------------------------------------------ */
+  --mo-text: #14141f;
+  --mo-text-muted: #6b7280;
+  --mo-text-faint: #9aa0a8;
+  --mo-text-on-ink: #f4f4f6;
+  --mo-text-on-ink-muted: #a7acb3;
+
+  /* --- Tintes de estado (fondo suave + texto legible) ------------------- */
+  --mo-tint-risk: #fbe9ec;
+  --mo-tint-risk-text: #8b1a2f;
+  --mo-tint-risk-border: #f3ccd4;
+
+  --mo-tint-warn: #fdf6e3;
+  --mo-tint-warn-text: #7c6420;
+  --mo-tint-warn-border: #eee0bd;
+
+  --mo-tint-ok: #e9f6ed;
+  --mo-tint-ok-text: #15803d;
+  --mo-tint-ok-border: #c7e6d1;
+
+  --mo-tint-info: #e9eefb;
+  --mo-tint-info-text: #2c4b93;
+  --mo-tint-info-border: #ccd8f2;
+
+  --mo-tint-neutral: #eef0f3;
+  --mo-tint-neutral-text: #4b5563;
+  --mo-tint-neutral-border: #dfe3e9;
+
+  --mo-tint-gold: #f6f3ea;
+  --mo-tint-gold-text: #7a6c45;
+  --mo-tint-gold-border: #e3dac2;
+
+  /* --- Tipografía ------------------------------------------------------- */
+  --mo-font-display: var(--font-source-serif), "Source Serif 4", Cambria, Georgia, "Times New Roman", serif;
+  --mo-font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mo-font-mono: var(--font-dm-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+  /* Etiqueta diminuta en mayúsculas con tracking: la firma del sistema. */
+  --mo-eyebrow-size: 0.6875rem;
+  --mo-eyebrow-tracking: 0.09em;
+
+  /* --- Forma ------------------------------------------------------------ */
+  --mo-radius-card: 12px;
+  --mo-radius-control: 9px;
+  --mo-radius-pill: 999px;
+
+  --mo-shadow-card: 0 1px 2px rgba(20, 20, 31, 0.04), 0 6px 20px rgba(20, 20, 31, 0.045);
+  --mo-shadow-card-hover: 0 1px 2px rgba(20, 20, 31, 0.05), 0 14px 34px rgba(20, 20, 31, 0.07);
+  --mo-shadow-raised: 0 10px 24px rgba(20, 20, 31, 0.14);
+  --mo-shadow-overlay: 0 24px 60px rgba(20, 20, 31, 0.26);
+
+  /* --- Medidas del armazón --------------------------------------------- */
+  --mo-sidebar-w: 236px;
+  --mo-topbar-h: 60px;
+
+  --mo-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Base del documento                                                      */
+/* ---------------------------------------------------------------------- */
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--mo-canvas);
+  color: var(--mo-text);
+  font-family: var(--mo-font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button, input, select, textarea { font: inherit; }
+
+::selection {
+  background: rgba(233, 69, 96, 0.18);
+  color: var(--mo-ink);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #c9ced6;
+  border-radius: var(--mo-radius-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: #aab1bb; background-clip: content-box; }
+
+/* Franja de scroll sobre superficie oscura (sidebar). */
+.mo-scroll-dark::-webkit-scrollbar-thumb { background: #3a3a48; background-clip: content-box; }
+.mo-scroll-dark::-webkit-scrollbar-thumb:hover { background: #4d4d5d; background-clip: content-box; }
+
+/* ---------------------------------------------------------------------- */
+/* Primitivas tipográficas reutilizables                                   */
+/* ---------------------------------------------------------------------- */
+
+/* Etiqueta diminuta en mayúsculas: cabeceras de tabla, labels de KPI,
+   títulos de grupo en la navegación. */
+.mo-eyebrow {
+  font-family: var(--mo-font-sans);
+  font-size: var(--mo-eyebrow-size);
+  font-weight: 500;
+  letter-spacing: var(--mo-eyebrow-tracking);
+  text-transform: uppercase;
+  color: var(--mo-text-faint);
+  line-height: 1.2;
+}
+
+/* Cifra grande en serif: KPIs, totales, importes destacados. */
+.mo-figure {
+  font-family: var(--mo-font-display);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--mo-text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+/* Título de sección/tarjeta en serif. */
+.mo-title {
+  font-family: var(--mo-font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--mo-text);
+}
+
+/* Importe o código: siempre en mono y con cifras de ancho fijo. */
+.mo-mono {
+  font-family: var(--mo-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.mo-muted { color: var(--mo-text-muted); }
+.mo-faint { color: var(--mo-text-faint); }
+
+/* Semántica de importe. */
+.mo-amount-negative { color: var(--mo-burgundy); }
+.mo-amount-positive { color: var(--mo-green); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

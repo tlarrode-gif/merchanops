@@ -114,7 +114,7 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
             <Link href={`/grandes-campanas/${params.id}`} className="font-semibold hover:underline">{nombreCampana}</Link>
             <span> / Editar</span>
           </nav>
-          <h1 className="mt-1 text-2xl font-extrabold">Editar campaña</h1>
+          <h1 className="mo-page-title mt-1 text-2xl font-extrabold">Editar campaña</h1>
         </div>
 
         <section className="gc-form-section">

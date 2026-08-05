@@ -1,5 +1,6 @@
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { normalizeProvince } from "@/lib/provinces";
+import { clearProvinceView, isProvinceViewActive, matchesProvinceView } from "@/lib/shell/province-view";
 import { hashPassword, isHashedPassword, randomPassword, verifyPassword } from "@/lib/password";
 import { checkLoginAllowed, clearLoginAttempts, recordLoginFailure } from "@/lib/rate-limit";
 import { sanitizeIdentifier } from "@/lib/sanitize";
@@ -320,6 +321,9 @@ export function saveCurrentAppSession(session: AppSession | null) {
 
 export function logoutAppUser() {
   if (isSupabaseConfigured && supabase) void supabase.auth.signOut().catch(() => undefined);
+  // El filtro de provincia de la topbar es de la persona, no del navegador:
+  // la siguiente sesión empieza viendo todo su alcance.
+  clearProvinceView();
   saveCurrentAppSession(null);
 }
 
@@ -396,10 +400,20 @@ export function userCanSeeProvince(session: AppSession | null | undefined, provi
   return !!normalized && session.provinces.map(normalizeProvince).includes(normalized);
 }
 
+/**
+ * Filtro de VISTA por provincia. Aplica dos recortes en este orden:
+ *   1. el alcance del rol (un gestor solo ve sus provincias);
+ *   2. la provincia elegida en el selector de la topbar, si hay alguna.
+ * El segundo nunca amplía el primero, así que un gestor no puede mirar fuera
+ * de su alcance eligiendo otra provincia en el selector.
+ */
 export function filterBySessionProvince<T extends { province?: string | null; points?: Array<{ province?: string | null }> }>(rows: T[], session: AppSession | null | undefined) {
   if (!session || !session.active) return [];
-  if (isAdminSession(session)) return rows;
-  return rows.filter(row => userCanSeeProvince(session, row.province) || row.points?.some(point => userCanSeeProvince(session, point.province)));
+  const inScope = isAdminSession(session)
+    ? rows
+    : rows.filter(row => userCanSeeProvince(session, row.province) || row.points?.some(point => userCanSeeProvince(session, point.province)));
+  if (!isProvinceViewActive()) return inScope;
+  return inScope.filter(row => matchesProvinceView(row.province) || row.points?.some(point => matchesProvinceView(point.province)));
 }
 
 export function sessionProvinceLabel(session?: AppSession | null) {

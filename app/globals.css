@@ -3,433 +3,91 @@
 @tailwind utilities;
 
 /*
-  UI/UX refresh foundation
-  - DM Sans applied globally to the interface.
-  - DM Mono kept available through Tailwind's font-mono utility for money, CECO and codes.
-  - Low-risk visual utilities added without touching app logic.
-  - Progressive visual polish applied globally to existing MerchanOps surfaces.
+  Este fichero es SOLO Tailwind + un puñado de utilidades de componente.
+
+  Todo el aspecto de la aplicación vive ahora en las capas mo-* (mo-theme,
+  mo-shell, mo-surfaces). Aquí había 365 líneas de reglas colgando de
+  `main.min-h-screen.bg-slate-100 ...` con !important: parches acumulados que
+  pintaban la app en la paleta slate de Tailwind. El rediseño los sustituye por
+  un sistema con tokens, así que se han retirado en bloque.
+
+  Las utilidades de abajo sí se conservan: son clases con nombre propio, no
+  parches sobre el marcado de otro, y ahora consumen los tokens de marca.
 */
-* { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
-body {
-  margin: 0;
-  background: #f8fafc;
-  color: #0f172a;
-  font-family: var(--font-dm-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-button, input, select, textarea { font: inherit; }
 
 @layer components {
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm shadow-slate-900/10 transition-all hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/20;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-all focus:outline-none;
+    background: var(--mo-ink);
+    border: 1px solid var(--mo-ink);
   }
+  .btn-primary:hover { background: #23232f; box-shadow: var(--mo-shadow-raised); }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-all hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-900/10;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all focus:outline-none;
+    background: var(--mo-surface);
+    border: 1px solid var(--mo-border);
+    color: var(--mo-text);
   }
+  .btn-secondary:hover { background: var(--mo-surface-muted); border-color: var(--mo-border-strong); }
 
   .icon-button {
-    @apply inline-flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-900/10;
+    @apply inline-flex items-center justify-center rounded-lg p-1.5 transition-colors focus:outline-none;
+    color: var(--mo-text-faint);
   }
+  .icon-button:hover { background: var(--mo-surface-muted); color: var(--mo-text); }
 
   .money {
-    font-family: var(--font-dm-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    @apply font-medium tabular-nums tracking-tight text-slate-900;
+    font-family: var(--mo-font-mono);
+    @apply font-medium tabular-nums;
+    letter-spacing: -0.01em;
+    color: var(--mo-text);
   }
 
   .code-chip {
-    font-family: var(--font-dm-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    @apply inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700;
+    font-family: var(--mo-font-mono);
+    @apply inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium;
+    background: var(--mo-surface-sunken);
+    color: #4b5563;
   }
 
   .soft-card {
-    @apply rounded-2xl border border-slate-200/70 bg-white p-5 shadow-sm;
+    @apply p-5;
+    background: var(--mo-surface);
+    border: 1px solid var(--mo-border);
+    border-radius: var(--mo-radius-card);
+    box-shadow: var(--mo-shadow-card);
   }
 
   .field-label {
-    @apply mb-1 block text-xs font-medium tracking-wide text-slate-600;
+    @apply mb-1 block text-xs font-medium tracking-wide;
+    color: var(--mo-text-muted);
   }
 
   .field-control {
-    @apply w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 transition-all focus:border-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10;
+    @apply w-full px-3 py-2 text-sm transition-all focus:outline-none;
+    border-radius: var(--mo-radius-control);
+    border: 1px solid var(--mo-border);
+    background: var(--mo-surface);
+    color: var(--mo-text);
   }
+  .field-control:focus { border-color: var(--mo-coral); box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.13); }
 
   .status-pill {
     @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium;
   }
 
   .table-head-cell {
-    @apply border-b border-slate-200 px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+    @apply px-3 py-2.5 text-left uppercase;
+    font-size: var(--mo-eyebrow-size);
+    font-weight: 500;
+    letter-spacing: var(--mo-eyebrow-tracking);
+    color: var(--mo-text-faint);
+    border-bottom: 1px solid var(--mo-border);
   }
 
   .table-cell {
-    @apply px-3 py-3 align-middle text-sm text-slate-700;
+    @apply px-3 py-3 align-middle text-sm;
+    color: var(--mo-text);
   }
 }
-
-/* Progressive polish for the current main app without touching React logic */
-main.min-h-screen.bg-slate-100 {
-  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
-}
-
-main.min-h-screen.bg-slate-100 > header {
-  border-bottom: 1px solid rgba(226, 232, 240, 0.9) !important;
-  background: rgba(255, 255, 255, 0.92) !important;
-  backdrop-filter: blur(10px);
-}
-
-main.min-h-screen.bg-slate-100 h1,
-main.min-h-screen.bg-slate-100 h2,
-main.min-h-screen.bg-slate-100 h3 {
-  letter-spacing: -0.025em;
-}
-
-main.min-h-screen.bg-slate-100 button {
-  transition: background-color .18s ease, color .18s ease, border-color .18s ease, transform .18s ease, box-shadow .18s ease;
-}
-
-main.min-h-screen.bg-slate-100 button:hover {
-  transform: translateY(-1px);
-}
-
-main.min-h-screen.bg-slate-100 input,
-main.min-h-screen.bg-slate-100 select,
-main.min-h-screen.bg-slate-100 textarea {
-  border-color: #e2e8f0 !important;
-  background-color: #f8fafc;
-  color: #0f172a;
-  font-size: 0.875rem;
-  transition: all .18s ease;
-}
-
-main.min-h-screen.bg-slate-100 input:focus,
-main.min-h-screen.bg-slate-100 select:focus,
-main.min-h-screen.bg-slate-100 textarea:focus {
-  outline: none !important;
-  border-color: #94a3b8 !important;
-  background-color: white !important;
-  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.08);
-}
-
-main.min-h-screen.bg-slate-100 label > span {
-  margin-bottom: 0.25rem;
-  display: block;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: #475569;
-  letter-spacing: .015em;
-}
-
-main.min-h-screen.bg-slate-100 .rounded-3xl.border.bg-white,
-main.min-h-screen.bg-slate-100 .rounded-2xl.border.bg-white,
-main.min-h-screen.bg-slate-100 .rounded-3xl.border.bg-white.p-5,
-main.min-h-screen.bg-slate-100 .rounded-2xl.border.bg-white.px-4,
-main.min-h-screen.bg-slate-100 .rounded-2xl.border.bg-white.p-5 {
-  border-color: rgba(226, 232, 240, 0.75) !important;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 28px rgba(15, 23, 42, 0.035);
-}
-
-main.min-h-screen.bg-slate-100 table {
-  border-collapse: collapse;
-}
-
-main.min-h-screen.bg-slate-100 thead tr,
-main.min-h-screen.bg-slate-100 thead.bg-slate-50 {
-  background: #f8fafc !important;
-}
-
-main.min-h-screen.bg-slate-100 th {
-  color: #64748b;
-  font-size: 0.72rem;
-  font-weight: 650;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-main.min-h-screen.bg-slate-100 td {
-  border-bottom-color: #f1f5f9;
-}
-
-main.min-h-screen.bg-slate-100 tbody tr {
-  transition: background-color .16s ease;
-}
-
-main.min-h-screen.bg-slate-100 tbody tr:hover {
-  background: rgba(248, 250, 252, 0.85);
-}
-
-main.min-h-screen.bg-slate-100 .font-mono,
-main.min-h-screen.bg-slate-100 [class*="font-mono"] {
-  font-family: var(--font-dm-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
-  font-variant-numeric: tabular-nums;
-}
-
-main.min-h-screen.bg-slate-100 .fixed.right-4.top-24,
-main.min-h-screen.bg-slate-100 .fixed.right-4.top-6 {
-  border: 0 !important;
-  background: #0f172a !important;
-  color: white !important;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.22) !important;
-}
-
-main.min-h-screen.bg-slate-100 .bg-red-50,
-main.min-h-screen.bg-slate-100 .bg-orange-50,
-main.min-h-screen.bg-slate-100 .bg-amber-50,
-main.min-h-screen.bg-slate-100 .bg-blue-50,
-main.min-h-screen.bg-slate-100 .bg-green-50 {
-  border-color: rgba(226, 232, 240, 0.75);
-}
-
-/* Second-pass app polish: closer to the visual system, still CSS-only */
-main.min-h-screen.bg-slate-100 > header .text-3xl,
-main.min-h-screen.bg-slate-100 > header h1 {
-  font-size: 1.45rem !important;
-  line-height: 1.15 !important;
-}
-
-main.min-h-screen.bg-slate-100 > header p {
-  color: #64748b !important;
-}
-
-main.min-h-screen.bg-slate-100 nav button {
-  border-radius: 999px !important;
-  border-color: #e2e8f0 !important;
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
-main.min-h-screen.bg-slate-100 nav button.bg-slate-900 {
-  background: #0f172a !important;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
-}
-
-main.min-h-screen.bg-slate-100 nav button:not(.bg-slate-900):hover {
-  background: #f8fafc !important;
-  border-color: #cbd5e1 !important;
-}
-
-main.min-h-screen.bg-slate-100 header button.bg-slate-900,
-main.min-h-screen.bg-slate-100 section button.bg-slate-900 {
-  background: #0f172a !important;
-  border-color: #0f172a !important;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.13);
-}
-
-main.min-h-screen.bg-slate-100 header button.border,
-main.min-h-screen.bg-slate-100 section button.border {
-  border-color: #e2e8f0 !important;
-  background: #fff;
-}
-
-main.min-h-screen.bg-slate-100 .grid > .rounded-3xl.border.bg-white svg,
-main.min-h-screen.bg-slate-100 .grid > .rounded-2xl.border.bg-white svg {
-  color: #64748b;
-}
-
-main.min-h-screen.bg-slate-100 .grid > .rounded-3xl.border.bg-white p.text-2xl,
-main.min-h-screen.bg-slate-100 .grid > .rounded-2xl.border.bg-white p.text-2xl {
-  font-weight: 650;
-  letter-spacing: -0.04em;
-}
-
-main.min-h-screen.bg-slate-100 .h-2.overflow-hidden.rounded-full.bg-slate-100,
-main.min-h-screen.bg-slate-100 .h-2.rounded-full.bg-slate-100 {
-  height: 0.65rem !important;
-  background: #eef2f7 !important;
-}
-
-main.min-h-screen.bg-slate-100 .h-full.bg-slate-900,
-main.min-h-screen.bg-slate-100 .h-2.rounded-full.bg-slate-900 {
-  background: #0f172a !important;
-}
-
-main.min-h-screen.bg-slate-100 .rounded-2xl.bg-slate-50,
-main.min-h-screen.bg-slate-100 .rounded-xl.bg-slate-50 {
-  background: #f8fafc !important;
-  border: 1px solid rgba(226, 232, 240, 0.7);
-}
-
-main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 {
-  backdrop-filter: blur(6px);
-}
-
-main.min-h-screen.bg-slate-100 .fixed.inset-0.z-50 > div {
-  border: 1px solid #f1f5f9;
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24) !important;
-}
-
-main.min-h-screen.bg-slate-100 textarea[readonly] {
-  background: #fff7ed !important;
-  border-color: #fed7aa !important;
-  color: #7c2d12;
-}
-
-main.min-h-screen.bg-slate-100 tr.bg-red-50,
-main.min-h-screen.bg-slate-100 tr.bg-red-50\/60 {
-  background: rgba(254, 242, 242, 0.75) !important;
-  box-shadow: inset 3px 0 0 #f87171;
-}
-
-main.min-h-screen.bg-slate-100 .text-red-600:hover {
-  color: #b91c1c !important;
-}
-
-main.min-h-screen.bg-slate-100 .rounded-2xl.bg-slate-900,
-main.min-h-screen.bg-slate-100 .rounded-xl.bg-slate-900 {
-  background: #0f172a !important;
-}
-
-/* Phase 3: SaaS dashboard refinement, CSS-only */
-main.min-h-screen.bg-slate-100 section.mx-auto,
-main.min-h-screen.bg-slate-100 .mx-auto.max-w-7xl {
-  max-width: 1480px !important;
-}
-
-main.min-h-screen.bg-slate-100 section.mx-auto.space-y-5,
-main.min-h-screen.bg-slate-100 section.mx-auto.space-y-4 {
-  row-gap: 1.25rem;
-}
-
-main.min-h-screen.bg-slate-100 .rounded-3xl.border.bg-white:hover,
-main.min-h-screen.bg-slate-100 .rounded-2xl.border.bg-white:hover {
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 16px 36px rgba(15, 23, 42, 0.055);
-}
-
-main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-3xl.border.bg-white,
-main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-2xl.border.bg-white {
-  position: relative;
-  overflow: hidden;
-}
-
-main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-3xl.border.bg-white::before,
-main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-2xl.border.bg-white::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  height: 3px;
-  width: 100%;
-  background: linear-gradient(90deg, rgba(233,69,96,.95), rgba(15,23,42,.75));
-  opacity: .85;
-}
-
-main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-3xl.border.bg-white p.text-sm.text-slate-500,
-main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-2xl.border.bg-white p.text-sm.text-slate-500 {
-  font-size: .68rem !important;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-  font-weight: 500;
-}
-
-main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-3xl.border.bg-white p.text-2xl,
-main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-2xl.border.bg-white p.text-2xl,
-main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-3xl.border.bg-white .text-2xl,
-main.min-h-screen.bg-slate-100 .grid.gap-3 > .rounded-2xl.border.bg-white .text-2xl {
-  font-size: 1.55rem !important;
-}
-
-main.min-h-screen.bg-slate-100 input[type="checkbox"] {
-  accent-color: #0f172a;
-}
-
-main.min-h-screen.bg-slate-100 input[type="date"],
-main.min-h-screen.bg-slate-100 input[type="month"],
-main.min-h-screen.bg-slate-100 input[type="number"] {
-  font-family: var(--font-dm-mono), ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
-}
-
-main.min-h-screen.bg-slate-100 select {
-  cursor: pointer;
-}
-
-main.min-h-screen.bg-slate-100 table td .rounded-xl.border,
-main.min-h-screen.bg-slate-100 table td .rounded-lg.border,
-main.min-h-screen.bg-slate-100 table td select,
-main.min-h-screen.bg-slate-100 table td input {
-  min-height: 32px;
-}
-
-main.min-h-screen.bg-slate-100 table th:first-child,
-main.min-h-screen.bg-slate-100 table td:first-child {
-  padding-left: 1rem !important;
-}
-
-main.min-h-screen.bg-slate-100 table th:last-child,
-main.min-h-screen.bg-slate-100 table td:last-child {
-  padding-right: 1rem !important;
-}
-
-main.min-h-screen.bg-slate-100 table tbody tr:last-child td {
-  border-bottom: 0 !important;
-}
-
-main.min-h-screen.bg-slate-100 .overflow-auto {
-  border-radius: 1rem;
-}
-
-main.min-h-screen.bg-slate-100 .max-h-64.overflow-auto,
-main.min-h-screen.bg-slate-100 .max-h-80.overflow-auto {
-  padding-right: .25rem;
-}
-
-main.min-h-screen.bg-slate-100 .rounded-xl.border.px-3.py-1,
-main.min-h-screen.bg-slate-100 .rounded-xl.border.px-3.py-1.text-sm {
-  box-shadow: 0 1px 1px rgba(15, 23, 42, 0.03);
-}
-
-main.min-h-screen.bg-slate-100 .rounded-xl.border.px-3.py-1:hover,
-main.min-h-screen.bg-slate-100 .rounded-xl.border.px-3.py-1.text-sm:hover {
-  border-color: #cbd5e1 !important;
-}
-
-main.min-h-screen.bg-slate-100 .rounded-xl.bg-slate-900.px-3.py-1,
-main.min-h-screen.bg-slate-100 .rounded-xl.bg-slate-900.px-3.py-1.text-sm {
-  box-shadow: 0 7px 14px rgba(15, 23, 42, .16);
-}
-
-main.min-h-screen.bg-slate-100 a.rounded-2xl.border.bg-white,
-main.min-h-screen.bg-slate-100 a.rounded-2xl.bg-slate-900,
-main.min-h-screen.bg-slate-100 button.rounded-2xl.border,
-main.min-h-screen.bg-slate-100 button.rounded-2xl.bg-slate-900 {
-  font-weight: 500;
-}
-
-main.min-h-screen.bg-slate-100 .text-xs.text-slate-500,
-main.min-h-screen.bg-slate-100 .text-sm.text-slate-500 {
-  color: #64748b !important;
-}
-
-main.min-h-screen.bg-slate-100 .border-t.py-2,
-main.min-h-screen.bg-slate-100 .border-t.p-2,
-main.min-h-screen.bg-slate-100 .border-t.p-3 {
-  border-color: #f1f5f9 !important;
-}
-
-main.min-h-screen.bg-slate-100 .bg-purple-50 {
-  background: #faf5ff !important;
-  border-color: #e9d5ff !important;
-}
-
-main.min-h-screen.bg-slate-100 .bg-blue-50 {
-  background: #eff6ff !important;
-}
-
-main.min-h-screen.bg-slate-100 .bg-green-50 {
-  background: #f0fdf4 !important;
-}
-
-main.min-h-screen.bg-slate-100 .bg-orange-50,
-main.min-h-screen.bg-slate-100 .bg-amber-50 {
-  background: #fffbeb !important;
-}
-
-main.min-h-screen.bg-slate-100 .bg-red-50 {
-  background: #fef2f2 !important;
-}
-
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: #f8fafc; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; border: 2px solid #f8fafc; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
