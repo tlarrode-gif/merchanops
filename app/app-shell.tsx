@@ -341,7 +341,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           riesgo de perder lo tecleado sí es real.
         */}
         <div className="mo-app__content" key={keepsLocalState(pathname, currentTab) ? "view:estable" : `view:${province}`}>
-          <Breadcrumbs pathname={pathname} />
+          <Breadcrumbs pathname={pathname} title={meta.title} />
           {children}
         </div>
       </div>
@@ -395,7 +395,7 @@ function crumbFor(segment: string) {
 // como página, así que se muestran sin enlace para no llevar a un 404.
 const nonRoutableSegments = new Set(["configuracion", "rrhh", "pagos"]);
 
-function Breadcrumbs({ pathname }: { pathname: string }) {
+function Breadcrumbs({ pathname, title }: { pathname: string; title: string }) {
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length < 2) return null;
   return (
@@ -405,6 +405,9 @@ function Breadcrumbs({ pathname }: { pathname: string }) {
         const href = `/${segments.slice(0, index + 1).join("/")}`;
         const last = index === segments.length - 1;
         const label = crumbFor(segment);
+        // El último tramo suele ser el nombre de la pantalla, que la topbar ya
+        // rotula en grande: repetirlo dos veces en la misma franja es ruido.
+        if (last && label === title) return null;
         return (
           <span key={href} className="flex items-center gap-1">
             <span className="mo-breadcrumbs__sep" aria-hidden>/</span>
@@ -440,6 +443,12 @@ function GlobalSearch({ session, onNavigate }: { session: AppSession; onNavigate
   const [highlight, setHighlight] = useState(0);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // El atajo es el mismo, pero anunciarlo como ⌘K en Windows o Linux no dice
+  // nada. Se resuelve tras montar para no descuadrar la hidratación.
+  const [shortcutLabel, setShortcutLabel] = useState("⌘K");
+  useEffect(() => {
+    if (!/Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent)) setShortcutLabel("Ctrl K");
+  }, []);
 
   // ⌘K / Ctrl+K abre el buscador desde cualquier pantalla.
   useEffect(() => {
@@ -511,7 +520,7 @@ function GlobalSearch({ session, onNavigate }: { session: AppSession; onNavigate
         placeholder="Buscar campaña, punto, instalador…"
         aria-label="Buscador global"
       />
-      <span className="mo-search__kbd" aria-hidden>⌘K</span>
+      <span className="mo-search__kbd" aria-hidden>{shortcutLabel}</span>
 
       {open && term.length > 0 && (
         <div className="mo-search__panel" role="listbox">

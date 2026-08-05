@@ -200,6 +200,7 @@
 */
 .mo-app .mo-kpi,
 .mo-app .mo-kpi-grid > * {
+  align-self: start;
   position: relative;
   overflow: hidden;
   border-radius: var(--mo-radius-card);
@@ -451,6 +452,23 @@
   transition: border-color 0.16s var(--mo-ease), box-shadow 0.16s var(--mo-ease), background-color 0.16s var(--mo-ease);
 }
 
+/*
+  Misma altura para todos los controles de una fila. El marcado mezcla py-1,
+  py-1.5 y py-2 según la pantalla, y un input, un select nativo y un campo de
+  fecha no miden lo mismo con el mismo padding: en una rejilla de filtros
+  salían tres alturas distintas (38, 39 y 41 px) y la fila se veía irregular.
+  Las áreas de texto y los controles dentro de celda quedan fuera: allí la
+  altura la manda el contenido.
+*/
+.mo-app :is(section, div, form, label):not(td):not(th) > input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+.mo-app :is(section, div, form, label):not(td):not(th) > select,
+.mo-app label > input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+.mo-app label > select {
+  min-height: 40px;
+}
+
+.mo-app td :is(input, select) { min-height: 32px; }
+
 .mo-app input::placeholder,
 .mo-app textarea::placeholder { color: var(--mo-text-faint); }
 
@@ -524,6 +542,14 @@
   white-space: nowrap;
   background: transparent;
 }
+
+/*
+  Un <th> sin alineación explícita sale CENTRADO por defecto del navegador,
+  mientras que su columna va alineada a la izquierda: la cabecera quedaba
+  flotando fuera del eje de sus datos. Solo se respeta la alineación cuando el
+  marcado la pide (los importes llevan su `text-right`).
+*/
+.mo-app th:not([class*="text-center"]):not([class*="text-right"]) { text-align: left; }
 
 .mo-app td {
   border-bottom: 1px solid var(--mo-border-soft);
