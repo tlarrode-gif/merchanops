@@ -134,11 +134,13 @@
   font-weight: 500;
   letter-spacing: 0.13em;
   text-transform: uppercase;
-  color: #6e727d;
+  /* 4,9:1 sobre el #14141F de la sidebar. Con el #6e727d anterior se quedaba
+     en 3,9:1 —por debajo de AA— y el chevron era casi invisible. */
+  color: #868b96;
   transition: color 0.16s var(--mo-ease);
 }
 
-.mo-sidebar__group-label:hover { color: var(--mo-text-on-ink-muted); }
+.mo-sidebar__group-label:hover { color: #fff; }
 
 .mo-sidebar__group-chevron {
   width: 12px;
@@ -461,7 +463,7 @@
   transform: translateY(-50%);
   width: 14px;
   height: 14px;
-  color: var(--mo-text-faint);
+  color: var(--mo-text-muted);
   pointer-events: none;
 }
 

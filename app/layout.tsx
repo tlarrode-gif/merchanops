@@ -65,10 +65,28 @@ export const metadata: Metadata = {
   description: "Gestión de servicios de trade marketing"
 };
 
+/*
+  Las variables de next/font van en <html>, NO en <body>.
+
+  Los tokens de mo-theme.css se declaran en `:root`, que ES <html>, y encadenan
+  la variable de la fuente:
+
+      --mo-font-display: var(--font-source-serif), "Source Serif 4", …
+
+  Con las clases en <body>, `--font-source-serif` todavía no existe en <html>:
+  la sustitución falla, la custom property entera queda inválida y —como las
+  custom properties heredan su valor ya computado— esa invalidez baja a todo el
+  árbol. Resultado: ninguna de las tres tipografías de marca se aplicaba en
+  ninguna pantalla y todo caía al stack por defecto de Tailwind.
+
+  Los tokens de color son literales y sí resolvían, así que la app se veía «casi
+  bien» y el fallo pasó desapercibido: la sidebar era negra y el acento coral,
+  pero los títulos y los importes nunca fueron serif ni mono.
+*/
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es">
-      <body className={`${dmSans.variable} ${dmMono.variable} ${sourceSerif.variable}`}>
+    <html lang="es" className={`${dmSans.variable} ${dmMono.variable} ${sourceSerif.variable}`}>
+      <body>
         {/* AppShell lee la query (?tab=) con useSearchParams para marcar el
             enlace activo tras una navegación client-side; eso exige Suspense. */}
         <Suspense fallback={null}>

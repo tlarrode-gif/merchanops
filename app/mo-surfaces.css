@@ -234,7 +234,7 @@
   font-weight: 500;
   letter-spacing: var(--mo-eyebrow-tracking);
   text-transform: uppercase;
-  color: var(--mo-text-faint);
+  color: var(--mo-eyebrow-color);
   display: block;
   margin-bottom: 0.375rem;
 }
@@ -312,23 +312,45 @@
 }
 
 /* Secundario: blanco con borde. */
-.mo-app :is(button, a).border:not(.bg-slate-900):not([class*="bg-red"]):not([class*="bg-emerald"]):not([class*="bg-green"]):not([class*="bg-amber"]):not([class*="bg-orange"]):not([class*="bg-blue"]):not([class*="bg-purple"]) {
+.mo-app :is(button, a).border:not(.bg-slate-900):not(.text-red-600):not(.text-red-700):not([class*="bg-red"]):not([class*="bg-emerald"]):not([class*="bg-green"]):not([class*="bg-amber"]):not([class*="bg-orange"]):not([class*="bg-blue"]):not([class*="bg-purple"]) {
   background: var(--mo-surface);
   border-color: var(--mo-border);
   color: var(--mo-text);
 }
 
-.mo-app :is(button, a).border:not(.bg-slate-900):not([class*="bg-red"]):not([class*="bg-emerald"]):not([class*="bg-green"]):not([class*="bg-amber"]):not([class*="bg-orange"]):not([class*="bg-blue"]):not([class*="bg-purple"]):hover:not(:disabled) {
+.mo-app :is(button, a).border:not(.bg-slate-900):not(.text-red-600):not(.text-red-700):not([class*="bg-red"]):not([class*="bg-emerald"]):not([class*="bg-green"]):not([class*="bg-amber"]):not([class*="bg-orange"]):not([class*="bg-blue"]):not([class*="bg-purple"]):hover:not(:disabled) {
   background: var(--mo-surface-muted);
   border-color: var(--mo-border-strong);
 }
 
-/* Acción destructiva: burdeos, nunca rojo semáforo. */
-.mo-app :is(button, a).text-red-600,
-.mo-app :is(button, a).text-red-700 { color: var(--mo-burgundy); }
+/*
+  Acción destructiva: burdeos, nunca rojo semáforo.
 
-.mo-app :is(button, a).text-red-600:hover,
-.mo-app :is(button, a).text-red-700:hover { color: #6f1425; }
+  Va en su propio bloque y no como un simple `color` porque el selector del
+  botón secundario acumula siete :not([class*=…]) —especificidad 9— y se comía
+  el burdeos: «Borrar» acababa pintado en tinta, idéntico a «Editar». Aquí se
+  le da la misma forma que al secundario más su color.
+*/
+.mo-app :is(button, a).border.text-red-600,
+.mo-app :is(button, a).border.text-red-700 {
+  background: var(--mo-surface);
+  border-color: var(--mo-tint-risk-border);
+  color: var(--mo-burgundy);
+}
+
+.mo-app :is(button, a).border.text-red-600:hover:not(:disabled),
+.mo-app :is(button, a).border.text-red-700:hover:not(:disabled) {
+  background: var(--mo-tint-risk);
+  border-color: var(--mo-burgundy);
+  color: #6f1425;
+}
+
+/* Destructivo sin borde (icono suelto dentro de una fila). */
+.mo-app :is(button, a).text-red-600:not(.border),
+.mo-app :is(button, a).text-red-700:not(.border) { color: var(--mo-burgundy); }
+
+.mo-app :is(button, a).text-red-600:not(.border):hover,
+.mo-app :is(button, a).text-red-700:not(.border):hover { color: #6f1425; }
 
 .mo-app :is(button, a).bg-red-600,
 .mo-app :is(button, a).bg-red-700 {
@@ -495,7 +517,7 @@
   font-weight: 500;
   letter-spacing: var(--mo-eyebrow-tracking);
   text-transform: uppercase;
-  color: var(--mo-text-faint);
+  color: var(--mo-eyebrow-color);
   border-bottom: 1px solid var(--mo-border);
   padding-top: 0.6875rem;
   padding-bottom: 0.6875rem;
@@ -708,6 +730,16 @@
   color: #fff !important;
   border-radius: var(--mo-radius-control);
   box-shadow: var(--mo-shadow-raised);
+  /*
+    Baja a la esquina inferior. Anclado a `top-24` (96 px) aterrizaba justo
+    encima de la fila de acciones de cada pantalla —desde que la banda de
+    cabecera dejó de ser sticky— y llegaba a tapar «Crear gran campaña»
+    comiéndose sus clics. Abajo a la derecha es además donde se espera un
+    aviso efímero, y no compite con nada.
+  */
+  top: auto !important;
+  bottom: 1.25rem;
+  z-index: 60;
 }
 
 .mo-app .fixed.right-4.top-24 b,
