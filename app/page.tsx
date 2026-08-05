@@ -1,9 +1,9 @@
 ﻿"use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Fragment, Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AlertTriangle, BarChart3, CalendarDays, CheckCircle2, Copy, CreditCard, Edit3, FileDown, MessageCircle, Package, Plus, Trash2, Users, X } from "lucide-react";
-import { MoActionList, MoActionRow, MoBadge, MoBars, MoCard, MoColumns, MoDonut, MoEmpty, MoKpi, MoKpiGrid, MoLegend, statusTone, type MoTone } from "@/components/ui/mo";
+import { MoActionList, MoActionRow, MoAvatar, MoBadge, MoBars, MoCard, MoColumns, MoDonut, MoEmpty, MoKpi, MoKpiGrid, MoLegend, statusTone, type MoTone } from "@/components/ui/mo";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { AppPermissionKey, AppSession, AppUser, adminPermissions, canAccessModule, defaultPermissions, ensureAuthSession, filterBySessionProvince, getCurrentAppSession, isAdminSession, loadInternalUsers, loginAppUser, normalizeUser, saveCurrentAppSession, saveInternalUsers, userCanSeeProvince } from "@/lib/access-control";
 import { provinceOptions, provinceScopeValues } from "@/lib/provinces";
@@ -507,7 +507,161 @@ function quickFilter(s:Service,q:string){if(!q)return true;if(q==="sin-trabajado
 function PointTable({s,updatePoint}:any){return <div className="mt-4 overflow-auto"><table className="w-full min-w-[760px] text-sm"><thead><tr className="bg-slate-50"><th className="p-2 text-left">Punto</th><th className="p-2 text-left">Código</th><th className="p-2 text-left">Estado punto</th><th className="p-2 text-left">Comentario</th><th className="p-2 text-right">Pago</th></tr></thead><tbody>{(s.points||[]).map((p:Point)=><tr key={p.id} className={`border-t ${isIncActive(p)?"bg-red-50":""}`}><td className="p-2">{p.name}<br/><span className="text-slate-500">{p.address}</span></td><td className="p-2">{p.report_code}</td><td className="p-2"><SelectMini value={pStatus(p)} onChange={(v:string)=>updatePoint(p,{point_status:v})} options={pointStatuses}/></td><td className="p-2"><input disabled={!['Incidencia','Pospuesto'].includes(pStatus(p))} value={p.point_comment||p.incident_comment||""} onChange={e=>updatePoint(p,{point_comment:e.target.value,incident_comment:e.target.value})} className="w-full rounded-xl border px-2 py-1 disabled:bg-slate-100"/></td><td className="p-2 text-right"><b>{eur(pPay(p))}</b>{isIncActive(p)&&<p className="text-xs text-slate-500">Original {eur(pOriginal(p))}</p>}</td></tr>)}</tbody></table></div>}
 function MaterialStatusPill({service}:any){const status=service.logistics_status||service.material_status||"Sin asignar";const cls=status.includes("incid")||status.includes("bloque")?"bg-red-50 text-red-800 ring-red-200":status.includes("envi")||status.includes("picking")?"bg-blue-50 text-blue-800 ring-blue-200":status.includes("entreg")||status.includes("recib")?"bg-emerald-50 text-emerald-800 ring-emerald-200":"bg-slate-100 text-slate-700 ring-slate-200";const href=service.logistics_request_id?`/logistica/solicitudes?id=${service.logistics_request_id}`:"";return href?<a href={href} className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ring-1 ${cls}`}>Material: {status}</a>:<span className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ring-1 ${cls}`}>Material: {status}</span>}
 function HourlyBox({s,updateService}:any){if(!["Horas","Mixto"].includes(s.payment_type||""))return null;return <div className="mt-4 grid gap-2 rounded-2xl bg-slate-50 p-3 md:grid-cols-3"><Input label="Precio/hora" type="number" value={s.hourly_rate||0} onChange={(v:any)=>updateService(s,{hourly_rate:Number(v)})}/><Input label="Horas trabajadas" type="number" value={s.hours_worked||0} onChange={(v:any)=>updateService(s,{hours_worked:Number(v)})}/><div><p className="text-sm font-medium">Total horas</p><p className="text-xl font-bold">{eur(hourTotal(s))}</p></div></div>}
-function CalendarByWorker({services,workers}:any){const[m,setM]=useState(new Date().toISOString().slice(0,7));return <div className="space-y-4"><Card><Input label="Mes" type="month" value={m} onChange={setM}/></Card>{workers.map((w:Worker)=><Card key={w.id}><h3 className="font-semibold">{w.name}</h3><div className="mt-2 grid gap-2 md:grid-cols-4">{services.filter((s:Service)=>s.worker_id===w.id&&(dateOnly(s.start_date).startsWith(m)||dateOnly(s.deadline).startsWith(m))).map((s:Service)=><div key={s.id} className="rounded-2xl border p-3 text-sm" style={{borderColor:colorFor(s).bg}}><b>{s.client} · {s.campaign}</b><p>{s.start_date||"—"} → {s.deadline||"—"}</p><p>{s.status}</p></div>)}</div></Card>)}</div>}
+/*
+  Calendario — rediseño de agosto 2026.
+
+  Antes era una lista por instalador: una tarjeta por persona y dentro los
+  servicios del mes sueltos, sin eje de tiempo. Respondía a «qué lleva Sara»
+  pero no a la pregunta que de verdad se hace aquí, que es «quién está libre el
+  jueves», porque para saberlo había que leer fechas una por una.
+
+  El mockup lo plantea como una rejilla de instalador × día, y eso es lo que se
+  construye: la semana cruzada, cada servicio ocupando los días que abarca y
+  pintado con su color de calendario. Los fines de semana quedan apagados.
+
+  El selector de mes que ya existía no se pierde: sigue ahí y ahora salta a la
+  primera semana del mes elegido, además de las flechas para moverse semana a
+  semana.
+*/
+
+const diasSemana = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+/** Lunes de la semana a la que pertenece una fecha. */
+function lunesDe(fecha: Date) {
+  const d = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d;
+}
+
+function isoDe(fecha: Date) {
+  return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, "0")}-${String(fecha.getDate()).padStart(2, "0")}`;
+}
+
+function CalendarByWorker({ services, workers }: any) {
+  const [inicio, setInicio] = useState(() => lunesDe(new Date()));
+
+  const dias = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(inicio);
+    d.setDate(inicio.getDate() + i);
+    return d;
+  });
+  const hoy = isoDe(new Date());
+  const desde = isoDe(dias[0]);
+  const hasta = isoDe(dias[6]);
+  const mes = desde.slice(0, 7);
+
+  function moverSemanas(n: number) {
+    const d = new Date(inicio);
+    d.setDate(inicio.getDate() + n * 7);
+    setInicio(d);
+  }
+
+  // Un servicio ocupa un día si ese día cae entre su inicio y su fecha límite.
+  // Sin fechas no se puede colocar en la rejilla, así que se lista aparte para
+  // que no desaparezca de la vista.
+  function serviciosDe(worker: Worker, diaIso: string) {
+    return services.filter((s: Service) => {
+      if (s.worker_id !== worker.id) return false;
+      const ini = dateOnly(s.start_date), fin = dateOnly(s.deadline);
+      if (!ini && !fin) return false;
+      return (ini || fin) <= diaIso && diaIso <= (fin || ini);
+    });
+  }
+
+  const sinFecha = services.filter((s: Service) => !dateOnly(s.start_date) && !dateOnly(s.deadline));
+  const rotulo = new Date(`${mes}-01T00:00:00`).toLocaleDateString("es-ES", { month: "long", year: "numeric" });
+
+  return (
+    <div className="space-y-4">
+      <MoCard
+        title={<span className="mo-first-caps">{rotulo}</span>}
+        subtitle={`Semana del ${dias[0].getDate()} al ${dias[6].getDate()} · carga por instalador y día`}
+        actions={
+          <>
+            <button type="button" onClick={() => moverSemanas(-1)} className="rounded-xl border bg-white px-3 py-1.5 text-sm" aria-label="Semana anterior">←</button>
+            <button type="button" onClick={() => setInicio(lunesDe(new Date()))} className="rounded-xl border bg-white px-3 py-1.5 text-sm">Hoy</button>
+            <button type="button" onClick={() => moverSemanas(1)} className="rounded-xl border bg-white px-3 py-1.5 text-sm" aria-label="Semana siguiente">→</button>
+            <label className="ml-1 block text-sm">
+              <input
+                type="month"
+                aria-label="Mes"
+                value={mes}
+                onChange={e => { if (e.target.value) setInicio(lunesDe(new Date(`${e.target.value}-01T00:00:00`))); }}
+                className="rounded-xl border px-3 py-1.5 text-sm"
+              />
+            </label>
+          </>
+        }
+        bodyClassName="mo-card__body--flush"
+      >
+        <div className="mo-week-scroll">
+          <div className="mo-week" style={{ gridTemplateColumns: `minmax(150px, 190px) repeat(7, minmax(112px, 1fr))` }}>
+            <div className="mo-week__corner mo-eyebrow">Instalador</div>
+            {dias.map(dia => {
+              const iso = isoDe(dia);
+              const finde = dia.getDay() === 0 || dia.getDay() === 6;
+              return (
+                <div key={iso} className={`mo-week__head ${finde ? "is-weekend" : ""} ${iso === hoy ? "is-today" : ""}`}>
+                  <span className="mo-eyebrow">{diasSemana[(dia.getDay() + 6) % 7]}</span>
+                  <span className="mo-week__day">{dia.getDate()}</span>
+                </div>
+              );
+            })}
+
+            {workers.map((w: Worker) => (
+              <Fragment key={w.id}>
+                <div className="mo-week__worker">
+                  <MoAvatar name={w.name} size={26} />
+                  <span className="min-w-0">
+                    <span className="mo-week__worker-name">{w.name}</span>
+                    <span className="mo-week__worker-meta">{w.province || "Sin provincia"}</span>
+                  </span>
+                </div>
+                {dias.map(dia => {
+                  const iso = isoDe(dia);
+                  const finde = dia.getDay() === 0 || dia.getDay() === 6;
+                  const items = serviciosDe(w, iso);
+                  return (
+                    <div key={`${w.id}-${iso}`} className={`mo-week__cell ${finde ? "is-weekend" : ""} ${iso === hoy ? "is-today" : ""}`}>
+                      {items.map((s: Service) => (
+                        <span
+                          key={s.id}
+                          className="mo-week__item"
+                          style={{ borderLeftColor: colorFor(s).bg }}
+                          title={`${s.client} · ${s.campaign} — ${s.status || "Sin estado"} (${s.start_date || "—"} → ${s.deadline || "—"})`}
+                        >
+                          <b>{s.campaign}</b>
+                          <em>{(s.points || []).length} puntos · {s.status}</em>
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })}
+              </Fragment>
+            ))}
+          </div>
+        </div>
+
+        {!workers.length && <MoEmpty title="Sin instaladores" hint="Da de alta trabajadores para ver su carga por día." />}
+      </MoCard>
+
+      {sinFecha.length > 0 && (
+        <MoCard title="Sin fechas asignadas" subtitle="No se pueden colocar en la rejilla hasta que tengan inicio o fecha límite">
+          <ul className="space-y-2">
+            {sinFecha.map((s: Service) => (
+              <li key={s.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <b>{s.client} · {s.campaign}</b>
+                <span className="text-slate-500">{s.worker_name || "Sin instalador"} · {s.province || "sin provincia"}</span>
+                <MoBadge status={s.status} />
+              </li>
+            ))}
+          </ul>
+        </MoCard>
+      )}
+    </div>
+  );
+}
+
 function Clients({clients,edit,del}:any){return <div className="grid gap-4 md:grid-cols-3">{clients.map((c:Client)=><Card key={c.id}><h3 className="text-lg font-semibold">{c.name}</h3><p className="mt-2 rounded-xl bg-slate-50 p-2 font-mono">{c.ceco||"Sin CECO"}</p><p className="mt-2 text-sm text-slate-500">{c.notes}</p><div className="mt-3 flex gap-2"><button onClick={()=>edit(c)} className="rounded-xl border px-3 py-1">Editar</button><button onClick={()=>del(c)} className="rounded-xl border px-3 py-1 text-red-600">Borrar</button></div></Card>)}</div>}
 function Workers({workers,services,edit,del}:any){const[month,setMonth]=useState(new Date().toISOString().slice(0,7));const year=Number(month.slice(0,4)),monthNum=Number(month.slice(5,7)),from=`${month}-01`,to=`${year}-${String(monthNum).padStart(2,"0")}-${String(new Date(year,monthNum,0).getDate()).padStart(2,"0")}`;return <div className="space-y-4"><Card><Input label="Mes para importes" type="month" value={month} onChange={setMonth}/></Card><div className="grid gap-4 md:grid-cols-3">{workers.map((w:Worker)=>{const ws=services.filter((s:Service)=>s.worker_id===w.id),val=ws.filter(isValidated),m=ws.filter((s:Service)=>isValidated(s)&&s.validated_at&&dateOnly(s.validated_at)>=from&&dateOnly(s.validated_at)<=to);return <Card key={w.id}><Users className="mb-2 h-5 w-5"/><h3 className="text-lg font-semibold">{w.name}</h3><p className="text-sm text-slate-500">{w.phone} · {w.province}</p>{w.email&&<p className="text-sm text-slate-500 break-all">{w.email}</p>}<p className="mt-2 text-sm">{w.skills}</p><div className="mt-3 grid grid-cols-2 gap-2 text-sm"><Mini label="Activos" value={ws.filter((s:Service)=>!isValidated(s)).length}/><Mini label="A tiempo" value={pct(val.filter(onTime).length,val.length)+"%"}/><Mini label="Mes" value={eur(m.reduce((a:number,s:Service)=>a+serviceTotal(s),0))}/><Mini label="Validados mes" value={m.length}/></div><div className="mt-3 flex gap-2"><button onClick={()=>edit(w)} className="rounded-xl border px-3 py-1">Editar</button><button onClick={()=>del(w)} className="rounded-xl border px-3 py-1 text-red-600">Borrar</button></div></Card>})}</div></div>}
 function Payments({services,workers,clients}:any){const[from,setFrom]=useState(monthStart()),[to,setTo]=useState(monthEnd()),[wid,setWid]=useState(""),[cid,setCid]=useState(""),[campaignPayments,setCampaignPayments]=useState<any[]>([]);useEffect(()=>{async function loadCampaignPayments(){const sessionNow=getCurrentAppSession();if(!canAccessModule(sessionNow,"pagos")){setCampaignPayments([]);return}if(isSupabaseConfigured&&supabase){let pointQuery=supabase.from("big_campaign_points").select("*");if(!isAdminSession(sessionNow)&&sessionNow?.provinces?.length)pointQuery=pointQuery.in("province",provinceScopeValues(sessionNow.provinces));const{data:points}=await pointQuery;const campaignIds=Array.from(new Set(((points||[])as any[]).map(point=>point.big_campaign_id).filter(Boolean))) as string[];let campaigns:any[]=[];if(campaignIds.length){const{data}=await supabase.from("big_campaigns").select("*").in("id",campaignIds);campaigns=(data||[]) as any[]}const byCampaign=new Map(campaigns.map((c:any)=>[c.id,c]));setCampaignPayments(((points||[])as any[]).map(point=>{const campaign:any=byCampaign.get(point.big_campaign_id)||{};return buildBigCampaignPaymentRow(point,campaign,sessionNow)}).filter(Boolean))}else setCampaignPayments([])}loadCampaignPayments()},[]);function buildBigCampaignPaymentRow(point:any,campaign:any,sessionNow:AppSession|null){const province=point.province||campaign.province||"";if(!isAdminSession(sessionNow)&&!userCanSeeProvince(sessionNow,province))return null;const status=point.point_status||"Pendiente",incidentActive=isPayableFailedStatus(status)&&point.incident_status!=="Resuelta"&&!point.incident_resolved_at,incidentResolved=point.incident_status==="Resuelta"||!!point.incident_resolved_at;if(!["Finalizado","Incidencia","Pospuesto"].includes(status)&&!incidentResolved)return null;const incident=Number(point.incident_fee||INCIDENT_FEE),original=Number(point.original_fee??point.fee??0),total=incidentActive?incident:incidentResolved?original+incident:Number(point.fee||0),paymentDate=dateOnly(point.validated_at||point.finished_at||point.incident_resolved_at||point.reported_at||campaign.deadline||campaign.start_date||todayISO());return{id:`big-${point.id}`,source:"Gran campaña",date:paymentDate,worker_id:point.worker_id||null,worker_name:point.worker_name||"Sin instalador",client_id:campaign.client_id||null,client:campaign.client||"Gran campaña",ceco:campaign.ceco||"",campaign:campaign.name||"Gran campaña",payment_type:status==="Incidencia"||status==="Pospuesto"?"Incidencia":"Puntos",total,province}}const serviceRows=services.filter((s:Service)=>isValidated(s)&&s.validated_at).map((s:Service)=>({id:`service-${s.id}`,source:"Servicio",date:dateOnly(s.validated_at),worker_id:s.worker_id,worker_name:s.worker_name,client_id:s.client_id,client:s.client,ceco:s.ceco,campaign:s.campaign,payment_type:s.payment_type||"Puntos",total:serviceTotal(s),pointsTotal:pointTotal(s),hoursTotal:hourTotal(s)}));const campaignRows=campaignPayments.map(row=>({...row,pointsTotal:row.total,hoursTotal:0}));const valid=[...serviceRows,...campaignRows].filter(row=>(!from||row.date>=from)&&(!to||row.date<=to)&&(!wid||row.worker_id===wid)&&(!cid||row.client_id===cid));const total=valid.reduce((a:number,row:any)=>a+Number(row.total||0),0),totalHours=valid.reduce((a:number,row:any)=>a+Number(row.hoursTotal||0),0),totalPoints=valid.reduce((a:number,row:any)=>a+Number(row.pointsTotal||0),0);function exp(){downloadCSV("pagos.csv",[["Origen","Fecha","Trabajador","Cliente","CECO","Campaña","Tipo pago","Total"],...valid.map((row:any)=>[row.source,row.date,row.worker_name,row.client,row.ceco,row.campaign,row.payment_type,row.total])])}const workerTotals=workers.map((w:Worker)=>[w.name,valid.filter((row:any)=>row.worker_id===w.id).reduce((a:number,row:any)=>a+Number(row.total||0),0)]as[string,number]);const unassigned=valid.filter((row:any)=>!row.worker_id).reduce((a:number,row:any)=>a+Number(row.total||0),0);const payByWorker=moneyData([...workerTotals,...(unassigned>0?[["Sin instalador",unassigned] as [string,number]]:[])].filter(x=>x[1]>0));return <div className="space-y-4"><Card><div className="grid gap-2 md:grid-cols-5"><Input label="Desde" type="date" value={from} onChange={setFrom}/><Input label="Hasta" type="date" value={to} onChange={setTo}/><Select label="Trabajador" value={wid} onChange={setWid} options={["",...workers.map((w:Worker)=>w.id)]} labels={{"":"Todos",...Object.fromEntries(workers.map((w:Worker)=>[w.id,w.name]))}}/><Select label="Cliente" value={cid} onChange={setCid} options={["",...clients.map((c:Client)=>c.id)]} labels={{"":"Todos",...Object.fromEntries(clients.map((c:Client)=>[c.id,c.name]))}}/><button onClick={exp} className="self-end rounded-2xl bg-slate-900 px-4 py-2 text-white"><FileDown className="mr-1 inline h-4 w-4"/>Exportar</button></div></Card><div className="grid gap-3 md:grid-cols-5"><Kpi label="Total periodo" value={eur(total)} icon={CreditCard}/><Kpi label="Líneas pago" value={valid.length} icon={CheckCircle2}/><Kpi label="Grandes campañas" value={valid.filter((row:any)=>row.source==="Gran campaña").length} icon={Users}/><Kpi label="Importe puntos" value={eur(totalPoints)} icon={Package}/><Kpi label="Importe horas" value={eur(totalHours)} icon={CalendarDays}/></div><BarChart title="Pagos por trabajador" data={payByWorker}/><Card><div className="overflow-auto"><table className="w-full min-w-[900px] text-sm"><thead><tr className="bg-slate-50"><th className="p-2 text-left">Origen</th><th className="p-2 text-left">Fecha</th><th>Trabajador</th><th>Cliente</th><th>Campaña</th><th>Tipo</th><th className="text-right">Total</th></tr></thead><tbody>{valid.map((row:any)=><tr key={row.id} className="border-t"><td className="p-2">{row.source}</td><td className="p-2">{row.date}</td><td>{row.worker_name}</td><td>{row.client}</td><td>{row.campaign}</td><td>{row.payment_type}</td><td className="text-right font-semibold">{eur(row.total)}</td></tr>)}</tbody></table></div></Card></div>}

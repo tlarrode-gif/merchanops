@@ -306,6 +306,135 @@
 }
 
 /* ====================================================================== */
+/* Rejilla semanal del calendario                                          */
+/* ====================================================================== */
+
+/* La semana cruzada por instalador y día. Se desplaza en horizontal dentro de
+   su tarjeta: con siete columnas y nombres a la izquierda, en pantallas
+   estrechas no cabe, y estrujar las columnas la haría ilegible. */
+.mo-app .mo-week-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mo-app .mo-week {
+  display: grid;
+  /* Ancho mínimo para que la semana siga siendo legible; por encima de eso
+     estira hasta ocupar la tarjeta. Con `max-content` el texto de los bloques
+     obligaba a desplazarse aunque hubiera sitio de sobra. */
+  min-width: 860px;
+  width: 100%;
+  border-top: 1px solid var(--mo-border-soft);
+}
+
+.mo-app .mo-week__corner {
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid var(--mo-border);
+  background: var(--mo-surface);
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+.mo-app .mo-week__head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 0.5rem 0.375rem;
+  border-bottom: 1px solid var(--mo-border);
+  border-left: 1px solid var(--mo-border-soft);
+}
+
+.mo-app .mo-week__day {
+  font-family: var(--mo-font-display);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--mo-text);
+  line-height: 1.1;
+}
+
+/* Fin de semana: se ve que existe, pero no compite con los días laborables. */
+.mo-app .mo-week__head.is-weekend,
+.mo-app .mo-week__cell.is-weekend { background: var(--mo-surface-sunken); }
+.mo-app .mo-week__head.is-weekend .mo-week__day,
+.mo-app .mo-week__head.is-weekend .mo-eyebrow { color: var(--mo-text-faint); }
+
+/* Hoy, marcado en coral. */
+.mo-app .mo-week__head.is-today { box-shadow: inset 0 -2px 0 var(--mo-coral); }
+.mo-app .mo-week__head.is-today .mo-week__day { color: var(--mo-coral); }
+.mo-app .mo-week__cell.is-today { background: rgba(233, 69, 96, 0.035); }
+
+.mo-app .mo-week__worker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid var(--mo-border-soft);
+  background: var(--mo-surface);
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.mo-app .mo-week__worker-name {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--mo-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mo-app .mo-week__worker-meta {
+  display: block;
+  font-size: 0.6875rem;
+  color: var(--mo-text-faint);
+}
+
+.mo-app .mo-week__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 56px;
+  padding: 5px;
+  border-bottom: 1px solid var(--mo-border-soft);
+  border-left: 1px solid var(--mo-border-soft);
+}
+
+/* Cada bloque lleva a la izquierda el color de calendario de su servicio: es
+   la misma clave de color que ya usaba la app, ahora legible de un vistazo. */
+.mo-app .mo-week__item {
+  display: block;
+  border-radius: 6px;
+  border-left: 3px solid var(--mo-ink);
+  background: var(--mo-surface-muted);
+  padding: 4px 6px;
+  min-width: 0;
+}
+
+.mo-app .mo-week__item b {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--mo-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mo-app .mo-week__item em {
+  display: block;
+  font-style: normal;
+  font-size: 0.625rem;
+  color: var(--mo-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ====================================================================== */
 /* Bandeja de acciones                                                     */
 /* ====================================================================== */
 
@@ -402,3 +531,9 @@
   .mo-app .mo-action { flex-wrap: wrap; }
   .mo-app .mo-action__text { flex-basis: 100%; }
 }
+
+/* Los nombres de mes de `toLocaleDateString` vienen en minúscula; `capitalize`
+   de Tailwind subiría también la preposición ("Agosto De 2026"). */
+/* ::first-letter no aplica a un elemento en línea: necesita inline-block. */
+.mo-app .mo-first-caps { display: inline-block; }
+.mo-app .mo-first-caps::first-letter { text-transform: uppercase; }
