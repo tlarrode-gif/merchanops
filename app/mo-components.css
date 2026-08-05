@@ -240,7 +240,9 @@
 .mo-app .mo-columns__bar {
   width: 100%;
   border-radius: 4px 4px 2px 2px;
-  background: var(--mo-surface-sunken);
+  /* Con --mo-surface-sunken, casi el color del lienzo, la gráfica parecía un
+     esqueleto de carga en vez de datos. */
+  background: #d5d9e0;
   transition: height 0.35s var(--mo-ease);
 }
 

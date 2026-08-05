@@ -42,7 +42,15 @@
   /* --- Texto ------------------------------------------------------------ */
   --mo-text: #14141f;
   --mo-text-muted: #6b7280;
-  --mo-text-faint: #9aa0a8;
+  /* Solo para elementos GRÁFICOS (iconos, separadores, chevrons), que piden
+     3:1. Como texto se queda en 2,6:1 sobre blanco y no llega a AA, así que
+     las etiquetas usan --mo-eyebrow-color. */
+  --mo-text-faint: #8a9099;
+  /* La etiqueta diminuta en mayúsculas es texto pequeño y aparece en cada
+     KPI y en cada cabecera de tabla de la app: tiene que cumplir AA (4,6:1
+     sobre blanco). Antes compartía color con --mo-text-faint y se quedaba
+     en 2,6:1 en todas las pantallas. */
+  --mo-eyebrow-color: #6b7280;
   --mo-text-on-ink: #f4f4f6;
   --mo-text-on-ink-muted: #a7acb3;
 
@@ -148,7 +156,7 @@ button, input, select, textarea { font: inherit; }
   font-weight: 500;
   letter-spacing: var(--mo-eyebrow-tracking);
   text-transform: uppercase;
-  color: var(--mo-text-faint);
+  color: var(--mo-eyebrow-color);
   line-height: 1.2;
 }
 
