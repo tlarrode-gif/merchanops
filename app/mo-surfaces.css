@@ -507,9 +507,21 @@
   border-bottom: 1px solid var(--mo-border-soft);
   padding-top: 0.6875rem;
   padding-bottom: 0.6875rem;
-  color: var(--mo-text);
   vertical-align: middle;
 }
+
+/*
+  Sin `color` a propósito: el td lo hereda de la tabla, y fijarlo aquí pisaba el
+  de la fila. En el historial económico, un evento revertido se marca con
+  `text-slate-400 line-through` en el <tr>; al poner color en el td, el gris que
+  lo apaga se perdía y la línea revertida se leía igual de fuerte que una viva.
+
+  Y la alineación cede ante una utilidad explícita: las tablas de RR.HH. usan
+  `align-top` porque sus celdas llevan varias líneas.
+*/
+.mo-app td.align-top { vertical-align: top; }
+.mo-app td.align-bottom { vertical-align: bottom; }
+.mo-app td.align-baseline { vertical-align: baseline; }
 
 .mo-app tbody tr { transition: background-color 0.14s var(--mo-ease); }
 .mo-app tbody tr:hover { background: var(--mo-surface-muted); }

@@ -109,11 +109,22 @@ const groups: NavGroup[] = [
 ];
 
 /**
- * Pantallas donde NO se puede remontar al cambiar de provincia porque hay
- * trabajo escrito sin guardar: altas, ediciones, asignación e informes.
+ * Pantallas que NO se remontan al cambiar de provincia.
+ *
+ * Remontar es lo que hace que una lista vuelva a pedir sus datos con el nuevo
+ * alcance, pero se lleva por delante el estado local. Aquí no compensa:
+ *
+ *  · formularios de alta y edición, asignación e informes: hay trabajo escrito
+ *    sin guardar;
+ *  · RR.HH.: su ámbito es nacional, no se filtra por provincia, y en «Altas
+ *    laborales» se pierde toda la selección de trabajos marcados —que puede ser
+ *    de decenas de filas— sin filtrar nada a cambio;
+ *  · Logística: los datos son de almacén, tampoco dependen de la provincia;
+ *  · Configuración: es global.
  */
 function keepsLocalState(pathname: string, tab: string) {
   if (pathname === "/") return tab.startsWith("nuevo-");
+  if (/^\/(rrhh|logistica|configuracion)(\/|$)/.test(pathname)) return true;
   return /\/(nueva|editar|asignacion|informe)$/.test(pathname);
 }
 
