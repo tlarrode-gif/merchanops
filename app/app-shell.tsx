@@ -50,7 +50,9 @@ type NavLink = {
   rrhhManagerOnly?: boolean;
   hiddenForRoles?: AppRole[];
   tab?: string;
-  excludePrefix?: string;
+  /** Rutas que cuelgan de `href` pero tienen su propio enlace en la sidebar:
+   *  sin esto se marcarían DOS enlaces activos a la vez. */
+  excludePrefixes?: string[];
 };
 type NavGroup = { id: string; label: string | null; links: NavLink[] };
 
@@ -66,7 +68,7 @@ const groups: NavGroup[] = [
       { href: "/?tab=calendario", label: "Calendario", icon: CalendarDays, module: "calendario", tab: "calendario" },
       { href: "/?tab=pagos", label: "Pagos", icon: CreditCard, module: "pagos", tab: "pagos" },
       { href: "/pagos/obligaciones", label: "Aprobación de pagos", icon: WalletCards, counter: "obligaciones", module: "pagos" },
-      { href: "/grandes-campanas", label: "Grandes Campañas", icon: Megaphone, counter: "campanas", module: "servicios", excludePrefix: "/grandes-campanas/isdin" },
+      { href: "/grandes-campanas", label: "Grandes Campañas", icon: Megaphone, counter: "campanas", module: "servicios", excludePrefixes: ["/grandes-campanas/isdin", "/grandes-campanas/mi-zona"] },
       { href: "/grandes-campanas/mi-zona", label: "Mi zona", icon: MapPin, module: "servicios" }
     ]
   },
@@ -187,7 +189,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   function isActive(link: NavLink) {
     if (link.tab) return pathname === "/" && currentTab === link.tab;
     if (link.exact) return pathname === link.href;
-    if (link.excludePrefix && pathname.startsWith(link.excludePrefix)) return false;
+    if ((link.excludePrefixes || []).some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`))) return false;
     return pathname === link.href || pathname.startsWith(`${link.href}/`);
   }
 
