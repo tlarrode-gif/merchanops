@@ -84,10 +84,11 @@ Se copiaron literalmente de `pg_policies` del proyecto antes de tocarlas y solo 
 `and not merchan_is_rrhh()` en la rama de escritura, de modo que el comportamiento de admin,
 gestores y almacén no cambia.
 
-## Cierre del módulo de Grandes Campañas · `v11_0` a `v11_3`: PENDIENTES DE APLICAR
+## Cierre del módulo de Grandes Campañas · `v11_0` a `v11_3` (aplicadas el 2026-08-05)
 
-Se aplican **en este orden**. `v11_2` y `v11_3` son independientes entre sí, pero
-`v11_2` crea `merchan_gc_puede_operar_campana()`, que conviene tener antes.
+Aplicadas al proyecto `dptmswhwmqimijpfyndn` **en este orden**, que es obligatorio:
+`v11_0` crea `merchan_gc_puede_operar_campana()` y `merchan_gc_campana_editable()`,
+que usan las tres siguientes.
 
 | Fichero | Qué hace |
 |---|---|
@@ -134,5 +135,12 @@ se puede resolver dos veces, una negativa sin línea original válida (o contra 
 anulada) se rechaza con instrucciones, el mes contable cerrado bloquea, el candado
 del informe salta tanto con un bloque de coste como cuando falta la clave
 `bloques`, y un informe emitido no se edita ni se borra.
+
+Verificado tras aplicar: las seis tablas y la vista existen con RLS activa, los
+siete helpers y RPC tienen su EXECUTE para `authenticated`, el bucket privado
+`campana-documentos` está creado con sus cuatro policies sobre `storage.objects`,
+y los tres triggers están en su sitio. Un UPDATE sobre un punto que no toca ningún
+campo vigilado no genera ruido en la bitácora (0 filas), que es el comportamiento
+buscado.
 
 **La próxima migración libre es `v11_4`.**
