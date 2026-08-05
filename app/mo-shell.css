@@ -403,12 +403,33 @@
   flex-shrink: 1;
 }
 
+/*
+  En pantalla estrecha el buscador se recoge a un icono para dejar sitio al
+  título, pero al enfocarlo se despliega sobre la topbar: si se quedara en 44 px
+  no se vería lo que se escribe, que es tanto como no tenerlo.
+*/
 @media (max-width: 900px) {
-  .mo-search { width: 44px; }
+  .mo-search {
+    width: 40px;
+    transition: width 0.18s var(--mo-ease);
+  }
+
+  .mo-search:focus-within {
+    position: absolute;
+    left: 0.75rem;
+    right: 0.75rem;
+    width: auto;
+    z-index: 5;
+  }
+
   .mo-search__input { padding-right: 0.5rem !important; }
   .mo-search__input::placeholder { color: transparent; }
+  .mo-search:focus-within .mo-search__input::placeholder { color: var(--mo-text-faint); }
   .mo-search__kbd { display: none; }
 }
+
+/* La topbar es el contexto de posicionamiento del buscador desplegado. */
+.mo-topbar { position: sticky; }
 
 .mo-search__input {
   width: 100%;
