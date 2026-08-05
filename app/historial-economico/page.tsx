@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AppSession, canAccessModule, getCurrentAppSession, isAdminSession, sessionProvinceLabel } from "@/lib/access-control";
+import { MoKpi } from "@/components/ui/mo";
 import {
   EconomicEvent,
   EconomicEventOrigen,
@@ -270,12 +271,12 @@ export default function HistorialEconomicoPage() {
         </div>
 
         <div className="grid gap-3 md:grid-cols-6">
-          <K label="Pagos (neto)" value={eur(summary.pagos)} />
-          {admin && <K label="Facturación (neto)" value={eur(summary.facturacion)} />}
-          {admin && <K label="Extras (neto)" value={eur(summary.extras)} />}
-          <K label="Eventos" value={summary.total} />
-          <K label="Reversos" value={summary.reversos} />
-          <K label="En revisión" value={summary.enRevision} />
+          <K label="Pagos (neto)" value={eur(summary.pagos)} accent="gold" />
+          {admin && <K label="Facturación (neto)" value={eur(summary.facturacion)} accent="gold" />}
+          {admin && <K label="Extras (neto)" value={eur(summary.extras)} accent="gold" />}
+          <K label="Eventos" value={summary.total} accent="ink" />
+          <K label="Reversos" value={summary.reversos} accent="risk" />
+          <K label="En revisión" value={summary.enRevision} accent="risk" />
         </div>
 
         {admin && (
@@ -339,4 +340,4 @@ export default function HistorialEconomicoPage() {
   );
 }
 
-function K({ label, value }: { label: string; value: any }) { return <div className="rounded-3xl border bg-white p-5 shadow-sm"><p className="text-sm text-slate-500">{label}</p><p className="text-2xl font-bold">{value}</p></div>; }
+function K({ label, value, accent }: { label: string; value: any; accent?: "coral" | "risk" | "ok" | "gold" | "ink" }) { return <MoKpi label={label} value={value} accent={accent} />; }
