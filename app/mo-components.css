@@ -67,6 +67,9 @@
   display: grid;
   gap: 0.75rem;
   grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+  /* Sin esto, un KPI con línea de apoyo larga estira toda la fila y deja a las
+     otras siete tarjetas medio vacías, como pasaba en Vinilos. */
+  align-items: start;
 }
 
 .mo-app .mo-kpi__label {
