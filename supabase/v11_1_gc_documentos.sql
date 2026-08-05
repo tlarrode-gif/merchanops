@@ -62,6 +62,16 @@
 --     versión anterior fallaba en cuanto el documento original lo había subido
 --     otra persona, y el mensaje que salía era el falso «ya no existe».
 --
+-- D10 El UPDATE se concede POR COLUMNAS (borrado lógico y visibilidad). Un grant
+--     de tabla entera dejaba al autor reescribir storage_path, version o
+--     sustituye_a por PostgREST y saltarse el versionado.
+--
+-- D11 Publicar una versión nueva sobre un documento AJENO se rechaza dentro del
+--     RPC. La pantalla ya no lo ofrece, pero el RPC es SECURITY DEFINER y la
+--     pantalla no es una defensa.
+--
+-- D12 El `punto_id` que llega del cliente se valida contra la campaña.
+--
 -- D9  Escribir documentos exige poder OPERAR la campaña, no solo verla. Almacén
 --     y RR.HH. ven las campañas desde v9_11b/v10_4 y con la primera versión de
 --     estas policies podían subir y leer documentación de cualquier campaña de
@@ -196,7 +206,16 @@ create policy gc_docs_update on public.campana_documentos
 
 -- Sin policy de DELETE: los documentos no se borran físicamente (D5).
 revoke delete on public.campana_documentos from authenticated, anon;
-grant select, insert, update on public.campana_documentos to authenticated;
+-- D10: el UPDATE se concede POR COLUMNAS. Con un `grant update` de tabla entera,
+-- quien subió un documento podía reescribir por PostgREST `storage_path`,
+-- `version`, `sustituye_a`, `vigente` o incluso `campana_id`, saltándose el
+-- versionado que esta migración existe para garantizar. Las únicas columnas que
+-- la aplicación cambia directamente son las del borrado lógico y la visibilidad;
+-- jubilar una versión lo hace el RPC, que es SECURITY DEFINER y no pasa por aquí.
+revoke update on public.campana_documentos from authenticated, anon;
+grant select, insert on public.campana_documentos to authenticated;
+grant update (deleted_at, deleted_por_nombre, vigente, visible_instalador)
+  on public.campana_documentos to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 3. Publicar documento / nueva versión, en una sola transacción (D4)
@@ -217,6 +236,7 @@ declare
   v_version integer := 1;
   v_sustituye uuid := nullif(p_doc ->> 'sustituye_a', '')::uuid;
   v_campana uuid := nullif(p_doc ->> 'campana_id', '')::uuid;
+  v_punto uuid := nullif(p_doc ->> 'punto_id', '')::uuid;
 begin
   if v_campana is null then
     raise exception 'Falta la campaña del documento.';
@@ -236,6 +256,14 @@ begin
     raise exception 'La campaña está cerrada (completada, cancelada o archivada): su documentación es de solo lectura.';
   end if;
 
+  -- D12: el punto llega del cliente; hay que comprobar que existe y que es de esta
+  -- campaña, o un documento de punto acabaría colgando del punto de otra campaña.
+  if v_punto is not null and not exists (
+    select 1 from public.puntos_venta_campana p where p.id = v_punto and p.campana_id = v_campana
+  ) then
+    raise exception 'Ese punto no existe o no pertenece a esta campaña.';
+  end if;
+
   v_perfil := public.merchan_auth_profile();
 
   if v_sustituye is not null then
@@ -245,6 +273,14 @@ begin
     end if;
     if v_anterior.campana_id <> v_campana then
       raise exception 'Una versión nueva tiene que ser de la misma campaña que la anterior.';
+    end if;
+    -- D11: la pantalla solo ofrece «Subir versión nueva» a administración o a quien
+    -- lo subió, pero el RPC es SECURITY DEFINER y hay que repetir la regla aquí: si
+    -- no, otra gestora de la misma campaña puede publicar encima del briefing ajeno
+    -- y dejar el original como no vigente.
+    if not public.merchan_is_admin()
+       and v_anterior.subido_por is distinct from public.merchan_my_app_user_id() then
+      raise exception 'Ese documento lo subió otra persona: solo administración o quien lo subió puede publicar una versión nueva.';
     end if;
     -- Sin estas dos comprobaciones, dos personas podían publicar cada una su «v2»
     -- sobre el mismo v1 y quedaban DOS documentos vigentes con la misma versión.
@@ -268,7 +304,7 @@ begin
     subido_por, subido_por_nombre
   ) values (
     v_campana,
-    nullif(p_doc ->> 'punto_id', '')::uuid,
+    v_punto,
     p_doc ->> 'nombre',
     nullif(p_doc ->> 'descripcion', ''),
     coalesce(nullif(p_doc ->> 'categoria', ''), 'otro'),

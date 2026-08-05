@@ -268,7 +268,6 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     if (result.error) {
       setErrorPestana(`No se pudo cargar el historial: ${result.error}`);
     } else {
-      setErrorPestana("");
       // La RLS de la bitácora filtra por provincia, pero la regla v10.2 de la
       // aplicación es más estricta: un punto ya asignado solo lo ve su gestor.
       // Se aplica el mismo filtro que a los puntos para no enseñar de refilón
@@ -289,7 +288,9 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     if (result.error) {
       setErrorPestana(`No se pudieron cargar los documentos: ${result.error}`);
     } else {
-      setErrorPestana("");
+      // Ojo: NO se limpia `errorPestana` aquí. Estas recargas se lanzan justo
+      // después de una acción, y una recarga correcta borraba el motivo por el
+      // que la subida o la retirada acababan de fallar antes de poder leerlo.
       setDocumentos(result.data);
       setDocumentosCargados(true);
     }
@@ -378,6 +379,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   async function handleRetirarDocumento(documento: Documento) {
     if (!confirm(`¿Retirar «${documento.nombre}»?\n\nDeja de ofrecerse, pero su ficha se conserva en el histórico de la campaña.`)) return;
     setSaving(true);
+    setErrorPestana("");
     const result = await retirarDocumento(documento.id, session);
     if (result.error) setErrorPestana(result.error);
     else flash("Documento retirado.");
@@ -387,6 +389,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
 
   async function handleVisibilidadDocumento(documento: Documento, visible: boolean) {
     setSaving(true);
+    setErrorPestana("");
     const result = await cambiarVisibilidadInstalador(documento.id, visible);
     if (result.error) setErrorPestana(result.error);
     await cargarDocumentos(true);

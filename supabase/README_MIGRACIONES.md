@@ -143,4 +143,14 @@ y los tres triggers están en su sitio. Un UPDATE sobre un punto que no toca nin
 campo vigilado no genera ruido en la bitácora (0 filas), que es el comportamiento
 buscado.
 
-**La próxima migración libre es `v11_4`.**
+## `v11_4`: endurecimiento tras la revisión del PR #40 (aplicada el 2026-08-05)
+
+| Fichero | Qué hace |
+|---|---|
+| (aplicada en línea, recogida en `v11_1` y `v11_2`) | El UPDATE de `campana_documentos` pasa a ser **por columnas** (`deleted_at`, `deleted_por_nombre`, `vigente`, `visible_instalador`): con el grant de tabla entera, quien subió un documento podía reescribir `storage_path`, `version`, `sustituye_a` o `campana_id` por PostgREST y saltarse el versionado. Publicar una versión sobre un documento **ajeno** se rechaza dentro del RPC. El `punto_id` del cliente se valida contra la campaña. Y en una regularización **de punto** el beneficiario lo pone el servidor a partir del instalador del punto: antes el JSON del cliente ganaba, así que se podía nombrar beneficiario a otra persona. |
+
+Los ficheros `v11_1_gc_documentos.sql` y `v11_2_gc_regularizaciones.sql` ya incluyen
+estos cambios, así que aplicarlos de cero sobre una base limpia da el mismo
+resultado que la base actual.
+
+**La próxima migración libre es `v11_5`.**

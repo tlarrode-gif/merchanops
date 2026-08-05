@@ -98,11 +98,13 @@ export function RegularizacionesPanel({ campanaId, regularizaciones, puntos, mes
   }
 
   async function aprobar(fila: Regularizacion) {
+    // SIN valor por defecto a propósito: con «SÍ» pre-relleno, pulsar Enter
+    // mientras se despachan pendientes marcaba el coste como refacturable al
+    // cliente sin que nadie lo decidiera. Es justo lo que D3 quiere evitar.
     const respuesta = window.prompt(
       `Aprobar «${fila.concepto}» (${centimosAEuros(fila.importe_cents)}).\n\n` +
       "¿Se le refactura al cliente? Escribe SÍ o NO.\n" +
-      "Esta respuesta es la que permitirá facturarlo después; no se puede dejar en blanco.",
-      "SÍ"
+      "Esta respuesta es la que permitirá facturarlo después; no hay valor por defecto."
     );
     if (respuesta === null) return;
     const limpio = respuesta.trim().toLowerCase();

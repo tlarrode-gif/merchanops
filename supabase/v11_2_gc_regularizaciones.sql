@@ -58,6 +58,9 @@
 --     campaña en su ámbito y aun así no ser la responsable de ese punto concreto:
 --     con solo el primer nivel podía generar un pago sobre el punto de otra.
 --
+-- D10 En una regularización DE PUNTO el beneficiario lo pone el servidor a partir
+--     del instalador del punto. El cliente no puede nombrar a otro.
+--
 -- D9  Ni se propone ni se aprueba nada contra una campaña cerrada: es el mismo
 --     candado que assertCampanaEditable() aplica en toda la operativa del módulo.
 --
@@ -276,9 +279,15 @@ begin
     v_importe,
     v_fecha,
     v_mes,
-    -- El beneficiario por defecto es el instalador del punto: es quien cobra.
-    coalesce(nullif(p_datos ->> 'trabajador_id', ''), v_punto_row.instalador_id),
-    coalesce(nullif(p_datos ->> 'trabajador_nombre', ''), v_punto_row.instalador_nombre),
+    -- D10: con punto, el beneficiario sale SIEMPRE del punto, nunca del cliente.
+    -- Antes el JSON ganaba al instalador, así que quien podía operar un punto
+    -- suyo podía nombrar beneficiario a otra persona y, si administración lo
+    -- aprobaba, el pago se creaba a nombre de quien dijera el JSON en vez de a
+    -- nombre del instalador que enseña la pantalla.
+    case when v_punto is not null then v_punto_row.instalador_id
+         else nullif(p_datos ->> 'trabajador_id', '') end,
+    case when v_punto is not null then v_punto_row.instalador_nombre
+         else nullif(p_datos ->> 'trabajador_nombre', '') end,
     v_perfil.id,
     coalesce(nullif(v_perfil.display_name, ''), 'Operaciones')
   ) returning * into v_fila;
