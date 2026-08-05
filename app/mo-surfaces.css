@@ -680,15 +680,26 @@
   box-shadow: var(--mo-shadow-overlay);
 }
 
-/* Aviso flotante (toast) de la app. */
+/*
+  Aviso flotante (toast).
+
+  Va con !important a propósito: el marcado lo pinta con `bg-emerald-50`, y el
+  remapeo de estados del bloque 9 —que también usa !important— le devolvía el
+  fondo verde claro dejando texto blanco sobre él, ilegible. Y este toast no es
+  decorativo: es el único canal de respuesta del Home, el que dice si un
+  guardado ha ido bien o ha fallado.
+*/
 .mo-app .fixed.right-4.top-24,
 .mo-app .fixed.right-4.top-6 {
   border: 0;
-  background: var(--mo-ink);
-  color: #fff;
+  background-color: var(--mo-ink) !important;
+  color: #fff !important;
   border-radius: var(--mo-radius-control);
   box-shadow: var(--mo-shadow-raised);
 }
+
+.mo-app .fixed.right-4.top-24 b,
+.mo-app .fixed.right-4.top-6 b { color: #fff; }
 
 /* ====================================================================== */
 /* 12. Bloques de aviso                                                   */

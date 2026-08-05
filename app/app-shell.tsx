@@ -108,6 +108,15 @@ const groups: NavGroup[] = [
   }
 ];
 
+/**
+ * Pantallas donde NO se puede remontar al cambiar de provincia porque hay
+ * trabajo escrito sin guardar: altas, ediciones, asignación e informes.
+ */
+function keepsLocalState(pathname: string, tab: string) {
+  if (pathname === "/") return tab.startsWith("nuevo-");
+  return /\/(nueva|editar|asignacion|informe)$/.test(pathname);
+}
+
 /** Iniciales para el avatar: «Laura Méndez» -> «LM». */
 function initials(name: string) {
   const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
@@ -309,10 +318,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        {/* La clave por provincia fuerza el remontaje de la pantalla al cambiar
-            el filtro: así vuelve a pedir sus datos con el nuevo alcance en vez
-            de quedarse enseñando la provincia anterior. */}
-        <div className="mo-app__content" key={`view:${province}`}>
+        {/*
+          Al cambiar de provincia hay que volver a pedir los datos: si no, la
+          pantalla se queda enseñando el alcance anterior. La forma de forzarlo
+          sin tocar las 40 pantallas es remontar el subárbol con una clave.
+
+          Pero remontar tira el estado local, y en un formulario a medio
+          rellenar eso es perder trabajo escrito. Así que en las pantallas de
+          alta y edición la clave se congela: ahí el filtro de provincia no
+          aporta nada —se está trabajando sobre UNA entidad concreta— y el
+          riesgo de perder lo tecleado sí es real.
+        */}
+        <div className="mo-app__content" key={keepsLocalState(pathname, currentTab) ? "view:estable" : `view:${province}`}>
           <Breadcrumbs pathname={pathname} />
           {children}
         </div>
