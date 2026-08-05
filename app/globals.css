@@ -11,83 +11,22 @@
   pintaban la app en la paleta slate de Tailwind. El rediseño los sustituye por
   un sistema con tokens, así que se han retirado en bloque.
 
-  Las utilidades de abajo sí se conservan: son clases con nombre propio, no
-  parches sobre el marcado de otro, y ahora consumen los tokens de marca.
+  De las once utilidades que había aquí solo sobrevive `code-chip`: el resto se
+  quedó sin consumidores al reescribir /ui-preview con las piezas del sistema.
 */
 
 @layer components {
-  .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-all focus:outline-none;
-    background: var(--mo-ink);
-    border: 1px solid var(--mo-ink);
-  }
-  .btn-primary:hover { background: #23232f; box-shadow: var(--mo-shadow-raised); }
-
-  .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all focus:outline-none;
-    background: var(--mo-surface);
-    border: 1px solid var(--mo-border);
-    color: var(--mo-text);
-  }
-  .btn-secondary:hover { background: var(--mo-surface-muted); border-color: var(--mo-border-strong); }
-
-  .icon-button {
-    @apply inline-flex items-center justify-center rounded-lg p-1.5 transition-colors focus:outline-none;
-    color: var(--mo-text-faint);
-  }
-  .icon-button:hover { background: var(--mo-surface-muted); color: var(--mo-text); }
-
-  .money {
-    font-family: var(--mo-font-mono);
-    @apply font-medium tabular-nums;
-    letter-spacing: -0.01em;
-    color: var(--mo-text);
-  }
-
+  /*
+    Solo queda `code-chip`. Las otras diez utilidades (btn-primary, soft-card,
+    field-control, table-cell…) nacieron para una preview que ya no existe: hoy
+    ese papel lo hacen las piezas de components/ui/mo.tsx y el revestimiento de
+    mo-surfaces.css, que actúan sobre el marcado real. Mantener dos vocabularios
+    para lo mismo es la forma segura de que se separen.
+  */
   .code-chip {
     font-family: var(--mo-font-mono);
     @apply inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium;
     background: var(--mo-surface-sunken);
     color: #4b5563;
-  }
-
-  .soft-card {
-    @apply p-5;
-    background: var(--mo-surface);
-    border: 1px solid var(--mo-border);
-    border-radius: var(--mo-radius-card);
-    box-shadow: var(--mo-shadow-card);
-  }
-
-  .field-label {
-    @apply mb-1 block text-xs font-medium tracking-wide;
-    color: var(--mo-text-muted);
-  }
-
-  .field-control {
-    @apply w-full px-3 py-2 text-sm transition-all focus:outline-none;
-    border-radius: var(--mo-radius-control);
-    border: 1px solid var(--mo-border);
-    background: var(--mo-surface);
-    color: var(--mo-text);
-  }
-  .field-control:focus { border-color: var(--mo-coral); box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.13); }
-
-  .status-pill {
-    @apply inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium;
-  }
-
-  .table-head-cell {
-    @apply px-3 py-2.5 text-left uppercase;
-    font-size: var(--mo-eyebrow-size);
-    font-weight: 500;
-    letter-spacing: var(--mo-eyebrow-tracking);
-    color: var(--mo-text-faint);
-    border-bottom: 1px solid var(--mo-border);
-  }
-
-  .table-cell {
-    @apply px-3 py-3 align-middle text-sm;
-    color: var(--mo-text);
   }
 }

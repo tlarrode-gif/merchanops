@@ -55,7 +55,15 @@
   color: var(--mo-text-on-ink);
   display: flex;
   flex-direction: column;
-  z-index: 45;
+  /*
+    Por debajo de 40 a propósito. La app tiene overlays propios a `z-40` —el
+    panel de detalle de un vinilo y la barra flotante de «Tramitar» de RR.HH.—
+    y con la sidebar a 45 quedaban tapados: el clic para cerrar no respondía en
+    la franja izquierda y la barra de tramitar desaparecía bajo el menú.
+    Solo hace falta que quede por encima del contenido de la página, que no
+    crea contexto de apilamiento.
+  */
+  z-index: 30;
 }
 
 /* --- Marca --- */
