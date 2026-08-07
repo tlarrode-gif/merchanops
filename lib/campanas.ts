@@ -1,6 +1,8 @@
 import { AppSession, AppUser, canDeleteCampaigns, canManageCampaigns, isAdminSession, userCanSeeProvince } from "@/lib/access-control";
 import { agruparPuntosParaMaterial } from "@/lib/campana-asignacion";
 import { copyCampanaColumnas } from "@/lib/campana-columnas";
+import { copyDelegacionesCampana } from "@/lib/campana-delegaciones";
+import { ConfigPagoCampana, horasEntreMarcas, valorPuntoEur } from "@/lib/campana-horas";
 import { normalizeProvince, provinceScopeValues } from "@/lib/provinces";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { csvSafeCell } from "@/lib/sanitize";
@@ -27,6 +29,16 @@ export type Campana = {
   presupuesto?: number | null;
   // Feature 2: la campana pide a los gestores la direccion de envio del trabajador.
   solicitar_direccion_envio?: boolean | null;
+  // v11.5 · Campaña por DELEGACIONES: en las provincias de las delegaciones
+  // marcadas manda la delegación subcontratada; el resto sigue siendo de los
+  // gestores. Ver lib/campana-delegaciones.ts.
+  delegaciones_activas?: boolean | null;
+  // v11.5 · Pago por HORAS: horas del punto x tarifa, en vez del importe del punto.
+  pago_por_horas?: boolean | null;
+  tarifa_hora?: number | null;
+  // v11.5 · Kilometraje reportado x tarifa. Independiente del pago por horas.
+  pago_kilometraje?: boolean | null;
+  tarifa_km?: number | null;
   created_by?: string | null;
   created_by_name?: string | null;
   archived_at?: string | null;
@@ -80,6 +92,14 @@ export type PuntoVenta = {
   estado: PuntoEstado;
   fecha_visita?: string | null;
   importe?: number | null;
+  // v11.5 · Reporte del turno en las campañas por horas. `horas_trabajadas` se
+  // deriva de entrada/salida cuando las dos existen (lib/campana-horas.ts) y, si
+  // no, guarda el total que traiga el Excel del reporte.
+  hora_entrada?: string | null;
+  hora_salida?: string | null;
+  horas_trabajadas?: number | null;
+  // v11.5 · Kilometraje reportado del desplazamiento a este punto.
+  kilometros?: number | null;
   notas?: string | null;
   // v10.2: fecha en que Almacen cerro el picking del material de este punto.
   // La escribe logistics_close_picking; en Grandes Campanas es de solo lectura.
@@ -222,11 +242,13 @@ async function scopeListadoKpis(rows: CampanaListadoRow[], session: AppSession |
   if (!supabase) return rows;
   const ids = rows.map(row => row.id);
   const [puntosResult, incidenciasResult] = await Promise.all([
-    supabase.from("puntos_venta_campana").select("id,campana_id,provincia,gestor_id,gestor_nombre,estado,importe").in("campana_id", ids),
+    // Las horas y los kilómetros entran en el SELECT porque en una campaña por horas
+    // son ELLOS los que valen dinero; sin traerlos, el gestor veía 0 € de coste.
+    supabase.from("puntos_venta_campana").select("id,campana_id,provincia,gestor_id,gestor_nombre,estado,importe,hora_entrada,hora_salida,horas_trabajadas,kilometros").in("campana_id", ids),
     supabase.from("incidencias_campana").select("id,campana_id,punto_id,estado").in("campana_id", ids).neq("estado", "resuelta")
   ]);
   if (puntosResult.error) return rows.map(row => ({ ...row, presupuesto: null }));
-  const puntos = (puntosResult.data || []) as Array<Pick<PuntoVenta, "id" | "campana_id" | "provincia" | "gestor_id" | "gestor_nombre" | "estado" | "importe">>;
+  const puntos = (puntosResult.data || []) as Array<Pick<PuntoVenta, "id" | "campana_id" | "provincia" | "gestor_id" | "gestor_nombre" | "estado" | "importe" | "hora_entrada" | "hora_salida" | "horas_trabajadas" | "kilometros">>;
   const visibles = puntos.filter(punto => sessionCanSeePunto(session, punto));
   const puntoIds = new Set(visibles.map(punto => punto.id));
   const incidencias = (incidenciasResult.data || []) as Array<{ campana_id: string | null; punto_id: string | null }>;
@@ -239,15 +261,25 @@ async function scopeListadoKpis(rows: CampanaListadoRow[], session: AppSession |
       completados: propios.filter(punto => punto.estado === "completado").length,
       pendientes: propios.filter(punto => punto.estado === "pendiente").length,
       asignados: propios.filter(punto => punto.gestor_id || punto.gestor_nombre).length,
-      importe_total: propios.reduce((sum, punto) => sum + Number(punto.importe || 0), 0),
-      coste_ejecutado: propios.filter(punto => punto.estado === "completado").reduce((sum, punto) => sum + Number(punto.importe || 0), 0),
+      importe_total: propios.reduce((sum, punto) => sum + valorPuntoEur(punto, row), 0),
+      coste_ejecutado: propios.filter(punto => punto.estado === "completado").reduce((sum, punto) => sum + valorPuntoEur(punto, row), 0),
       incidencias_abiertas: incidencias.filter(incidencia => incidencia.campana_id === row.id && incidencia.punto_id && puntoIds.has(incidencia.punto_id)).length
     };
   });
 }
 
-// KPIs de detalle calculados sobre los puntos visibles para la sesión (visión provincial del gestor).
-export function kpisDesdePuntos(campanaId: string, puntos: PuntoVenta[], incidencias: IncidenciaCampana[], fechaFin?: string | null): CampanaKpis {
+/**
+ * KPIs de detalle calculados sobre los puntos visibles para la sesión (visión
+ * provincial del gestor). `campana` trae el modo de pago: sin él, una campaña por
+ * horas mostraba 0 € de coste ejecutado porque sus puntos no tienen importe.
+ */
+export function kpisDesdePuntos(
+  campanaId: string,
+  puntos: PuntoVenta[],
+  incidencias: IncidenciaCampana[],
+  fechaFin?: string | null,
+  campana: ConfigPagoCampana = {}
+): CampanaKpis {
   const puntoIds = new Set(puntos.map(punto => punto.id));
   return {
     campana_id: campanaId,
@@ -256,8 +288,8 @@ export function kpisDesdePuntos(campanaId: string, puntos: PuntoVenta[], inciden
     pendientes: puntos.filter(punto => punto.estado === "pendiente").length,
     asignados: puntos.filter(punto => punto.gestor_id || punto.gestor_nombre).length,
     incidencias_abiertas: incidencias.filter(incidencia => incidencia.estado !== "resuelta" && incidencia.punto_id && puntoIds.has(incidencia.punto_id)).length,
-    coste_ejecutado: puntos.filter(punto => punto.estado === "completado").reduce((sum, punto) => sum + Number(punto.importe || 0), 0),
-    importe_total: puntos.reduce((sum, punto) => sum + Number(punto.importe || 0), 0),
+    coste_ejecutado: puntos.filter(punto => punto.estado === "completado").reduce((sum, punto) => sum + valorPuntoEur(punto, campana), 0),
+    importe_total: puntos.reduce((sum, punto) => sum + valorPuntoEur(punto, campana), 0),
     dias_restantes: fechaFin ? Math.ceil((new Date(`${dateOnly(fechaFin)}T00:00:00`).getTime() - Date.now()) / 86400000) : null
   };
 }
@@ -307,6 +339,11 @@ export type CampanaInput = {
   provincias: string[];
   presupuesto?: number | null;
   solicitar_direccion_envio?: boolean | null;
+  delegaciones_activas?: boolean | null;
+  pago_por_horas?: boolean | null;
+  tarifa_hora?: number | null;
+  pago_kilometraje?: boolean | null;
+  tarifa_km?: number | null;
 };
 
 export async function insertCampana(input: CampanaInput, session: AppSession | null): Promise<Result<Campana | null>> {
@@ -422,7 +459,16 @@ export async function duplicateCampana(id: string, opciones: DuplicarOpciones, s
     fecha_inicio: opciones.fecha_inicio || null,
     fecha_fin: opciones.fecha_fin || null,
     provincias: original.data.provincias || [],
-    presupuesto: original.data.presupuesto ?? null
+    presupuesto: original.data.presupuesto ?? null,
+    // La configuración de la campaña viaja SIEMPRE con la copia: duplicar una
+    // campaña por horas y que la copia naciera pagando por punto sería un error
+    // silencioso de nómina que nadie miraría hasta el cierre del mes.
+    solicitar_direccion_envio: original.data.solicitar_direccion_envio ?? false,
+    delegaciones_activas: original.data.delegaciones_activas ?? false,
+    pago_por_horas: original.data.pago_por_horas ?? false,
+    tarifa_hora: original.data.tarifa_hora ?? null,
+    pago_kilometraje: original.data.pago_kilometraje ?? false,
+    tarifa_km: original.data.tarifa_km ?? null
   }, session);
   if (creada.error || !creada.data) return { data: null, error: creada.error || "No se pudo crear la copia." };
   const nuevaId = creada.data.id;
@@ -440,6 +486,9 @@ export async function duplicateCampana(id: string, opciones: DuplicarOpciones, s
         provincia: gestor.provincia
       })));
     }
+    // Las delegaciones son parte del equipo: sin ellas la copia de una campaña
+    // subcontratada repartiría los puntos entre los gestores de la casa.
+    await copyDelegacionesCampana(id, nuevaId);
   }
 
   if (opciones.copiarPuntos) {
@@ -537,8 +586,17 @@ export async function insertPuntosBatch(campanaId: string, puntos: PuntoInput[],
 
 // Campos internos que una actualización por Excel puede tocar en un punto existente.
 // NO se incluyen gestor_id/instalador ni datos_extra: la actualización de progreso
-// (estado, fecha, importe, notas) no debe pisar la asignación ni los datos originales.
-const camposActualizablesPunto: (keyof PuntoInput)[] = ["nombre_comercial", "direccion", "provincia", "tipo", "estado", "fecha_visita", "importe", "notas"];
+// (estado, fecha, importe, horas, kilómetros, notas) no debe pisar la asignación ni
+// los datos originales.
+const camposActualizablesPunto: (keyof PuntoInput)[] = [
+  "nombre_comercial", "direccion", "provincia", "tipo", "estado", "fecha_visita", "importe",
+  // v11.5 · Lo que el reporte del cliente devuelve de cada visita.
+  "hora_entrada", "hora_salida", "horas_trabajadas", "kilometros",
+  "notas"
+];
+
+/** Campos que se comparan como NÚMERO: "25" y "25.00" no son un cambio. */
+const camposNumericosPunto = new Set<keyof PuntoInput>(["importe", "horas_trabajadas", "kilometros"]);
 
 export type ActualizacionMasiva = { actualizados: number; sinCambios: number; noEncontrados: number; nuevos: number };
 
@@ -558,10 +616,14 @@ export async function updatePuntosPorCodigo(
   if (bloqueada) return { data: vacio, error: bloqueada };
   const negativos = filas.filter(fila => Number(fila.importe ?? 0) < 0);
   if (negativos.length) return { data: vacio, error: `${negativos.length} fila(s) con importe negativo; corrígelas antes de actualizar.` };
+  // Mismo criterio para lo que se paga por horas y por kilómetros: un signo
+  // perdido en el Excel no puede convertirse en un descuento en la nómina.
+  const negativosReporte = filas.filter(fila => Number(fila.horas_trabajadas ?? 0) < 0 || Number(fila.kilometros ?? 0) < 0);
+  if (negativosReporte.length) return { data: vacio, error: `${negativosReporte.length} fila(s) con horas o kilómetros negativos; corrígelas antes de actualizar.` };
 
   const { data: existentesData, error: readError } = await supabase
     .from("puntos_venta_campana")
-    .select("id,codigo,nombre_comercial,direccion,provincia,tipo,estado,fecha_visita,importe,notas")
+    .select("id,codigo,nombre_comercial,direccion,provincia,tipo,estado,fecha_visita,importe,hora_entrada,hora_salida,horas_trabajadas,kilometros,notas")
     .eq("campana_id", campanaId);
   if (readError) return { data: vacio, error: readError.message };
   const porCodigo = new Map<string, Record<string, unknown>>();
@@ -582,10 +644,34 @@ export async function updatePuntosPorCodigo(
     for (const campo of camposActualizablesPunto) {
       const valor = (fila as Record<string, unknown>)[campo];
       const actual = existente[campo];
-      if (campo === "importe") { if (valor != null && Number(valor) !== Number(actual ?? 0)) patch.importe = valor; continue; }
+      if (camposNumericosPunto.has(campo)) {
+        // Un número solo se pisa si de verdad cambia; `null` (celda vacía) no borra.
+        if (valor != null && Number(valor) !== Number(actual ?? NaN)) patch[campo] = valor;
+        continue;
+      }
       const texto = String(valor ?? "").trim();
       if (texto === "") continue; // celda vacía no borra
+      if (campo === "hora_entrada" || campo === "hora_salida") {
+        // La base guarda `time` y devuelve "08:30:00": comparar el texto crudo
+        // marcaría cambio en cada subida aunque el reporte traiga la misma hora.
+        if (texto !== String(actual ?? "").trim().slice(0, 5)) patch[campo] = texto;
+        continue;
+      }
       if (texto !== String(actual ?? "").trim()) patch[campo] = campo === "fecha_visita" ? (dateOnly(texto) || valor) : valor;
+    }
+    // v11.5 · Si el reporte trae marcas horarias nuevas, las horas que se PAGAN se
+    // recalculan aquí: si no, un Excel podría subir la hora de salida y dejar el
+    // total antiguo, que es justo lo que se cobraría.
+    if (patch.hora_entrada !== undefined || patch.hora_salida !== undefined) {
+      const entrada = (patch.hora_entrada ?? existente.hora_entrada) as string | null;
+      const salida = (patch.hora_salida ?? existente.hora_salida) as string | null;
+      const calculo = horasEntreMarcas(entrada, salida);
+      // Solo se escribe cuando el par de marcas da un número: un turno mal
+      // reportado (salida antes que entrada) deja las horas como estaban y el
+      // pago sale bloqueado con su motivo, en vez de inventar un total.
+      if (calculo.horas !== null && calculo.horas !== Number(existente.horas_trabajadas ?? NaN)) {
+        patch.horas_trabajadas = calculo.horas;
+      }
     }
     if (!Object.keys(patch).length) { resumen.sinCambios += 1; continue; }
     // La bitácora tiene que poder distinguir «lo cambió alguien» de «lo cambió un Excel».
@@ -605,39 +691,83 @@ export async function updatePuntosPorCodigo(
 
 export type AsignacionMasiva = { asignados: number; omitidos: number };
 
-// Asignación en bloque. El ámbito se verifica aquí (no solo en la UI): un gestor solo
-// puede tocar puntos de sus provincias o ya asignados a él; los demás se omiten.
-export async function bulkAssignPuntos(
+/**
+ * Asignación en bloque, común a las dos capas de reparto (v11.5).
+ *
+ * `capa` decide qué se reparte y QUIÉN puede hacerlo, y esa es la regla de la
+ * operativa nueva:
+ *   - "zona": administración reparte los puntos entre responsables de zona
+ *     (gestores o delegaciones). Es lo que da acceso al punto.
+ *   - "trabajador": el responsable de zona reparte SUS puntos entre los
+ *     instaladores. Administración no entra aquí: no asigna trabajadores.
+ *
+ * El ámbito se verifica en esta capa, no solo en la interfaz: un gestor solo
+ * puede tocar puntos de sus provincias o ya asignados a él; los demás se omiten.
+ */
+async function bulkAssign(
   ids: string[],
-  gestor: { id: string | null; nombre: string | null } | null,
-  session: AppSession | null
+  persona: { id: string | null; nombre: string | null } | null,
+  session: AppSession | null,
+  capa: "zona" | "trabajador"
 ): Promise<Result<AsignacionMasiva>> {
-  if (!supabase) return { data: { asignados: 0, omitidos: 0 }, error: "Supabase no está configurado." };
-  if (!session?.active) return { data: { asignados: 0, omitidos: 0 }, error: "Sesión no válida." };
-  if (!ids.length) return { data: { asignados: 0, omitidos: 0 } };
+  const vacio = { asignados: 0, omitidos: 0 };
+  if (!supabase) return { data: vacio, error: "Supabase no está configurado." };
+  if (!session?.active) return { data: vacio, error: "Sesión no válida." };
+  if (capa === "zona" && !isAdminSession(session)) {
+    return { data: vacio, error: "Solo administración reparte los puntos entre gestores de zona." };
+  }
+  if (capa === "trabajador" && isAdminSession(session)) {
+    return { data: vacio, error: "Administración no asigna trabajadores: reparte la zona y es el gestor quien elige a su instalador." };
+  }
+  if (!ids.length) return { data: vacio };
   const { data, error } = await supabase.from("puntos_venta_campana").select("id,provincia,gestor_id,campana_id").in("id", ids);
-  if (error) return { data: { asignados: 0, omitidos: 0 }, error: error.message };
+  if (error) return { data: vacio, error: error.message };
   const campanas = Array.from(new Set(((data || []) as Array<{ campana_id?: string }>).map(row => row.campana_id).filter(Boolean))) as string[];
   for (const campanaId of campanas) {
     const bloqueada = await assertCampanaEditable(campanaId);
-    if (bloqueada) return { data: { asignados: 0, omitidos: 0 }, error: bloqueada };
+    if (bloqueada) return { data: vacio, error: bloqueada };
   }
   const permitidos = ((data || []) as Array<Pick<PuntoVenta, "id" | "provincia" | "gestor_id">>)
     .filter(punto => sessionCanSeePunto(session, punto))
     .map(punto => punto.id);
   const omitidos = ids.length - permitidos.length;
   if (!permitidos.length) return { data: { asignados: 0, omitidos }, error: "Ninguno de los puntos seleccionados está dentro de tu ámbito." };
-  const patch = {
-    gestor_id: gestor?.id || null,
-    gestor_nombre: gestor?.nombre || null,
-    origen_ultimo_cambio: "masiva" satisfies OrigenCambio,
-    updated_at: new Date().toISOString()
-  };
+  const patch = capa === "zona"
+    ? {
+        gestor_id: persona?.id || null,
+        gestor_nombre: persona?.nombre || null,
+        origen_ultimo_cambio: "masiva" satisfies OrigenCambio,
+        updated_at: new Date().toISOString()
+      }
+    : {
+        instalador_id: persona?.id || null,
+        instalador_nombre: persona?.nombre || null,
+        origen_ultimo_cambio: "masiva" satisfies OrigenCambio,
+        updated_at: new Date().toISOString()
+      };
   for (let index = 0; index < permitidos.length; index += 200) {
     const { error: updateError } = await supabase.from("puntos_venta_campana").update(patch).in("id", permitidos.slice(index, index + 200));
     if (updateError) return { data: { asignados: index, omitidos }, error: updateError.message };
   }
   return { data: { asignados: permitidos.length, omitidos } };
+}
+
+/** Administración: reparte los puntos entre gestores de zona o delegaciones. */
+export async function bulkAssignPuntos(
+  ids: string[],
+  gestor: { id: string | null; nombre: string | null } | null,
+  session: AppSession | null
+): Promise<Result<AsignacionMasiva>> {
+  return bulkAssign(ids, gestor, session, "zona");
+}
+
+/** Gestor o delegación: reparte sus puntos entre los trabajadores de la zona. */
+export async function bulkAssignInstaladores(
+  ids: string[],
+  trabajador: { id: string | null; nombre: string | null } | null,
+  session: AppSession | null
+): Promise<Result<AsignacionMasiva>> {
+  return bulkAssign(ids, trabajador, session, "trabajador");
 }
 
 export type ResultadoReparto = { aplicados: number; personas: number };
@@ -647,9 +777,19 @@ export type ResultadoReparto = { aplicados: number; personas: number };
 // de zona (administración) o el INSTALADOR/trabajador (gestor).
 async function aplicarReparto(
   sugerencias: Array<{ punto_id: string; persona_id: string; persona_nombre: string }>,
-  campo: "gestor" | "instalador"
+  campo: "gestor" | "instalador",
+  session: AppSession | null
 ): Promise<Result<ResultadoReparto>> {
   if (!supabase) return { data: { aplicados: 0, personas: 0 }, error: "Supabase no está configurado." };
+  // v11.5 · Las dos capas de reparto no se cruzan: administración reparte zona y
+  // el responsable de zona reparte trabajadores. La guarda vive aquí y no solo en
+  // los botones, que se pueden saltar.
+  if (campo === "gestor" && !isAdminSession(session)) {
+    return { data: { aplicados: 0, personas: 0 }, error: "Solo administración reparte los puntos entre gestores de zona." };
+  }
+  if (campo === "instalador" && isAdminSession(session)) {
+    return { data: { aplicados: 0, personas: 0 }, error: "Administración no asigna trabajadores: eso lo hace el gestor o la delegación de la zona." };
+  }
   if (!sugerencias.length) return { data: { aplicados: 0, personas: 0 } };
   const porPersona = new Map<string, { nombre: string; ids: string[] }>();
   for (const sugerencia of sugerencias) {
@@ -676,19 +816,27 @@ async function aplicarReparto(
   return { data: { aplicados, personas: porPersona.size } };
 }
 
-/** Administración: reparte los puntos entre gestores de zona (les da acceso). */
-export async function aplicarSugerenciasGestor(sugerencias: Array<{ punto_id: string; persona_id: string; persona_nombre: string }>) {
-  return aplicarReparto(sugerencias, "gestor");
+/** Administración: reparte los puntos entre responsables de zona (les da acceso). */
+export async function aplicarSugerenciasGestor(
+  sugerencias: Array<{ punto_id: string; persona_id: string; persona_nombre: string }>,
+  session: AppSession | null
+) {
+  return aplicarReparto(sugerencias, "gestor", session);
 }
 
-/** Gestor: reparte sus puntos entre los trabajadores de la zona. */
-export async function aplicarSugerenciasInstalador(sugerencias: Array<{ punto_id: string; persona_id: string; persona_nombre: string }>) {
-  return aplicarReparto(sugerencias, "instalador");
+/** Gestor o delegación: reparte sus puntos entre los trabajadores de la zona. */
+export async function aplicarSugerenciasInstalador(
+  sugerencias: Array<{ punto_id: string; persona_id: string; persona_nombre: string }>,
+  session: AppSession | null
+) {
+  return aplicarReparto(sugerencias, "instalador", session);
 }
 
 export async function updatePunto(id: string, patch: Partial<PuntoVenta>, origen: OrigenCambio = "pantalla"): Promise<Result<boolean>> {
   if (!supabase) return { data: false, error: "Supabase no está configurado." };
   if (patch.importe !== undefined && Number(patch.importe ?? 0) < 0) return { data: false, error: "El importe no puede ser negativo." };
+  if (patch.horas_trabajadas !== undefined && Number(patch.horas_trabajadas ?? 0) < 0) return { data: false, error: "Las horas trabajadas no pueden ser negativas." };
+  if (patch.kilometros !== undefined && Number(patch.kilometros ?? 0) < 0) return { data: false, error: "El kilometraje no puede ser negativo." };
   const punto = await campanaIdDePunto(id);
   if (punto.error) return { data: false, error: punto.error };
   if (punto.campanaId) {
@@ -900,6 +1048,12 @@ export function campanaCsvRows(rows: CampanaListadoRow[], incluirFinancieros = t
   }));
 }
 
+/**
+ * Filas de exportación de puntos. Las columnas de horas y kilómetros salen SIEMPRE,
+ * también en las campañas por punto: el archivo exportado es la plantilla que se
+ * reenvía al cliente para que devuelva el reporte, y una columna que no está no se
+ * puede rellenar. Vacías no molestan; ausentes obligan a inventarse la cabecera.
+ */
 export function puntosCsvRows(puntos: PuntoVenta[]): CampanaExportRow[] {
   return puntos.map(punto => ({
     Codigo: punto.codigo || "",
@@ -913,9 +1067,19 @@ export function puntosCsvRows(puntos: PuntoVenta[]): CampanaExportRow[] {
     Estado: puntoEstadoLabels[punto.estado] || punto.estado,
     "Fecha instalacion": dateOnly(punto.fecha_visita),
     Picking: dateOnly(punto.picking_cerrado_at),
+    "Hora entrada": horaCorta(punto.hora_entrada),
+    "Hora salida": horaCorta(punto.hora_salida),
+    Horas: punto.horas_trabajadas != null ? Number(punto.horas_trabajadas) : "",
+    Kilometros: punto.kilometros != null ? Number(punto.kilometros) : "",
     Importe: Number(punto.importe || 0),
     Notas: punto.notas || ""
   }));
+}
+
+/** "08:30:00" (lo que devuelve un `time` de Postgres) → "08:30". */
+export function horaCorta(valor?: string | null) {
+  const texto = String(valor ?? "").trim();
+  return texto ? texto.slice(0, 5) : "";
 }
 
 export function downloadCsv(filename: string, rows: CampanaExportRow[]) {

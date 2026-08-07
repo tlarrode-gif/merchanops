@@ -153,4 +153,34 @@ Los ficheros `v11_1_gc_documentos.sql` y `v11_2_gc_regularizaciones.sql` ya incl
 estos cambios, así que aplicarlos de cero sobre una base limpia da el mismo
 resultado que la base actual.
 
-**La próxima migración libre es `v11_5`.**
+## Delegaciones y pago por horas · `v11_5` (aplicada el 2026-08-07)
+
+| Fichero | Qué hace |
+|---|---|
+| `v11_5_gc_delegaciones_y_horas.sql` | Rol `delegacion` en el CHECK de `app_users` (gestor subcontratado). Tabla `campana_delegaciones` + `grandes_campanas.delegaciones_activas`. Pago por horas y kilometraje: `pago_por_horas`, `tarifa_hora`, `pago_kilometraje` y `tarifa_km` en la campaña; `hora_entrada`, `hora_salida`, `horas_trabajadas` y `kilometros` en el punto, con CHECK de no negativos. `payment_obligations.type` admite `mileage`. `v_campana_kpis` deja de sumar solo `importe`. El trigger de la bitácora vigila las cuatro columnas nuevas. |
+
+**El rol `delegacion` NO tiene ni una sola rama propia de RLS, y es a propósito.**
+Su alcance es exactamente el de un gestor: las policies operativas filtran por
+`merchan_province_scope()`, que no mira el rol, así que una delegación ve lo que
+vería un gestor con esas provincias. Darle una rama propia sería repetir el error
+que documentaron `v9_11` (almacén) y `v10_4` (RR.HH.). Lo único que cambia
+respecto a un gestor vive en la aplicación: en las campañas con
+`delegaciones_activas` es la delegación —y no el gestor— quien recibe los puntos
+de sus provincias (`lib/campana-delegaciones.ts`).
+
+**Nota sobre `v_campana_kpis`.** Se recrea con `create or replace` manteniendo
+nombres, tipos y orden de columnas, que es lo que permite hacerlo sin tocar
+`v_campanas_listado`, la vista que la consume. El valor de un punto pasa a
+depender del modo de la campaña (`importe`, u `horas × tarifa`, más el
+kilometraje); es el espejo SQL de `valorPuntoEur()` en `lib/campana-horas.ts` y
+sin él una campaña por horas mostraba 0 € de coste ejecutado con el trabajo ya
+hecho.
+
+**Nota sobre el turno nocturno.** Una salida anterior a la entrada NO se
+interpreta como turno que cruza la medianoche: se deja sin horas y el pago sale
+BLOQUEADO con el motivo `invalid_hours`. Adivinar ahí es inventarse ocho horas en
+la nómina de alguien, y «22:00 → 06:00» es tan probable que sea un turno de noche
+como una celda mal tecleada. Si algún día hace falta el turno nocturno, se añade
+como una marca explícita en el punto, nunca como una suposición del cálculo.
+
+**La próxima migración libre es `v11_6`.**

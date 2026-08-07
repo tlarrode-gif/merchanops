@@ -6,7 +6,7 @@
 
 export type ObligationOrigin = "servicio" | "gran_campana" | "isdin";
 
-export type ObligationType = "installation" | "failed_visit" | "points" | "hours" | "adjustment" | "reversal";
+export type ObligationType = "installation" | "failed_visit" | "points" | "hours" | "mileage" | "adjustment" | "reversal";
 
 export type ObligationKind = "pago" | "ajuste" | "anulacion";
 
@@ -27,7 +27,13 @@ export type BlockReason =
   | "missing_worker"
   | "invalid_amount"
   | "missing_original_fee"
-  | "preventive_call";
+  | "preventive_call"
+  // v11.5 · Campañas por horas y kilometraje. Cada motivo dice EXACTAMENTE qué
+  // falta para poder arreglarlo desde la ficha del punto o desde el Excel.
+  | "missing_hours"
+  | "invalid_hours"
+  | "missing_hourly_rate"
+  | "missing_km_rate";
 
 /**
  * Obligación calculada por el motor. La CLAVE es la identidad estable e
@@ -73,6 +79,27 @@ export interface CampanaPuntoInput {
   workerName: string | null;
   /** Incidencias registradas del punto: cada una es un desplazamiento fallido. */
   incidencias?: Array<{ id: string; estado: string; fecha: string | null }>;
+
+  // -------------------------------------------------------------------------
+  // v11.5 · Configuración de la CAMPAÑA a la que pertenece el punto
+  // -------------------------------------------------------------------------
+  /** true = el punto se paga por horas trabajadas y no por su importe. */
+  pagoPorHoras?: boolean;
+  /** Precio de la hora (euros). Falta = obligación bloqueada, nunca 0. */
+  tarifaHoraEur?: number | null;
+  /** true = además se paga el kilometraje reportado. */
+  pagoKilometraje?: boolean;
+  /** Precio del kilómetro (euros). */
+  tarifaKmEur?: number | null;
+
+  // -------------------------------------------------------------------------
+  // v11.5 · Lo REPORTADO en el punto
+  // -------------------------------------------------------------------------
+  /** Horas que se pagan, ya resueltas por lib/campana-horas.ts. */
+  horas?: number | null;
+  /** Motivo por el que no hay horas utilizables (marcas incoherentes, etc.). */
+  horasError?: "sin_datos" | "hora_no_reconocida" | "salida_anterior_a_entrada" | null;
+  kilometros?: number | null;
 }
 
 export interface EngineIssue {

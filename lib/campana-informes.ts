@@ -24,6 +24,7 @@
 import { supabase } from "@/lib/supabase";
 import { Campana, CampanaKpis, IncidenciaCampana, PuntoVenta, dateOnly, eur, formatDate } from "@/lib/campanas";
 import { Regularizacion, centimosAEuros, resumirRegularizaciones } from "@/lib/campana-regularizaciones";
+import { valorPuntoEur } from "@/lib/campana-horas";
 
 export type ClaveBloque =
   // Bloques que pueden ir a un cliente
@@ -298,7 +299,10 @@ export function calcularBloque(clave: ClaveBloque, entrada: EntradaInforme): Blo
         const persona = punto.instalador_nombre || punto.gestor_nombre || "Sin instalador";
         const actual = mapa.get(persona) || { puntos: 0, importe: 0 };
         actual.puntos += 1;
-        actual.importe += Number(punto.importe || 0);
+        // v11.5 · Lo que vale el punto depende del modo de la campaña: en una
+        // campaña por horas el `importe` está vacío y este bloque habría dicho
+        // 0 € por cada trabajador con la campaña ya ejecutada.
+        actual.importe += valorPuntoEur(punto, campana);
         mapa.set(persona, actual);
       }
       return {

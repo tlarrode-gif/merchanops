@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Sparkles, Users } from "lucide-react";
+import { Building2, Clock, Plus, Sparkles, Users } from "lucide-react";
 import { GestorAvatar } from "@/components/grandes-campanas/gestor-avatars";
 import { AppSession, AppUser, isAdminSession } from "@/lib/access-control";
 import { CampanaEstado } from "@/lib/campanas";
@@ -18,6 +18,15 @@ export type CampanaFormState = {
   provincias: string[];
   gestorIds: string[];
   solicitarDireccionEnvio: boolean;
+  // v11.5 · Campaña por delegaciones: se activa aquí y se eligen una a una.
+  delegacionesActivas: boolean;
+  delegacionIds: string[];
+  // v11.5 · Pago por horas y kilometraje. Las tarifas son texto en el formulario
+  // (un input numérico vacío no es 0) y se convierten al guardar.
+  pagoPorHoras: boolean;
+  tarifaHora: string;
+  pagoKilometraje: boolean;
+  tarifaKm: string;
 };
 
 export const emptyCampanaForm: CampanaFormState = {
@@ -30,8 +39,39 @@ export const emptyCampanaForm: CampanaFormState = {
   presupuesto: "",
   provincias: [],
   gestorIds: [],
-  solicitarDireccionEnvio: false
+  solicitarDireccionEnvio: false,
+  delegacionesActivas: false,
+  delegacionIds: [],
+  pagoPorHoras: false,
+  tarifaHora: "",
+  pagoKilometraje: false,
+  tarifaKm: ""
 };
+
+/**
+ * Traduce la configuración de pago del formulario a lo que guarda la campaña.
+ * Vive aquí —y no en cada pantalla— porque «crear» y «editar» tienen que
+ * guardar EXACTAMENTE lo mismo: la primera versión duplicaba la conversión y una
+ * tarifa vacía acababa como 0 € en una pantalla y como null en la otra.
+ *
+ * Una tarifa en blanco es `null`, nunca 0: 0 €/hora es una tarifa real (gratis) y
+ * «todavía no la he puesto» tiene que bloquear el pago, no liquidarlo a cero.
+ */
+export function configuracionPagoCampana(form: CampanaFormState) {
+  const numeroONull = (texto: string) => {
+    const limpio = texto.trim().replace(",", ".");
+    if (!limpio) return null;
+    const numero = Number(limpio);
+    return Number.isFinite(numero) && numero >= 0 ? numero : null;
+  };
+  return {
+    delegaciones_activas: form.delegacionesActivas,
+    pago_por_horas: form.pagoPorHoras,
+    tarifa_hora: form.pagoPorHoras ? numeroONull(form.tarifaHora) : null,
+    pago_kilometraje: form.pagoKilometraje,
+    tarifa_km: form.pagoKilometraje ? numeroONull(form.tarifaKm) : null
+  };
+}
 
 type ClientOption = { id: string; name: string };
 
@@ -40,6 +80,7 @@ export function CampanaForm({
   onChange,
   clients,
   gestores,
+  delegaciones = [],
   session,
   showEstadoInicial = true
 }: {
@@ -47,6 +88,8 @@ export function CampanaForm({
   onChange: (next: CampanaFormState) => void;
   clients: ClientOption[];
   gestores: AppUser[];
+  /** Usuarios con rol `delegacion` activos: los subcontratados disponibles. */
+  delegaciones?: AppUser[];
   session: AppSession | null;
   showEstadoInicial?: boolean;
 }) {
@@ -67,6 +110,10 @@ export function CampanaForm({
     patch({ gestorIds: value.gestorIds.includes(gestorId) ? value.gestorIds.filter(id => id !== gestorId) : [...value.gestorIds, gestorId] });
   }
 
+  function toggleDelegacion(delegacionId: string) {
+    patch({ delegacionIds: value.delegacionIds.includes(delegacionId) ? value.delegacionIds.filter(id => id !== delegacionId) : [...value.delegacionIds, delegacionId] });
+  }
+
   // 4A: propone (añade) los gestores cuyas provincias solapan con las de la campaña.
   function sugerirGestores() {
     const provNorm = value.provincias.map(normalizeProvince);
@@ -75,6 +122,15 @@ export function CampanaForm({
   }
 
   const gestoresSeleccionados = gestores.filter(gestor => value.gestorIds.includes(gestor.id));
+  const delegacionesSeleccionadas = delegaciones.filter(delegacion => value.delegacionIds.includes(delegacion.id));
+  // Provincias que dejan de ser de los gestores por estar subcontratadas. Se
+  // calcula aquí para poder DECIRLO en el formulario: activar delegaciones sin
+  // ver qué zonas cambian de manos es pedirle a alguien que firme a ciegas.
+  const zonasDelegadas = useMemo(
+    () => Array.from(new Set(delegacionesSeleccionadas.flatMap(delegacion => delegacion.provinces || []).map(normalizeProvince).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, "es")),
+    [delegacionesSeleccionadas]
+  );
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -196,6 +252,126 @@ export function CampanaForm({
           </div>
         </div>
       </section>
+
+      {/* v11.5 · Servicios subcontratados. Solo administración: es quien decide
+          qué zonas salen de la plantilla propia. */}
+      {admin && (
+        <section className="gc-form-section">
+          <h2 className="gc-form-title"><Building2 className="mr-1 inline h-4 w-4" />Delegaciones</h2>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={value.delegacionesActivas}
+              onChange={event => patch({ delegacionesActivas: event.target.checked })}
+            />
+            <b>Activar campaña por delegaciones</b>
+          </label>
+          <p className="mt-1 text-xs" style={{ color: "var(--gc-muted)" }}>
+            Marca las delegaciones que entran en esta campaña. En sus provincias los puntos van a la delegación en vez de al gestor;
+            las provincias sin delegación marcada las siguen llevando los gestores, como hasta ahora.
+          </p>
+          {value.delegacionesActivas && (
+            <div className="mt-3 space-y-2">
+              {!delegaciones.length ? (
+                <p className="gc-note">
+                  No hay ningún usuario con perfil <b>Delegación</b> activo. Créalo en <b>Usuarios y permisos</b> (rol «Delegación») y asígnale sus provincias.
+                </p>
+              ) : (
+                <>
+                  <div className="grid max-h-56 gap-1 overflow-auto rounded-xl border p-3 md:grid-cols-2" style={{ borderColor: "var(--gc-border)" }}>
+                    {delegaciones.map(delegacion => (
+                      <label key={delegacion.id} className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={value.delegacionIds.includes(delegacion.id)} onChange={() => toggleDelegacion(delegacion.id)} />
+                        <GestorAvatar name={delegacion.display_name} size={22} />
+                        {delegacion.display_name}
+                        <span className="text-xs" style={{ color: "var(--gc-muted)" }}>
+                          {delegacion.provinces?.length ? delegacion.provinces.join(", ") : "Sin provincias asignadas"}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {delegacionesSeleccionadas.some(delegacion => !(delegacion.provinces || []).length) && (
+                    <p className="gc-note">
+                      Alguna delegación marcada <b>no tiene provincias asignadas</b>: no recibirá ningún punto hasta que se le asignen en «Usuarios y permisos».
+                    </p>
+                  )}
+                  <p className="text-xs" style={{ color: "var(--gc-muted)" }}>
+                    {zonasDelegadas.length
+                      ? <>Zonas que pasan a delegación: <b>{zonasDelegadas.join(", ")}</b>.</>
+                      : "Todavía no has marcado ninguna delegación: la campaña la llevarán los gestores."}
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* v11.5 · Cómo se le paga al trabajador. Solo administración configura tarifas. */}
+      {admin && (
+        <section className="gc-form-section">
+          <h2 className="gc-form-title"><Clock className="mr-1 inline h-4 w-4" />Pago de la campaña</h2>
+          <div className="space-y-3">
+            <div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={value.pagoPorHoras} onChange={event => patch({ pagoPorHoras: event.target.checked })} />
+                <b>Activar campaña con pago por horas</b>
+              </label>
+              <p className="mt-1 text-xs" style={{ color: "var(--gc-muted)" }}>
+                El trabajador cobra por el tiempo del turno (hora de entrada y de salida de cada punto), no por el importe del punto.
+                Las horas se rellenan en la ficha del punto o se vuelcan al actualizar desde el Excel del reporte.
+              </p>
+              {value.pagoPorHoras && (
+                <label className="mt-2 block max-w-[260px]">
+                  <span className="gc-label">Tarifa por hora (€) <span className="gc-req">*</span></span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="gc-input"
+                    placeholder="0,00"
+                    value={value.tarifaHora}
+                    onChange={event => patch({ tarifaHora: event.target.value })}
+                  />
+                  {!value.tarifaHora.trim() && (
+                    <span className="text-xs" style={{ color: "var(--gc-secondary)" }}>
+                      Sin tarifa, los pagos de esta campaña se registrarán <b>bloqueados</b> hasta que la indiques.
+                    </span>
+                  )}
+                </label>
+              )}
+            </div>
+            <div className="border-t pt-3" style={{ borderColor: "var(--gc-border)" }}>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={value.pagoKilometraje} onChange={event => patch({ pagoKilometraje: event.target.checked })} />
+                <b>Pagar el kilometraje reportado</b>
+              </label>
+              <p className="mt-1 text-xs" style={{ color: "var(--gc-muted)" }}>
+                Se puede activar con o sin pago por horas. El kilometraje se paga como línea aparte en Pagos.
+              </p>
+              {value.pagoKilometraje && (
+                <label className="mt-2 block max-w-[260px]">
+                  <span className="gc-label">Tarifa por kilómetro (€) <span className="gc-req">*</span></span>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    className="gc-input"
+                    placeholder="0,2600"
+                    value={value.tarifaKm}
+                    onChange={event => patch({ tarifaKm: event.target.value })}
+                  />
+                  {!value.tarifaKm.trim() && (
+                    <span className="text-xs" style={{ color: "var(--gc-secondary)" }}>
+                      Sin tarifa, el kilometraje se registrará <b>bloqueado</b> hasta que la indiques.
+                    </span>
+                  )}
+                </label>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

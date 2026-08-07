@@ -4,10 +4,11 @@ import Link from "next/link";
 
 import { useEffect, useState } from "react";
 import { Save } from "lucide-react";
-import { CampanaForm, CampanaFormState, emptyCampanaForm } from "@/components/grandes-campanas/campana-form";
+import { CampanaForm, CampanaFormState, configuracionPagoCampana, emptyCampanaForm } from "@/components/grandes-campanas/campana-form";
 import { ColumnasConfig } from "@/components/grandes-campanas/columnas-config";
 import { AppSession, AppUser, canAccessModule, canManageCampaigns, getCurrentAppSession, loadInternalUsers } from "@/lib/access-control";
 import { CampanaColumna, fetchCampanaColumnas, saveCampanaColumnas } from "@/lib/campana-columnas";
+import { fetchDelegacionesCampana, saveDelegacionesCampana } from "@/lib/campana-delegaciones";
 import { CampanaEstado, campanaEstadoLabels, campanaEstados, dateOnly, fetchCampana, fetchGestoresCampana, saveGestoresCampana, updateCampana } from "@/lib/campanas";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
@@ -20,6 +21,7 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
   const [nombreCampana, setNombreCampana] = useState("");
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [gestores, setGestores] = useState<AppUser[]>([]);
+  const [delegaciones, setDelegaciones] = useState<AppUser[]>([]);
   const [columnas, setColumnas] = useState<CampanaColumna[]>([]);
   const [columnasEditadas, setColumnasEditadas] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -34,13 +36,21 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
         const { data } = await supabase.from("clients").select("id,name").order("name");
         setClients((data || []) as ClientOption[]);
       }
-      const [campanaResult, gestoresResult, columnasResult] = await Promise.all([fetchCampana(params.id), fetchGestoresCampana(params.id), fetchCampanaColumnas(params.id)]);
+      const [campanaResult, gestoresResult, columnasResult, delegacionesResult] = await Promise.all([
+        fetchCampana(params.id),
+        fetchGestoresCampana(params.id),
+        fetchCampanaColumnas(params.id),
+        fetchDelegacionesCampana(params.id)
+      ]);
       if (campanaResult.error) setError(campanaResult.error);
       if (!campanaResult.data) { setNotFound(true); setLoading(false); return; }
-      // El selector muestra los usuarios activos + los ya asignados a la campaña aunque
-      // estén inactivos, para no perderlos al guardar (delete+insert de saveGestoresCampana).
+      // Los selectores muestran los usuarios activos + los ya asignados a la campaña
+      // aunque estén inactivos, para no perderlos al guardar (el delete+insert de
+      // saveGestoresCampana / saveDelegacionesCampana los borraría de la campaña).
       const asignadosIds = new Set(gestoresResult.data.map(g => g.gestor_id).filter(Boolean) as string[]);
-      setGestores(users.filter(user => user.active || asignadosIds.has(user.id)));
+      const delegadasIds = new Set(delegacionesResult.data.map(d => d.delegacion_id).filter(Boolean) as string[]);
+      setGestores(users.filter(user => (user.active && (user.role === "manager" || user.role === "admin")) || asignadosIds.has(user.id)));
+      setDelegaciones(users.filter(user => (user.active && user.role === "delegacion") || delegadasIds.has(user.id)));
       setColumnas(columnasResult.data);
       const campana = campanaResult.data;
       setNombreCampana(campana.nombre);
@@ -55,7 +65,15 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
         presupuesto: campana.presupuesto != null ? String(campana.presupuesto) : "",
         provincias: campana.provincias || [],
         gestorIds: gestoresResult.data.map(gestor => gestor.gestor_id).filter(Boolean) as string[],
-        solicitarDireccionEnvio: !!campana.solicitar_direccion_envio
+        solicitarDireccionEnvio: !!campana.solicitar_direccion_envio,
+        delegacionesActivas: !!campana.delegaciones_activas,
+        delegacionIds: delegacionesResult.data.map(delegacion => delegacion.delegacion_id).filter(Boolean) as string[],
+        pagoPorHoras: !!campana.pago_por_horas,
+        // Las tarifas se editan como texto: "" es «sin tarifa» y 0 es «gratis», y
+        // convertir null en "0" habría hecho pagable a 0 € lo que debe bloquearse.
+        tarifaHora: campana.tarifa_hora != null ? String(campana.tarifa_hora) : "",
+        pagoKilometraje: !!campana.pago_kilometraje,
+        tarifaKm: campana.tarifa_km != null ? String(campana.tarifa_km) : ""
       });
       setLoading(false);
     }
@@ -75,12 +93,16 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
       fecha_fin: form.fecha_fin || null,
       provincias: form.provincias,
       presupuesto: form.presupuesto ? Number(form.presupuesto) : null,
-      solicitar_direccion_envio: form.solicitarDireccionEnvio
+      solicitar_direccion_envio: form.solicitarDireccionEnvio,
+      ...configuracionPagoCampana(form)
     });
     if (result.error) { setError(result.error); setSaving(false); return; }
     const seleccionados = gestores.filter(gestor => form.gestorIds.includes(gestor.id));
     const gestoresResult = await saveGestoresCampana(params.id, seleccionados);
     if (gestoresResult.error) { setError(`Campaña guardada, pero el equipo no se pudo actualizar: ${gestoresResult.error}`); setSaving(false); return; }
+    const delegacionesElegidas = delegaciones.filter(delegacion => form.delegacionIds.includes(delegacion.id));
+    const delegacionesResult = await saveDelegacionesCampana(params.id, delegacionesElegidas);
+    if (delegacionesResult.error) { setError(`Campaña guardada, pero las delegaciones no se pudieron actualizar: ${delegacionesResult.error}`); setSaving(false); return; }
     if (columnasEditadas) {
       const columnasResult = await saveCampanaColumnas(params.id, columnas);
       if (columnasResult.error) { setError(`Campaña guardada, pero el esquema de columnas no se pudo actualizar: ${columnasResult.error}`); setSaving(false); return; }
@@ -128,7 +150,7 @@ export default function EditarCampanaPage({ params }: { params: { id: string } }
           </div>
         </section>
 
-        <CampanaForm value={form} onChange={setForm} clients={clients} gestores={gestores} session={session} showEstadoInicial={false} />
+        <CampanaForm value={form} onChange={setForm} clients={clients} gestores={gestores} delegaciones={delegaciones} session={session} showEstadoInicial={false} />
 
         {columnas.length > 0 && (
           <section className="gc-form-section">

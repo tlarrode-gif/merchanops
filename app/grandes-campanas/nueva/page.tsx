@@ -4,10 +4,11 @@ import Link from "next/link";
 
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Plus } from "lucide-react";
-import { CampanaForm, CampanaFormState, emptyCampanaForm } from "@/components/grandes-campanas/campana-form";
+import { CampanaForm, CampanaFormState, configuracionPagoCampana, emptyCampanaForm } from "@/components/grandes-campanas/campana-form";
 import { ImportProgress, ImportadorCSV, ImportadorEstado } from "@/components/grandes-campanas/importador-csv";
 import { AppSession, AppUser, canAccessModule, canManageCampaigns, getCurrentAppSession, loadInternalUsers } from "@/lib/access-control";
 import { asignarGestoresAPuntosNuevos, provinciasDeLosPuntos } from "@/lib/campana-asignacion";
+import { delegacionesComoCandidatos, responsablesDeZona, saveDelegacionesCampana } from "@/lib/campana-delegaciones";
 import { saveCampanaColumnas } from "@/lib/campana-columnas";
 import { PuntoInput, insertCampana, insertPuntosBatch, saveGestoresCampana } from "@/lib/campanas";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
@@ -23,6 +24,7 @@ export default function NuevaCampanaPage() {
   const [form, setForm] = useState<CampanaFormState>(emptyCampanaForm);
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [gestores, setGestores] = useState<AppUser[]>([]);
+  const [delegaciones, setDelegaciones] = useState<AppUser[]>([]);
   const [importEstado, setImportEstado] = useState<ImportadorEstado | null>(null);
   const [progress, setProgress] = useState<ImportProgress>(null);
   const [manualActivo, setManualActivo] = useState(false);
@@ -34,7 +36,12 @@ export default function NuevaCampanaPage() {
   useEffect(() => {
     async function loadCatalogos() {
       const users = await loadInternalUsers();
-      setGestores(users.filter(user => user.active));
+      // El equipo de la campaña son gestores; las delegaciones se eligen en su
+      // propio bloque y no se mezclan con ellos. Almacén y RR.HH. quedan fuera:
+      // `merchan_gc_puede_operar_campana` no les deja operar una campaña, así que
+      // asignarlos no haría absolutamente nada.
+      setGestores(users.filter(user => user.active && (user.role === "manager" || user.role === "admin")));
+      setDelegaciones(users.filter(user => user.active && user.role === "delegacion"));
       if (isSupabaseConfigured && supabase) {
         const { data } = await supabase.from("clients").select("id,name").order("name");
         setClients((data || []) as ClientOption[]);
@@ -91,7 +98,8 @@ export default function NuevaCampanaPage() {
         fecha_fin: form.fecha_fin || null,
         provincias: form.provincias,
         presupuesto: form.presupuesto ? Number(form.presupuesto) : null,
-        solicitar_direccion_envio: form.solicitarDireccionEnvio
+        solicitar_direccion_envio: form.solicitarDireccionEnvio,
+        ...configuracionPagoCampana(form)
       }, session);
       if (created.error || !created.data) { setFormError(created.error || "No se pudo crear la campaña."); return; }
       const campanaId = created.data.id;
@@ -100,15 +108,30 @@ export default function NuevaCampanaPage() {
       const gestoresResult = await saveGestoresCampana(campanaId, seleccionados);
       if (gestoresResult.error) { setFormError(`Campaña creada, pero no se pudieron asignar gestores: ${gestoresResult.error}`); }
 
+      // Las delegaciones marcadas se guardan aunque el modo esté apagado: así se
+      // puede preparar la lista y activarla más tarde sin volver a elegirlas.
+      const delegacionesElegidas = delegaciones.filter(delegacion => form.delegacionIds.includes(delegacion.id));
+      const delegacionesResult = await saveDelegacionesCampana(campanaId, delegacionesElegidas);
+      if (delegacionesResult.error) { setFormError(`Campaña creada, pero no se pudieron guardar las delegaciones: ${delegacionesResult.error}`); }
+
       if (importEstado?.columnas.length) {
         const columnasResult = await saveCampanaColumnas(campanaId, importEstado.columnas);
         if (columnasResult.error) setFormError(`Campaña creada, pero el esquema de columnas no se pudo guardar: ${columnasResult.error}`);
       }
 
-      // Reparto por zona en el momento de crear: cada punto nace con su gestor, y ese
-      // reparto es lo que le da acceso al punto. Solo se reparte entre el equipo elegido.
+      // Reparto por zona en el momento de crear: cada punto nace con su responsable, y
+      // ese reparto es lo que le da acceso al punto. En una campaña por delegaciones,
+      // las provincias subcontratadas van a la delegación y el resto a los gestores.
       const puntosSinRepartir = [...(importEstado?.readyRows || []), ...manualPuntos];
-      const reparto = asignarGestoresAPuntosNuevos(puntosSinRepartir, seleccionados);
+      const { candidatos } = responsablesDeZona(
+        seleccionados,
+        delegacionesComoCandidatos(
+          delegacionesElegidas.map(delegacion => ({ delegacion_id: delegacion.id, delegacion_nombre: delegacion.display_name, provincias: delegacion.provinces || [] })),
+          delegacionesElegidas
+        ),
+        form.delegacionesActivas
+      );
+      const reparto = asignarGestoresAPuntosNuevos(puntosSinRepartir, candidatos);
       const puntos = reparto.puntos;
       let importados = 0;
       let duplicados = 0;
@@ -160,7 +183,7 @@ export default function NuevaCampanaPage() {
           <h1 className="mt-1 text-2xl font-extrabold">Crear / Importar nueva campaña nacional</h1>
         </div>
 
-        <CampanaForm value={form} onChange={setForm} clients={clients} gestores={gestores} session={session} />
+        <CampanaForm value={form} onChange={setForm} clients={clients} gestores={gestores} delegaciones={delegaciones} session={session} />
 
         <ImportadorCSV progress={progress} disabled={saving} onChange={setImportEstado} />
 

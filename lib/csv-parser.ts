@@ -1,6 +1,7 @@
 import { spanishProvinces, normalizeProvince } from "@/lib/provinces";
 import { PuntoEstado, PuntoInput } from "@/lib/campanas";
 import { CAMPO_IGNORAR, CampanaColumna, camposNoImportables } from "@/lib/campana-columnas";
+import { horasEntreMarcas, normalizarHora, numeroReportado } from "@/lib/campana-horas";
 
 export const MAX_IMPORT_ROWS = 50000;
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -58,6 +59,11 @@ const columnVariants: Record<string, string[]> = {
   estado: ["estado", "status", "situacion"],
   fecha_visita: ["fecha visita", "fecha_visita", "fecha", "visita", "fecha de visita", "date", "fecha prevista"],
   importe: ["importe", "precio", "fee", "amount", "coste", "costo", "tarifa", "pago", "presupuesto punto"],
+  // v11.5 · Campañas por horas: lo que devuelve el reporte del cliente.
+  hora_entrada: ["hora entrada", "hora de entrada", "entrada", "hora inicio", "hora de inicio", "inicio", "check in", "checkin", "h entrada"],
+  hora_salida: ["hora salida", "hora de salida", "salida", "hora fin", "hora de fin", "fin", "check out", "checkout", "h salida"],
+  horas_trabajadas: ["horas", "horas trabajadas", "total horas", "n horas", "num horas", "horas totales", "tiempo", "duracion"],
+  kilometros: ["kilometros", "kilometraje", "km", "kms", "kilometros recorridos", "km recorridos", "desplazamiento"],
   // «Instalador» ya NO cae aquí: es el trabajador de campo (tabla workers), no el gestor de zona.
   gestor_nombre: ["gestor", "manager", "responsable", "operativo", "gestor de zona"],
   notas: ["notas", "notes", "observaciones", "comentarios", "nota"],
@@ -415,6 +421,33 @@ export async function parseImportFile(file: File, esquema?: CampanaColumna[] | n
     const fechaParsed = parseFecha(record.fecha_visita);
     if (fechaParsed.error) warnings.push(fechaParsed.error);
 
+    // v11.5 · Horas y kilómetros. Una hora ilegible es un AVISO, no un error: la
+    // fila entra igual (el punto existe y su estado sirve), y lo que se queda sin
+    // resolver es el pago, que en Pagos aparecerá bloqueado con su motivo. Con
+    // error de fila, en cambio, se perdería el reporte completo de ese punto.
+    const horaEntrada = normalizarHora(record.hora_entrada);
+    if (record.hora_entrada != null && String(record.hora_entrada).trim() !== "" && !horaEntrada) {
+      warnings.push(`Hora de entrada no reconocida: "${String(record.hora_entrada)}"`);
+    }
+    const horaSalida = normalizarHora(record.hora_salida);
+    if (record.hora_salida != null && String(record.hora_salida).trim() !== "" && !horaSalida) {
+      warnings.push(`Hora de salida no reconocida: "${String(record.hora_salida)}"`);
+    }
+    const kilometros = numeroReportado(record.kilometros);
+    if (record.kilometros != null && String(record.kilometros).trim() !== "" && kilometros === null) {
+      warnings.push(`Kilometraje no numérico o negativo: "${String(record.kilometros)}"`);
+    }
+    // Las horas del reporte solo se usan si NO hay par entrada/salida: las marcas
+    // horarias son el dato primario y el total, un resumen que puede no cuadrar.
+    const calculoHoras = horasEntreMarcas(horaEntrada, horaSalida);
+    if (calculoHoras.error === "salida_anterior_a_entrada") {
+      warnings.push(`La hora de salida (${horaSalida}) es anterior a la de entrada (${horaEntrada}): las horas quedan sin calcular.`);
+    }
+    const horasImportadas = numeroReportado(record.horas_trabajadas);
+    if (record.horas_trabajadas != null && String(record.horas_trabajadas).trim() !== "" && horasImportadas === null) {
+      warnings.push(`Horas trabajadas no numéricas o negativas: "${String(record.horas_trabajadas)}"`);
+    }
+
     const estadoRaw = fold(record.estado);
     const estado: PuntoEstado = estadoVariants[estadoRaw] || "pendiente";
     if (estadoRaw && !estadoVariants[estadoRaw]) warnings.push(`Estado no reconocido ("${String(record.estado)}"), se importará como Pendiente.`);
@@ -433,6 +466,10 @@ export async function parseImportFile(file: File, esquema?: CampanaColumna[] | n
       estado,
       fecha_visita: fechaParsed.value,
       importe: importeParsed.value,
+      hora_entrada: horaEntrada,
+      hora_salida: horaSalida,
+      horas_trabajadas: calculoHoras.horas ?? horasImportadas,
+      kilometros,
       gestor_id: null,
       gestor_nombre: String(record.gestor_nombre ?? "").trim() || null,
       notas: String(record.notas ?? "").trim() || null,

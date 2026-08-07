@@ -166,3 +166,26 @@ describe("resumirEventos", () => {
     expect(resumirEventos([])).toEqual({ total: 0, sensibles: 0, porActor: [], porOrigen: [] });
   });
 });
+
+// ---------------------------------------------------------------------------
+// v11.5 · La bitácora habla también de horas y kilómetros
+// ---------------------------------------------------------------------------
+
+describe("bitácora del reporte por horas", () => {
+  it("cuenta el cambio de turno con palabras, no con nombres de columna", () => {
+    expect(describirEvento({ accion: "actualizado", campo: "hora_salida", valor_anterior: "16:00:00", valor_nuevo: "18:30:00" }))
+      .toBe("cambió la hora de salida de 16:00 a 18:30");
+  });
+
+  it("formatea las horas y los kilómetros con su unidad", () => {
+    expect(formatearValorEvento("horas_trabajadas", "8.5")).toBe("8,5 h");
+    expect(formatearValorEvento("kilometros", "120")).toBe("120 km");
+  });
+
+  it("cambiar las horas es tan sensible como cambiar el importe", () => {
+    // En una campaña por horas ESO es lo que se cobra.
+    expect(esCampoSensible("horas_trabajadas")).toBe(true);
+    expect(esCampoSensible("hora_entrada")).toBe(true);
+    expect(esCampoSensible("kilometros")).toBe(true);
+  });
+});
