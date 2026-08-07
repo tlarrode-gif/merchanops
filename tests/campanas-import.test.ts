@@ -181,3 +181,73 @@ describe("parseImportFile · cabeceras y hojas reales", () => {
     expect(result.rows[0].data.nombre_comercial).toBe("");
   });
 });
+
+// ---------------------------------------------------------------------------
+// v11.5 · Reporte de horas y kilometraje desde el Excel del cliente
+// ---------------------------------------------------------------------------
+
+describe("parseImportFile · horas y kilometraje", () => {
+  it("reconoce las cabeceras del reporte y calcula las horas del turno", async () => {
+    const result = await parseImportFile(
+      textFile(
+        "codigo;nombre_comercial;hora entrada;hora salida;kilometraje\nPV-1;Farmacia Sol;08:00;16:30;120,5\n",
+        "reporte.csv"
+      )
+    );
+    expect(result.fileError).toBeUndefined();
+    expect(result.rows[0].data).toMatchObject({
+      hora_entrada: "08:00",
+      hora_salida: "16:30",
+      horas_trabajadas: 8.5,
+      kilometros: 120.5
+    });
+    expect(result.rows[0].errors).toEqual([]);
+  });
+
+  it("acepta los sinónimos habituales de las columnas", async () => {
+    const result = await parseImportFile(
+      textFile("codigo;nombre_comercial;Hora de inicio;Hora de fin;Km\nPV-1;Farmacia Sol;9:15;13:45;30\n", "reporte.csv")
+    );
+    expect(result.rows[0].data).toMatchObject({ hora_entrada: "09:15", hora_salida: "13:45", horas_trabajadas: 4.5, kilometros: 30 });
+  });
+
+  it("lee la hora tal y como la guarda Excel (fracción de día)", async () => {
+    const file = sheetFile(
+      { Hoja1: [["codigo", "nombre_comercial", "hora entrada", "hora salida"], ["PV-1", "Farmacia Sol", 0.25, 0.5]] },
+      "reporte.xlsx"
+    );
+    const result = await parseImportFile(file);
+    expect(result.rows[0].data).toMatchObject({ hora_entrada: "06:00", hora_salida: "12:00", horas_trabajadas: 6 });
+  });
+
+  it("usa el total de horas del archivo cuando no vienen las marcas", async () => {
+    const result = await parseImportFile(textFile("codigo;nombre_comercial;horas\nPV-1;Farmacia Sol;7,5\n", "reporte.csv"));
+    expect(result.rows[0].data.horas_trabajadas).toBe(7.5);
+    expect(result.rows[0].data.hora_entrada).toBeNull();
+  });
+
+  it("una hora ilegible es AVISO y no error: la fila se importa y el pago sale bloqueado", async () => {
+    const result = await parseImportFile(textFile("codigo;nombre_comercial;hora entrada;hora salida\nPV-1;Farmacia Sol;mañana;16:00\n", "reporte.csv"));
+    expect(result.rows[0].errors).toEqual([]);
+    expect(result.rows[0].warnings.join(" ")).toContain("Hora de entrada no reconocida");
+    expect(result.rows[0].data.hora_entrada).toBeNull();
+    expect(result.rows[0].data.horas_trabajadas).toBeNull();
+  });
+
+  it("un turno con salida anterior a la entrada avisa y NO calcula horas", async () => {
+    const result = await parseImportFile(textFile("codigo;nombre_comercial;hora entrada;hora salida\nPV-1;Farmacia Sol;22:00;06:00\n", "reporte.csv"));
+    expect(result.rows[0].warnings.join(" ")).toContain("anterior a la de entrada");
+    expect(result.rows[0].data.horas_trabajadas).toBeNull();
+  });
+
+  it("un kilometraje negativo avisa y se descarta en vez de restar de la nómina", async () => {
+    const result = await parseImportFile(textFile("codigo;nombre_comercial;km\nPV-1;Farmacia Sol;-30\n", "reporte.csv"));
+    expect(result.rows[0].warnings.join(" ")).toContain("Kilometraje");
+    expect(result.rows[0].data.kilometros).toBeNull();
+  });
+
+  it("un archivo sin estas columnas sigue funcionando igual que antes", async () => {
+    const result = await parseImportFile(textFile("codigo;nombre_comercial;importe\nPV-1;Farmacia Sol;34,00\n", "puntos.csv"));
+    expect(result.rows[0].data).toMatchObject({ importe: 34, hora_entrada: null, hora_salida: null, horas_trabajadas: null, kilometros: null });
+  });
+});

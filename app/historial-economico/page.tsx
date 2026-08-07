@@ -115,8 +115,11 @@ export default function HistorialEconomicoPage() {
         supabase.from("isdin_vinyls").select("*"),
         supabase.from("isdin_billing_settings").select("*").eq("id", "global").maybeSingle(),
         supabase.from("isdin_billing_adjustments").select("*"),
-        supabase.from("grandes_campanas").select("id,nombre,cliente_marca"),
-        supabase.from("puntos_venta_campana").select("id,campana_id,gestor_id,gestor_nombre,instalador_id,instalador_nombre,codigo,nombre_comercial,provincia,estado,fecha_visita,importe,updated_at")
+        // v11.5 · La configuración de pago de la campaña y las horas/kilómetros del
+        // punto entran en el SELECT: sin ellas, una campaña por horas no generaba
+        // ni un evento económico (su `importe` está siempre vacío).
+        supabase.from("grandes_campanas").select("id,nombre,cliente_marca,pago_por_horas,tarifa_hora,pago_kilometraje,tarifa_km"),
+        supabase.from("puntos_venta_campana").select("id,campana_id,gestor_id,gestor_nombre,instalador_id,instalador_nombre,codigo,nombre_comercial,provincia,estado,fecha_visita,importe,hora_entrada,hora_salida,horas_trabajadas,kilometros,updated_at")
       ]);
       const services = (servicesR.data || []) as Row[];
       const points = (pointsR.data || []) as Row[];

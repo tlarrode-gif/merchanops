@@ -6,7 +6,13 @@ import { checkLoginAllowed, clearLoginAttempts, recordLoginFailure } from "@/lib
 import { sanitizeIdentifier } from "@/lib/sanitize";
 
 export type AppPermissionKey = "servicios" | "isdin" | "calendario" | "pagos" | "logistica" | "rrhh" | "usuarios";
-export type AppRole = "admin" | "manager" | "almacen" | "rrhh";
+/**
+ * `delegacion` (v11.5) es un GESTOR SUBCONTRATADO: mismo alcance provincial y la
+ * misma matriz de permisos que un gestor de la casa, pero identificable como
+ * externo para poder decir «en estas provincias manda la delegación, no nuestro
+ * gestor». Ver `esResponsableDeZona`.
+ */
+export type AppRole = "admin" | "manager" | "delegacion" | "almacen" | "rrhh";
 
 export type AppUser = {
   id: string;
@@ -86,17 +92,22 @@ export const rrhhPermissions: Record<AppPermissionKey, boolean> = {
   usuarios: false
 };
 
+/** Roles válidos. Cualquier valor fuera de esta lista se degrada a "manager". */
+const knownRoles: AppRole[] = ["admin", "manager", "delegacion", "almacen", "rrhh"];
+
 export function normalizeUser(row: Partial<AppUser>): AppUser {
   // Cualquier rol desconocido cae en "manager": si un rol nuevo no se añade AQUÍ,
   // el usuario se degrada en silencio a gestor y saveInternalUsers reescribe esa
   // degradación en la base.
-  const role = row.role === "admin" ? "admin" : row.role === "almacen" ? "almacen" : row.role === "rrhh" ? "rrhh" : "manager";
+  const role: AppRole = knownRoles.includes(row.role as AppRole) ? (row.role as AppRole) : "manager";
   const permissions = role === "admin"
     ? adminPermissions
     : role === "almacen"
       ? almacenPermissions
       : role === "rrhh"
         ? rrhhPermissions
+        // Delegación comparte matriz con gestor: sustituye al gestor en su zona,
+        // así que necesita exactamente sus mismos módulos.
         : { ...defaultPermissions, ...(row.permissions || {}), usuarios: false };
   return {
     id: row.id || uid(),
@@ -352,6 +363,30 @@ export function isRrhhSession(session?: AppSession | null) {
 }
 
 /**
+ * v11.5 · Delegación: gestor SUBCONTRATADO de una zona. Ve y hace lo mismo que un
+ * gestor de la casa dentro de sus provincias; lo único que cambia es que en las
+ * campañas «por delegaciones» es ella —y no el gestor interno— quien recibe los
+ * puntos de esas provincias.
+ */
+export function isDelegacionSession(session?: AppSession | null) {
+  return session?.role === "delegacion";
+}
+
+/**
+ * Quien gestiona una ZONA: el gestor de la casa o la delegación subcontratada.
+ * Es el perfil que reparte los puntos entre TRABAJADORES; administración solo
+ * reparte entre responsables de zona y nunca toca instaladores.
+ */
+export function isZoneManagerSession(session?: AppSession | null) {
+  return session?.role === "manager" || session?.role === "delegacion";
+}
+
+/** Espejo de lo anterior sobre una ficha de usuario (no sobre la sesión). */
+export function esResponsableDeZona(user: Pick<AppUser, "role">) {
+  return user.role === "manager" || user.role === "delegacion";
+}
+
+/**
  * Quien TRAMITA en RR.HH.: rellena el número de A3, cambia el estado de una
  * solicitud, concede o deniega un acceso y mantiene el catálogo de cadenas.
  * Los gestores entran al módulo (canAccessModule(session, "rrhh")) pero solo
@@ -364,6 +399,7 @@ export function canManageRrhh(session?: AppSession | null) {
 export const roleLabels: Record<AppRole, string> = {
   admin: "Administración",
   manager: "Gestor",
+  delegacion: "Delegación",
   almacen: "Almacén",
   rrhh: "RR.HH."
 };

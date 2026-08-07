@@ -1,4 +1,5 @@
 import { AppSession, isAdminSession, userCanSeeProvince } from "@/lib/access-control";
+import { valorPuntoEur } from "@/lib/campana-horas";
 import { IsdinBillingAdjustment, IsdinBillingLine, ISDIN_CECO, ISDIN_CLIENT } from "@/lib/isdin-billing";
 import { PaymentLine, dateOnly, fingerprint } from "@/lib/payment-ledger";
 import { normalizeProvince, provinceScopeValues } from "@/lib/provinces";
@@ -108,19 +109,25 @@ export function pagoEventsFromPaymentLines(lines: PaymentLine[]): EconomicEventI
 }
 
 // Pagos a trabajador del módulo nuevo de Grandes Campañas: cada punto completado
-// con importe genera un evento. El beneficiario es el INSTALADOR del punto; si
-// aún no tiene, se usa el gestor como respaldo (y sin ninguno queda en revisión).
+// que valga dinero genera un evento. El beneficiario es el INSTALADOR del punto;
+// si aún no tiene, se usa el gestor como respaldo (y sin ninguno queda en revisión).
+//
+// v11.5 · Lo que vale el punto lo decide la CAMPAÑA (importe del punto, u horas ×
+// tarifa, más kilometraje). Filtrar por `importe > 0` dejaba fuera todos los
+// puntos de una campaña por horas: el Historial económico se quedaba en blanco
+// justo en las campañas donde el cálculo es menos evidente.
 export function pagoEventsFromCampanaPuntos(puntos: AnyRow[], campanas: AnyRow[]): EconomicEventInput[] {
   const porCampana = new Map(campanas.map(campana => [campana.id, campana]));
   return puntos
-    .filter(punto => punto.estado === "completado" && Number(punto.importe || 0) > 0)
+    .filter(punto => punto.estado === "completado" && valorPuntoEur(punto, porCampana.get(punto.campana_id) || {}) > 0)
     .map(punto => {
       const campana = porCampana.get(punto.campana_id) || {};
       const fecha = dateOnly(punto.fecha_visita) || dateOnly(punto.updated_at) || hoy();
       const beneficiarioId = punto.instalador_id || punto.gestor_id || null;
       const beneficiarioNombre = punto.instalador_nombre || punto.gestor_nombre || "Sin instalador";
+      const importe = valorPuntoEur(punto, campana);
       return {
-        fingerprint: fingerprint(["evt", "pago", "gc_punto", punto.id, "completado", fecha, Number(punto.importe || 0), beneficiarioId || beneficiarioNombre || ""]),
+        fingerprint: fingerprint(["evt", "pago", "gc_punto", punto.id, "completado", fecha, importe, beneficiarioId || beneficiarioNombre || ""]),
         tipo: "pago_trabajador" as const,
         origen: "gran_campana" as const,
         source_id: String(punto.campana_id || ""),
@@ -133,8 +140,8 @@ export function pagoEventsFromCampanaPuntos(puntos: AnyRow[], campanas: AnyRow[]
         ceco: null,
         campana: campana.nombre || null,
         provincia: punto.provincia || null,
-        concepto: "Gran campaña - punto completado",
-        importe: Number(punto.importe || 0),
+        concepto: campana.pago_por_horas ? "Gran campaña - horas trabajadas" : "Gran campaña - punto completado",
+        importe,
         estado: "activo" as const,
         payload: { punto: punto.nombre_comercial || "", codigo: punto.codigo || "" }
       };

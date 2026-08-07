@@ -199,8 +199,8 @@ function DuplicarModal({
             <span className="gc-label">Qué se copia</span>
             <label className="flex items-center gap-2"><input type="checkbox" checked={opciones.copiarPuntos} onChange={event => patch({ copiarPuntos: event.target.checked })} />Puntos de venta ({Number(row.total_puntos).toLocaleString("es-ES")}) — se copian en estado «Pendiente», sin fecha de visita</label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={opciones.copiarImportes} disabled={!opciones.copiarPuntos} onChange={event => patch({ copiarImportes: event.target.checked })} />Importes/tarifas por punto</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={opciones.copiarEquipo} onChange={event => patch({ copiarEquipo: event.target.checked })} />Equipo de gestores ({(row.gestores_nombres || []).length})</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={opciones.copiarAsignaciones} disabled={!opciones.copiarPuntos} onChange={event => patch({ copiarAsignaciones: event.target.checked })} />Asignaciones de puntos a gestores</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={opciones.copiarEquipo} onChange={event => patch({ copiarEquipo: event.target.checked })} />Equipo de gestores y delegaciones ({(row.gestores_nombres || []).length})</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={opciones.copiarAsignaciones} disabled={!opciones.copiarPuntos} onChange={event => patch({ copiarAsignaciones: event.target.checked })} />Asignaciones de puntos a responsables de zona</label>
           </div>
           <p className="gc-note">Las incidencias, los avances y los pagos/facturación <b>nunca</b> se copian. La copia se crea en estado «Borrador».</p>
         </div>

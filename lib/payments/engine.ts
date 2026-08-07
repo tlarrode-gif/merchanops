@@ -369,14 +369,19 @@ export function computeBigCampaignPointObligations(point: BigCampaignPointInput)
  * de la instalación —solo lo genera el estado `completado`—.
  *
  * Reglas:
- *  - `completado`  → obligación de instalación por el importe del punto.
+ *  - `completado`  → obligación de instalación por el importe del punto, o por
+ *                    `horas × tarifa` si la campaña se paga POR HORAS (v11.5).
  *  - incidencia    → una obligación de visita fallida por cada incidencia registrada,
  *                    con la tarifa única de FAILED_VISIT_FEE_CENTS (8,56 €).
+ *  - kilometraje   → obligación PROPIA (v11.5) cuando la campaña lo paga y el punto
+ *                    trae kilómetros reportados. Va aparte del pago del trabajo
+ *                    porque se revisa, se bloquea y se liquida por separado.
  *  - `cancelado` y `pendiente` sin incidencias → nada.
  *
- * Nada se descarta en silencio: si falta el importe, la fecha de instalación o el
- * trabajador, la obligación se crea igualmente pero BLOQUEADA (`payable = false`)
- * con su motivo, para que aparezca en Pagos y en Avisos en lugar de desaparecer.
+ * Nada se descarta en silencio: si falta el importe, la tarifa, las horas, la fecha
+ * de instalación o el trabajador, la obligación se crea igualmente pero BLOQUEADA
+ * (`payable = false`) con su motivo, para que aparezca en Pagos y en Avisos en lugar
+ * de desaparecer.
  */
 export function computeCampanaPuntoObligations(punto: CampanaPuntoInput): EngineResult {
   const issues: EngineIssue[] = [];
@@ -406,29 +411,106 @@ export function computeCampanaPuntoObligations(punto: CampanaPuntoInput): Engine
     );
   }
 
+  const eventDate = dateOnly(punto.fechaInstalacion);
+  const sinTrabajador: BlockReason[] = punto.workerId || punto.workerName ? [] : ["missing_worker"];
+
   if (estado === "completado") {
-    const blocked: BlockReason[] = [];
-    const amountCents = centsOrBlock(punto.importeEur, blocked);
-    if (!punto.workerId && !punto.workerName) blocked.push("missing_worker");
+    const blocked: BlockReason[] = [...sinTrabajador];
+    // Dos formas de pagar el mismo trabajo, nunca las dos a la vez: la campaña por
+    // horas paga el turno y la campaña por punto paga el importe del punto. La
+    // CLAVE es distinta (`hours` vs `installation`) para que cambiar el modo de una
+    // campaña ya volcada no reescriba en silencio una línea con otro concepto: la
+    // vieja vuelve como divergencia y alguien decide qué hacer con ella.
+    const amountCents = punto.pagoPorHoras
+      ? importeHorasCents(punto, blocked)
+      : centsOrBlock(punto.importeEur, blocked);
     obligations.push(
       draft({
-        key: `gran_campana:${punto.id}:installation`,
+        key: `gran_campana:${punto.id}:${punto.pagoPorHoras ? "hours" : "installation"}`,
         origin: "gran_campana",
         sourceId: punto.id,
-        type: "installation",
+        type: punto.pagoPorHoras ? "hours" : "installation",
         amountCents,
         // Sin fecha de instalación `draft` bloquea con missing_event_date: nunca se
         // sustituye por la fecha de hoy, que falsearía el mes contable.
-        eventDate: dateOnly(punto.fechaInstalacion),
+        eventDate,
         workerId: punto.workerId,
         workerName: punto.workerName,
-        concept: "Gran campaña · punto completado",
+        concept: punto.pagoPorHoras
+          ? `Gran campaña · ${formatearHoras(punto.horas)} h de trabajo`
+          : "Gran campaña · punto completado",
+        blockedReasons: blocked
+      })
+    );
+  }
+
+  // Kilometraje: se paga lo REPORTADO, esté el punto completado o con incidencia
+  // (el desplazamiento se hizo igual). Solo se emite si hay kilómetros: sin ellos
+  // no hay nada que reclamar y una línea a 0 € solo ensucia Pagos.
+  const kilometros = Number(punto.kilometros ?? 0);
+  if (punto.pagoKilometraje && kilometros > 0) {
+    const blocked: BlockReason[] = [...sinTrabajador];
+    obligations.push(
+      draft({
+        key: `gran_campana:${punto.id}:mileage`,
+        origin: "gran_campana",
+        sourceId: punto.id,
+        type: "mileage",
+        amountCents: totalPorTarifa(punto.tarifaKmEur, kilometros, blocked, "missing_km_rate"),
+        eventDate,
+        workerId: punto.workerId,
+        workerName: punto.workerName,
+        concept: `Gran campaña · kilometraje (${kilometros.toLocaleString("es-ES")} km)`,
         blockedReasons: blocked
       })
     );
   }
 
   return { obligations, issues };
+}
+
+/**
+ * Total en céntimos de `tarifa × cantidad`, redondeado UNA sola vez al final.
+ *
+ * No se convierte la tarifa a céntimos antes de multiplicar: `tarifa_km` tiene
+ * cuatro decimales precisamente porque 0,265 €/km es una tarifa real, y pasarla
+ * primero por `eurosToCents` la subiría a 0,27 € y cobraría de más en cada
+ * kilómetro (33 km serían 8,91 € en vez de 8,75 €).
+ */
+function totalPorTarifa(tarifaEur: number | null | undefined, cantidad: number, blocked: BlockReason[], motivoSinTarifa: BlockReason): number {
+  if (tarifaEur == null) {
+    blocked.push(motivoSinTarifa);
+    return 0;
+  }
+  if (!Number.isFinite(tarifaEur) || tarifaEur < 0 || !Number.isFinite(cantidad) || cantidad < 0) {
+    blocked.push("invalid_amount");
+    return 0;
+  }
+  return eurosToCents(tarifaEur * cantidad);
+}
+
+/** Importe en céntimos de un turno: horas × tarifa, con los motivos de bloqueo. */
+function importeHorasCents(punto: CampanaPuntoInput, blocked: BlockReason[]): number {
+  // Un reporte incoherente (salida antes que entrada, hora ilegible) NO se
+  // aproxima ni se ignora: bloquea con su propio motivo para que se corrija.
+  if (punto.horasError && punto.horasError !== "sin_datos") {
+    blocked.push("invalid_hours");
+    // La falta de tarifa se sigue señalando: son dos cosas que corregir, no una.
+    if (punto.tarifaHoraEur == null) blocked.push("missing_hourly_rate");
+    return 0;
+  }
+  const horas = Number(punto.horas ?? NaN);
+  if (!Number.isFinite(horas) || horas < 0) {
+    blocked.push("missing_hours");
+    if (punto.tarifaHoraEur == null) blocked.push("missing_hourly_rate");
+    return 0;
+  }
+  return totalPorTarifa(punto.tarifaHoraEur, horas, blocked, "missing_hourly_rate");
+}
+
+function formatearHoras(horas: number | null | undefined) {
+  const numero = Number(horas ?? 0);
+  return Number.isFinite(numero) ? numero.toLocaleString("es-ES", { maximumFractionDigits: 2 }) : "0";
 }
 
 // ---------------------------------------------------------------------------

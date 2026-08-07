@@ -12,10 +12,12 @@ import { GestorAvatar } from "@/components/grandes-campanas/gestor-avatars";
 import { PuntosTabla } from "@/components/grandes-campanas/puntos-tabla";
 import { DireccionesEnvioPanel } from "@/components/grandes-campanas/direcciones-envio-panel";
 import { AppSession, AppUser, canAccessModule, canManageCampaigns, getCurrentAppSession, isAdminSession, loadInternalUsers } from "@/lib/access-control";
+import { CampanaDelegacion, delegacionesComoCandidatos, fetchDelegacionesCampana, responsablesDeZona } from "@/lib/campana-delegaciones";
 import { CampanaColumna, fetchCampanaColumnas } from "@/lib/campana-columnas";
 import { agruparPuntosParaMaterial, mismaProvincia, provinciasConVariosTrabajadores, sugerirGestoresPorPunto, sugerirTrabajadoresPorPunto } from "@/lib/campana-asignacion";
 import { addWorkerAddress, formatDireccionEnvio } from "@/lib/direcciones-envio";
 import { IncidenciaRow, resumenVolcado, syncCampanaObligations } from "@/lib/payments/campana-obligations";
+import { horasDelPunto } from "@/lib/campana-horas";
 import { PuntoEvento, fetchEventosCampana } from "@/lib/campana-auditoria";
 import { HistorialPanel } from "@/components/grandes-campanas/historial-panel";
 import { Documento, cambiarVisibilidadInstalador, fetchDocumentos, retirarDocumento, subirDocumento } from "@/lib/campana-documentos";
@@ -64,7 +66,7 @@ import {
 
 const tabs = [
   ["puntos", "Puntos"],
-  ["gestores", "Gestores"],
+  ["gestores", "Responsables de zona"],
   ["incidencias", "Incidencias"],
   ["documentos", "Documentos"],
   ["historial", "Historial"],
@@ -94,6 +96,10 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   const [workers, setWorkers] = useState<Array<{ id: string; name: string; province?: string | null; phone?: string | null }>>([]);
   // Usuarios internos con provincias: candidatos a gestor de zona para «Sugerir gestor».
   const [gestoresInternos, setGestoresInternos] = useState<AppUser[]>([]);
+  // v11.5 · Delegaciones marcadas en la campaña y sus fichas de usuario. Solo
+  // mandan si `campana.delegaciones_activas` está en true.
+  const [delegaciones, setDelegaciones] = useState<CampanaDelegacion[]>([]);
+  const [usuariosDelegacion, setUsuariosDelegacion] = useState<AppUser[]>([]);
   const updateFileRef = useRef<HTMLInputElement>(null);
   const [waOpen, setWaOpen] = useState(false);
   const [waWorkerId, setWaWorkerId] = useState("");
@@ -125,7 +131,11 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   useEffect(() => {
     if (supabase) supabase.from("workers").select("id,name,province,phone").order("name").then(({ data }) => setWorkers((data || []) as Array<{ id: string; name: string; province?: string | null; phone?: string | null }>));
     if (isAdminSession(session)) {
-      loadInternalUsers().then(users => setGestoresInternos(users.filter(user => user.active && (user.provinces || []).length > 0)));
+      loadInternalUsers().then(users => {
+        const conZona = users.filter(user => user.active && (user.provinces || []).length > 0);
+        setGestoresInternos(conZona.filter(user => user.role !== "delegacion"));
+        setUsuariosDelegacion(users.filter(user => user.role === "delegacion"));
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -168,13 +178,14 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
 
   async function refresh(silencioso = false) {
     if (!silencioso) setLoading(true);
-    const [campanaResult, kpisResult, puntosResult, incidenciasResult, gestoresResult, columnasResult] = await Promise.all([
+    const [campanaResult, kpisResult, puntosResult, incidenciasResult, gestoresResult, columnasResult, delegacionesResult] = await Promise.all([
       fetchCampana(params.id),
       fetchCampanaKpis(params.id),
       fetchPuntos(params.id),
       fetchIncidencias(params.id),
       fetchGestoresCampana(params.id),
-      fetchCampanaColumnas(params.id)
+      fetchCampanaColumnas(params.id),
+      fetchDelegacionesCampana(params.id)
     ]);
     const firstError = campanaResult.error || kpisResult.error || puntosResult.error || incidenciasResult.error || gestoresResult.error;
     setError(firstError || "");
@@ -184,6 +195,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     setIncidencias(incidenciasResult.data);
     setGestores(gestoresResult.data);
     setColumnas(columnasResult.data);
+    setDelegaciones(delegacionesResult.data);
     // Estado logístico de los puntos: necesidades de material de esta campaña.
     if (supabase) {
       const { data } = await supabase
@@ -234,7 +246,15 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
         objetivo as unknown as Array<Record<string, unknown>>,
         incidencias as unknown as IncidenciaRow[],
         session?.display_name || "Operaciones",
-        correlacion
+        correlacion,
+        // v11.5 · Las tarifas viven en la campaña: sin pasarlas, una campaña por
+        // horas se liquidaría con el importe del punto (normalmente vacío).
+        {
+          pago_por_horas: campana?.pago_por_horas,
+          tarifa_hora: campana?.tarifa_hora,
+          pago_kilometraje: campana?.pago_kilometraje,
+          tarifa_km: campana?.tarifa_km
+        }
       );
       return resumenVolcado(result);
     } catch (err) {
@@ -396,10 +416,25 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     setSaving(false);
   }
 
+  /** Campos cuyo cambio en un punto YA completado cambia lo que se le paga. */
+  const camposQueMuevenElPago: Array<keyof PuntoVenta> = ["importe", "fecha_visita", "hora_entrada", "hora_salida", "horas_trabajadas", "kilometros", "instalador_id"];
+
   async function handleUpdatePunto(punto: PuntoVenta, patch: Partial<PuntoVenta>) {
     setSaving(true);
     const result = await updatePunto(punto.id, patch);
     if (result.error) { setError(result.error); setSaving(false); return; }
+    // Corregir las horas o el importe de un punto ya completado cambia la nómina:
+    // se vuelve a volcar en el momento en vez de esperar a que alguien recuerde
+    // pulsar «Volcar pagos». La obligación es idempotente por clave, así que
+    // repetirlo actualiza la misma línea.
+    const siguePagando = punto.estado === "completado" && patch.estado === undefined;
+    if (siguePagando && camposQueMuevenElPago.some(campo => patch[campo] !== undefined)) {
+      const pagos = await volcarPagos([{ ...punto, ...patch }], `punto:${punto.id}`);
+      flash(`Punto actualizado. ${pagos}`);
+      await refresh(true);
+      setSaving(false);
+      return;
+    }
     if (patch.estado === "completado" && punto.estado !== "completado") {
       const bridgeError = await syncPuntoCompletadoConLogistica({ ...punto, ...patch }, campana, session);
       // v10.3: completar el punto es lo que genera el pago del trabajador. Si falta el
@@ -491,7 +526,17 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
       const result = await updatePuntosPorCodigo(params.id, filas, { insertarNuevos });
       if (result.error) { setError(result.error); return; }
       const r = result.data;
-      flash(`Actualización: ${r.actualizados} puntos actualizados · ${r.sinCambios} sin cambios · ${r.nuevos} nuevos · ${r.noEncontrados - r.nuevos} códigos no encontrados${sinCodigo ? ` · ${sinCodigo} filas sin código ignoradas` : ""}${insertarNuevos && sinNombre ? ` · ${sinNombre} filas sin nombre no se han creado como nuevas` : ""}.`);
+      let resumenPagos = "";
+      // v11.5 · «Que se vuelque el reporte y pague en consecuencia»: si el archivo
+      // ha cambiado algo, los pagos se recalculan aquí mismo. Se leen los puntos
+      // recién guardados en vez de usar el estado de la pantalla, que todavía tiene
+      // los valores anteriores y habría vuelto a volcar el importe viejo.
+      if (r.actualizados > 0 || r.nuevos > 0) {
+        const frescos = await fetchPuntos(params.id);
+        if (frescos.error) setError(`Puntos actualizados, pero no se pudieron releer para recalcular los pagos: ${frescos.error}`);
+        else resumenPagos = ` ${await volcarPagos(filterPuntosBySession(frescos.data, getCurrentAppSession()), `campana:${params.id}`)}`;
+      }
+      flash(`Actualización: ${r.actualizados} puntos actualizados · ${r.sinCambios} sin cambios · ${r.nuevos} nuevos · ${r.noEncontrados - r.nuevos} códigos no encontrados${sinCodigo ? ` · ${sinCodigo} filas sin código ignoradas` : ""}${insertarNuevos && sinNombre ? ` · ${sinNombre} filas sin nombre no se han creado como nuevas` : ""}.${resumenPagos}`);
       await refresh(true);
     } finally {
       setSaving(false);
@@ -550,25 +595,27 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
   // acceso al punto). Cada gestor reparte sus puntos entre TRABAJADORES de la zona.
 
   async function handleSugerirGestores() {
-    const candidatos = gestoresInternos.length ? gestoresInternos : [];
-    if (!candidatos.length) { setError("No hay usuarios con provincias asignadas a los que repartir los puntos."); return; }
-    const propuesta = sugerirGestoresPorPunto(puntos, candidatos);
+    if (!candidatosZona.length) { setError("No hay usuarios con provincias asignadas a los que repartir los puntos."); return; }
+    const propuesta = sugerirGestoresPorPunto(puntos, candidatosZona);
     if (!propuesta.sugerencias.length) {
       setError(propuesta.provinciasSinCandidato.length
-        ? `Ningún gestor cubre estas provincias: ${propuesta.provinciasSinCandidato.join(", ")}. Ajusta las provincias de los usuarios y vuelve a intentarlo.`
-        : "Todos los puntos visibles ya tienen gestor asignado.");
+        ? `Nadie cubre estas provincias: ${propuesta.provinciasSinCandidato.join(", ")}. Ajusta las provincias de los usuarios (o las delegaciones de la campaña) y vuelve a intentarlo.`
+        : "Todos los puntos visibles ya tienen responsable de zona asignado.");
       return;
     }
     const detalle = Object.entries(propuesta.sugerencias.reduce<Record<string, number>>((acc, item) => {
       acc[item.persona_nombre] = (acc[item.persona_nombre] || 0) + 1;
       return acc;
     }, {})).map(([nombre, total]) => `${nombre}: ${total}`).join("\n");
-    if (!window.confirm(`Se van a repartir ${propuesta.sugerencias.length} punto(s) sin gestor:\n\n${detalle}\n\n${propuesta.provinciasSinCandidato.length ? `Sin gestor en: ${propuesta.provinciasSinCandidato.join(", ")}.\n\n` : ""}Asignar el gestor es lo que le da acceso al punto. ¿Continuar?`)) return;
+    const avisoDelegadas = zonasDelegadas.length
+      ? `Zonas que lleva una delegación: ${zonasDelegadas.join(", ")}.\n\n`
+      : "";
+    if (!window.confirm(`Se van a repartir ${propuesta.sugerencias.length} punto(s) sin responsable:\n\n${detalle}\n\n${avisoDelegadas}${propuesta.provinciasSinCandidato.length ? `Sin nadie asignado en: ${propuesta.provinciasSinCandidato.join(", ")}.\n\n` : ""}Asignar el responsable de zona es lo que le da acceso al punto. ¿Continuar?`)) return;
     setSaving(true);
     setError("");
-    const result = await aplicarSugerenciasGestor(propuesta.sugerencias);
+    const result = await aplicarSugerenciasGestor(propuesta.sugerencias, session);
     if (result.error) setError(result.error);
-    else flash(`${result.data.aplicados} puntos repartidos entre ${result.data.personas} gestor(es)${propuesta.provinciasSinCandidato.length ? ` · sin gestor en ${propuesta.provinciasSinCandidato.join(", ")}` : ""}`);
+    else flash(`${result.data.aplicados} puntos repartidos entre ${result.data.personas} responsable(s) de zona${propuesta.provinciasSinCandidato.length ? ` · sin nadie en ${propuesta.provinciasSinCandidato.join(", ")}` : ""}`);
     await refresh(true);
     setSaving(false);
   }
@@ -592,7 +639,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     if (!window.confirm(`Se van a asignar ${propuesta.sugerencias.length} punto(s) sin trabajador:\n\n${detalle}${avisoVarios}${propuesta.provinciasSinCandidato.length ? `\n\nSin trabajador en: ${propuesta.provinciasSinCandidato.join(", ")}.` : ""}\n\n¿Continuar?`)) return;
     setSaving(true);
     setError("");
-    const result = await aplicarSugerenciasInstalador(propuesta.sugerencias);
+    const result = await aplicarSugerenciasInstalador(propuesta.sugerencias, session);
     if (result.error) setError(result.error);
     else flash(`${result.data.aplicados} puntos asignados a ${result.data.personas} trabajador(es)${propuesta.provinciasConVarios.length ? ` · revisa ${propuesta.provinciasConVarios.join(", ")}: hay varias opciones` : ""}`);
     await refresh(true);
@@ -647,18 +694,58 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     () => puntos.filter(punto => punto.estado !== "completado" && punto.estado !== "cancelado" && !logisticaPuntos[punto.id]?.request_id),
     [puntos, logisticaPuntos]
   );
-  // Puntos que generan pago: completados (instalación) o con incidencia (visita fallida).
+  // Puntos que generan pago: completados (trabajo), con incidencia (visita fallida)
+  // o —en las campañas que lo pagan— con kilometraje reportado, porque el
+  // desplazamiento se cobra aunque el punto siga abierto.
   const puntosPagables = useMemo(() => {
     const conIncidencia = new Set(incidencias.map(inc => inc.punto_id).filter(Boolean) as string[]);
-    return puntos.filter(punto => punto.estado === "completado" || conIncidencia.has(punto.id));
-  }, [puntos, incidencias]);
-  // Completados a los que les falta un dato para poder cobrarse.
+    return puntos.filter(punto =>
+      punto.estado === "completado"
+      || conIncidencia.has(punto.id)
+      || (campana?.pago_kilometraje && punto.estado !== "cancelado" && Number(punto.kilometros || 0) > 0)
+    );
+  }, [puntos, incidencias, campana?.pago_kilometraje]);
+  // Completados a los que les falta un dato para poder cobrarse. En una campaña por
+  // horas lo que falta no es el importe sino las marcas horarias: mirar `importe`
+  // ahí habría avisado de un problema inexistente y callado el de verdad.
   const puntosSinImporte = useMemo(
-    () => puntos.filter(punto => punto.estado === "completado" && (!Number(punto.importe || 0) || !punto.fecha_visita)),
-    [puntos]
+    () => puntos.filter(punto => {
+      if (punto.estado !== "completado") return false;
+      if (!punto.fecha_visita) return true;
+      return campana?.pago_por_horas ? horasDelPunto(punto).horas == null : !Number(punto.importe || 0);
+    }),
+    [puntos, campana?.pago_por_horas]
   );
   const puntosSinGestor = useMemo(() => puntos.filter(punto => !punto.gestor_id), [puntos]);
   const puntosSinTrabajador = useMemo(() => puntos.filter(punto => !punto.instalador_id), [puntos]);
+
+  // v11.5 · Responsables de zona de ESTA campaña. Con delegaciones activas, sus
+  // provincias salen del reparto de los gestores y pasan a la delegación; sin
+  // ellas, todo funciona como antes.
+  const candidatosDelegacion = useMemo(
+    () => delegacionesComoCandidatos(delegaciones, usuariosDelegacion),
+    [delegaciones, usuariosDelegacion]
+  );
+  const { candidatos: candidatosZona, delegadas: zonasDelegadas } = useMemo(
+    () => responsablesDeZona(gestoresInternos, candidatosDelegacion, Boolean(campana?.delegaciones_activas)),
+    [gestoresInternos, candidatosDelegacion, campana?.delegaciones_activas]
+  );
+  // Zonas subcontratadas que además tienen puntos en la campaña: son las únicas
+  // que merece la pena nombrar en pantalla.
+  const zonasDelegadasConPuntos = useMemo(() => {
+    const deLaCampana = new Set(puntos.map(punto => punto.provincia).filter(Boolean) as string[]);
+    return zonasDelegadas.filter(zona => Array.from(deLaCampana).some(propia => mismaProvincia(propia, zona)));
+  }, [puntos, zonasDelegadas]);
+  // Opciones del desplegable de zona de la tabla (solo lo usa administración).
+  const responsablesParaTabla = useMemo(
+    () => candidatosZona.map(persona => ({
+      id: persona.id,
+      name: persona.display_name || persona.id,
+      provinces: persona.provinces || [],
+      esDelegacion: persona.role === "delegacion"
+    })),
+    [candidatosZona]
+  );
   // Provincias de ESTA campaña en las que hay que elegir a mano porque hay varios trabajadores.
   const provinciasVariosTrabajadores = useMemo(() => {
     const deLaCampana = new Set(puntos.map(punto => punto.provincia).filter(Boolean) as string[]);
@@ -679,32 +766,106 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
     setSaving(false);
   }
 
-  const gestorStats = useMemo(() => gestores.map(gestor => {
-    const propios = puntos.filter(punto => punto.gestor_id === gestor.gestor_id || (gestor.gestor_nombre && punto.gestor_nombre === gestor.gestor_nombre));
-    const abiertas = incidencias.filter(incidencia => incidencia.estado !== "resuelta" && propios.some(punto => punto.id === incidencia.punto_id)).length;
-    return { ...gestor, asignados: propios.length, completados: propios.filter(punto => punto.estado === "completado").length, incidencias: abiertas };
-  }), [gestores, puntos, incidencias]);
+  /**
+   * Filas de la pestaña «Gestores». Junta el equipo guardado de la campaña con las
+   * delegaciones marcadas: sin ellas, en una campaña subcontratada la pestaña salía
+   * vacía o mostraba gestores sin un solo punto, que es justo lo contrario de lo
+   * que está pasando. Se añade además cualquier responsable que tenga puntos pero
+   * no figure en el equipo (reparto manual, campaña heredada): si tiene puntos,
+   * tiene que verse.
+   */
+  const gestorStats = useMemo(() => {
+    type Fila = { id: string; gestor_id?: string | null; gestor_nombre?: string | null; provincia?: string | null; esDelegacion: boolean };
+    const filas = new Map<string, Fila>();
+    for (const gestor of gestores) {
+      filas.set(String(gestor.gestor_id || gestor.gestor_nombre || gestor.id), {
+        id: gestor.id,
+        gestor_id: gestor.gestor_id,
+        gestor_nombre: gestor.gestor_nombre,
+        provincia: gestor.provincia,
+        esDelegacion: false
+      });
+    }
+    if (campana?.delegaciones_activas) {
+      for (const delegacion of delegaciones) {
+        const clave = String(delegacion.delegacion_id || delegacion.delegacion_nombre || delegacion.id);
+        filas.set(clave, {
+          id: String(delegacion.id || clave),
+          gestor_id: delegacion.delegacion_id,
+          gestor_nombre: delegacion.delegacion_nombre,
+          provincia: (delegacion.provincias || []).join(", ") || null,
+          esDelegacion: true
+        });
+      }
+    }
+    for (const punto of puntos) {
+      const clave = String(punto.gestor_id || punto.gestor_nombre || "");
+      if (!clave || filas.has(clave)) continue;
+      filas.set(clave, {
+        id: clave,
+        gestor_id: punto.gestor_id,
+        gestor_nombre: punto.gestor_nombre,
+        provincia: punto.provincia,
+        esDelegacion: (delegaciones || []).some(delegacion => delegacion.delegacion_id === punto.gestor_id)
+      });
+    }
+    return Array.from(filas.values()).map(fila => {
+      const propios = puntos.filter(punto => punto.gestor_id === fila.gestor_id || (fila.gestor_nombre && punto.gestor_nombre === fila.gestor_nombre));
+      const abiertas = incidencias.filter(incidencia => incidencia.estado !== "resuelta" && propios.some(punto => punto.id === incidencia.punto_id)).length;
+      return { ...fila, asignados: propios.length, completados: propios.filter(punto => punto.estado === "completado").length, incidencias: abiertas };
+    });
+  }, [gestores, delegaciones, campana?.delegaciones_activas, puntos, incidencias]);
 
   const incidenciasFiltradas = useMemo(
     () => incidencias.filter(incidencia => !filtroIncidencias || incidencia.estado === filtroIncidencias),
     [incidencias, filtroIncidencias]
   );
 
-  // Pagos de la campaña: solo puntos completados generan pago; se agrupan por
-  // trabajador (instalador; gestor como respaldo) en una sola línea con el total.
+  /**
+   * Pagos de la campaña. Solo los puntos completados generan pago y se agrupan por
+   * trabajador (instalador; gestor como respaldo) en una línea con su total.
+   *
+   * v11.5 · El importe del trabajo sale del modo de la campaña —importe del punto,
+   * u horas × tarifa— y el kilometraje se suma aparte, con su propia columna,
+   * porque en la nómina es otro concepto. Este resumen es un ESPEJO de lo que
+   * calcula el motor de pagos: los euros que mandan son los de `payment_obligations`.
+   */
   const pagosResumen = useMemo(() => {
-    const completados = puntos.filter(punto => punto.estado === "completado" && Number(punto.importe || 0) > 0);
-    const map = new Map<string, { trabajador: string; puntos: number; importe: number }>();
+    const porHoras = Boolean(campana?.pago_por_horas);
+    const tarifaHora = Number(campana?.tarifa_hora ?? 0);
+    const conKm = Boolean(campana?.pago_kilometraje);
+    const tarifaKm = Number(campana?.tarifa_km ?? 0);
+    const completados = puntos.filter(punto => punto.estado === "completado");
+    const map = new Map<string, { trabajador: string; puntos: number; horas: number; kilometros: number; trabajo: number; kilometraje: number }>();
+    let sinDatos = 0;
     for (const punto of completados) {
       const trabajador = punto.instalador_nombre || punto.gestor_nombre || "Sin instalador";
-      const grupo = map.get(trabajador) || { trabajador, puntos: 0, importe: 0 };
+      const grupo = map.get(trabajador) || { trabajador, puntos: 0, horas: 0, kilometros: 0, trabajo: 0, kilometraje: 0 };
+      const horas = porHoras ? horasDelPunto(punto).horas : null;
+      if (porHoras && horas === null) sinDatos += 1;
+      const kilometros = conKm ? Number(punto.kilometros || 0) : 0;
       grupo.puntos += 1;
-      grupo.importe += Number(punto.importe || 0);
+      grupo.horas += horas || 0;
+      grupo.kilometros += kilometros;
+      grupo.trabajo += porHoras ? (horas || 0) * tarifaHora : Number(punto.importe || 0);
+      grupo.kilometraje += kilometros * tarifaKm;
       map.set(trabajador, grupo);
     }
-    const filas = Array.from(map.values()).sort((a, b) => b.importe - a.importe);
-    return { filas, totalPuntos: completados.length, totalImporte: filas.reduce((sum, fila) => sum + fila.importe, 0), pendientes: puntos.length - completados.length };
-  }, [puntos]);
+    const filas = Array.from(map.values())
+      .filter(fila => fila.trabajo > 0 || fila.kilometraje > 0)
+      .sort((a, b) => (b.trabajo + b.kilometraje) - (a.trabajo + a.kilometraje));
+    return {
+      filas,
+      porHoras,
+      conKm,
+      // «Sin datos» son puntos completados de una campaña por horas a los que les
+      // faltan las marcas horarias: su pago existe, pero está bloqueado.
+      sinDatos,
+      totalPuntos: completados.length,
+      totalImporte: filas.reduce((sum, fila) => sum + fila.trabajo + fila.kilometraje, 0),
+      pendientes: puntos.length - completados.length
+    };
+  }, [puntos, campana?.pago_por_horas, campana?.tarifa_hora, campana?.pago_kilometraje, campana?.tarifa_km]);
 
   if (!session?.active) {
     return <main className="gc-module p-4"><section className="gc-empty mx-auto mt-10 max-w-2xl"><b>Inicia sesión</b> en MerchanOps para ver esta campaña.</section></main>;
@@ -757,7 +918,10 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
               <p className="mt-1 flex flex-wrap items-center gap-4 text-sm" style={{ color: "var(--gc-muted)" }}>
                 <span>Cliente: <b style={{ color: "var(--gc-text)" }}>{campana.cliente_marca || "—"}</b></span>
                 <span className="inline-flex items-center gap-1"><MapPin className="h-4 w-4" />{(campana.provincias || []).length ? `${campana.provincias.length} provincia${campana.provincias.length > 1 ? "s" : ""} (${campana.provincias.slice(0, 3).join(", ")}${campana.provincias.length > 3 ? "…" : ""})` : "Sin provincias"}</span>
-                <span className="inline-flex items-center gap-1"><Users className="h-4 w-4" />{gestores.length} gestores</span>
+                <span className="inline-flex items-center gap-1"><Users className="h-4 w-4" />{gestorStats.length} responsable{gestorStats.length === 1 ? "" : "s"} de zona</span>
+                {campana.delegaciones_activas && <span className="gc-badge">Por delegaciones</span>}
+                {campana.pago_por_horas && <span className="gc-badge">Pago por horas{campana.tarifa_hora != null ? ` · ${eur(campana.tarifa_hora)}/h` : ""}</span>}
+                {campana.pago_kilometraje && <span className="gc-badge">Kilometraje{campana.tarifa_km != null ? ` · ${eur(campana.tarifa_km)}/km` : ""}</span>}
                 <span>{Number(kpis?.asignados || 0)} operativos</span>
               </p>
               <p className="mt-1 text-sm" style={{ color: "var(--gc-muted)" }}>Periodo: <b style={{ color: "var(--gc-text)" }}>{formatDate(campana.fecha_inicio)} — {formatDate(campana.fecha_fin)}</b></p>
@@ -772,7 +936,14 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
               {canManageCampaigns(session) && (
                 <>
                   <input ref={updateFileRef} type="file" accept={FILE_ACCEPT_ATTR} className="hidden" onChange={event => handleUpdateFromExcel(event.target.files?.[0])} />
-                  <button className="gc-btn-outline" disabled={saving} onClick={() => updateFileRef.current?.click()} title="Sube un Excel/CSV con la columna de código para actualizar estado, fecha, importe o notas de los puntos existentes sin tocar el resto"><Upload className="h-4 w-4" />Actualizar desde Excel</button>
+                  <button
+                    className="gc-btn-outline"
+                    disabled={saving}
+                    onClick={() => updateFileRef.current?.click()}
+                    title={`Sube un Excel/CSV con la columna de código para actualizar estado, fecha, importe${campana.pago_por_horas ? ", hora de entrada y salida" : ""}${campana.pago_kilometraje ? ", kilometraje" : ""} o notas de los puntos existentes sin tocar el resto`}
+                  >
+                    <Upload className="h-4 w-4" />Actualizar desde Excel
+                  </button>
                 </>
               )}
               {canManageCampaigns(session) && <button className="gc-btn-dark" onClick={() => setNuevoAbierto(open => !open)}><Plus className="h-4 w-4" />Añadir puntos</button>}
@@ -790,10 +961,21 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
               <label><span className="gc-label">Importe</span><input type="number" className="gc-input" value={nuevoPunto.importe ?? ""} onChange={event => setNuevoPunto({ ...nuevoPunto, importe: event.target.value === "" ? null : Number(event.target.value) })} /></label>
               <label><span className="gc-label">Tipo</span><input className="gc-input" value={nuevoPunto.tipo || ""} onChange={event => setNuevoPunto({ ...nuevoPunto, tipo: event.target.value || null })} /></label>
               <label><span className="gc-label">Fecha visita</span><input type="date" className="gc-input" value={nuevoPunto.fecha_visita || ""} onChange={event => setNuevoPunto({ ...nuevoPunto, fecha_visita: event.target.value || null })} /></label>
-              <label><span className="gc-label">Gestor</span>
-                <select className="gc-select" value={nuevoPunto.gestor_id || ""} onChange={event => { const gestor = gestores.find(item => item.gestor_id === event.target.value); setNuevoPunto({ ...nuevoPunto, gestor_id: gestor?.gestor_id || null, gestor_nombre: gestor?.gestor_nombre || null }); }}>
+              {/* Responsable de zona del punto nuevo. Se listan los mismos que en la
+                  tabla (gestores y, si la campaña va por delegaciones, delegaciones)
+                  y no solo el equipo guardado: si no, un punto de una provincia
+                  subcontratada nacía sin poder asignarse a su delegación. */}
+              <label><span className="gc-label">Responsable de zona</span>
+                <select
+                  className="gc-select"
+                  value={nuevoPunto.gestor_id || ""}
+                  onChange={event => {
+                    const persona = responsablesParaTabla.find(item => item.id === event.target.value);
+                    setNuevoPunto({ ...nuevoPunto, gestor_id: persona?.id || null, gestor_nombre: persona?.name || null });
+                  }}
+                >
                   <option value="">Sin asignar</option>
-                  {gestores.map(gestor => <option key={gestor.id} value={gestor.gestor_id || ""}>{gestor.gestor_nombre}</option>)}
+                  {responsablesParaTabla.map(persona => <option key={persona.id} value={persona.id}>{persona.name}{persona.esDelegacion ? " · delegación" : ""}</option>)}
                 </select>
               </label>
               <div className="flex items-end gap-2">
@@ -852,7 +1034,7 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
         {/* El gestor ve KPIs recalculados sobre sus provincias, sin presupuesto de campaña. */}
         <CampanaDetalleKpis
           campana={campana}
-          kpis={admin ? kpis : kpisDesdePuntos(campana.id, puntos, incidencias, campana.fecha_fin)}
+          kpis={admin ? kpis : kpisDesdePuntos(campana.id, puntos, incidencias, campana.fecha_fin, campana)}
           showFinancials={admin}
         />
 
@@ -873,28 +1055,33 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
               <DireccionesEnvioPanel puntos={puntos} saving={saving} onAplicar={handleAplicarDireccionEnvio} />
             )}
             <div className="flex flex-wrap items-center justify-end gap-2 gc-no-print">
-              {/* Administración reparte los puntos entre gestores: es lo que les da acceso. */}
-              {admin && (
+              {/* v11.5 · Las dos capas de reparto no se solapan:
+                    · administración reparte ZONA (gestores o delegaciones), que es lo
+                      que da acceso al punto, y no ve el reparto de trabajadores;
+                    · el responsable de zona reparte TRABAJADORES entre sus puntos. */}
+              {admin ? (
                 <button
                   className="gc-btn-outline"
                   disabled={saving || !puntosSinGestor.length}
-                  title={puntosSinGestor.length ? "Repartir los puntos sin gestor entre los gestores de cada provincia" : "Todos los puntos tienen gestor asignado"}
+                  title={puntosSinGestor.length
+                    ? "Repartir los puntos sin responsable entre los gestores (o delegaciones) de cada provincia"
+                    : "Todos los puntos tienen responsable de zona asignado"}
                   onClick={handleSugerirGestores}
                 >
                   <Users className="h-4 w-4" />
-                  Sugerir gestor ({puntosSinGestor.length} sin gestor)
+                  Asignar zona ({puntosSinGestor.length} sin responsable)
+                </button>
+              ) : (
+                <button
+                  className="gc-btn-outline"
+                  disabled={saving || !puntosSinTrabajador.length}
+                  title={puntosSinTrabajador.length ? "Proponer un trabajador por provincia para tus puntos sin asignar" : "Todos tus puntos tienen trabajador asignado"}
+                  onClick={handleSugerirTrabajadores}
+                >
+                  <UserCheck className="h-4 w-4" />
+                  Sugerir trabajador ({puntosSinTrabajador.length} sin trabajador)
                 </button>
               )}
-              {/* El gestor reparte sus puntos entre los trabajadores de la zona. */}
-              <button
-                className="gc-btn-outline"
-                disabled={saving || !puntosSinTrabajador.length}
-                title={puntosSinTrabajador.length ? "Proponer un trabajador por provincia para tus puntos sin asignar" : "Todos tus puntos tienen trabajador asignado"}
-                onClick={handleSugerirTrabajadores}
-              >
-                <UserCheck className="h-4 w-4" />
-                Sugerir trabajador ({puntosSinTrabajador.length} sin trabajador)
-              </button>
               {/* Los pagos se vuelcan al completar cada punto; este botón recupera los
                   puntos completados antes de existir el volcado y refleja correcciones. */}
               <button
@@ -920,11 +1107,19 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
             </div>
             {puntosSinImporte.length > 0 && (
               <p className="text-xs gc-no-print" style={{ color: "var(--gc-secondary)" }}>
-                <b>{puntosSinImporte.length} punto(s) completados sin importe o sin fecha de instalación.</b> Su pago
+                <b>{puntosSinImporte.length} punto(s) completados sin {campana.pago_por_horas ? "horas" : "importe"} o sin fecha de instalación.</b> Su pago
                 queda registrado en Pagos pero <b>bloqueado</b>: nadie los cobrará hasta rellenar esos datos en la ficha del punto.
               </p>
             )}
-            {provinciasVariosTrabajadores.length > 0 && (
+            {/* Un gestor nunca reparte trabajadores en una provincia que ya no es suya:
+                decirlo aquí evita que descubra el cambio al ver puntos que no salen. */}
+            {campana.delegaciones_activas && zonasDelegadasConPuntos.length > 0 && (
+              <p className="text-xs gc-no-print" style={{ color: "var(--gc-muted)" }}>
+                <b>Campaña por delegaciones.</b> Estas provincias las gestiona una delegación subcontratada: {zonasDelegadasConPuntos.join(", ")}.
+                El resto sigue a cargo de los gestores.
+              </p>
+            )}
+            {!admin && provinciasVariosTrabajadores.length > 0 && (
               <p className="text-xs gc-no-print" style={{ color: "var(--gc-muted)" }}>
                 Provincias de esta campaña con <b>más de un trabajador</b> disponible: {provinciasVariosTrabajadores.join(", ")}.
                 Usa el filtro de provincia para revisarlas y elegir a mano.
@@ -936,8 +1131,11 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
               isAdmin={admin}
               columnas={columnas}
               workers={workers}
+              responsablesZona={responsablesParaTabla}
               saving={saving}
               logistica={logisticaPuntos}
+              pagoPorHoras={!!campana.pago_por_horas}
+              pagoKilometraje={!!campana.pago_kilometraje}
               onSolicitarMaterial={punto => abrirSolicitudMaterial([punto])}
               onUpdatePunto={handleUpdatePunto}
               onDeletePunto={handleDeletePunto}
@@ -949,19 +1147,19 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
         )}
 
         {tab === "gestores" && (
-          !gestorStats.length ? <div className="gc-empty"><b>Sin gestores asignados.</b> Asigna el equipo desde «Editar».</div> : (
+          !gestorStats.length ? <div className="gc-empty"><b>Sin responsables de zona asignados.</b> Asigna el equipo (y, si procede, las delegaciones) desde «Editar».</div> : (
             <div className="gc-table-wrap">
               <table className="gc-table">
-                <thead><tr><th>Gestor</th><th>Provincia</th><th style={{ textAlign: "right" }}>Puntos asignados</th><th style={{ textAlign: "right" }}>Completados</th><th style={{ textAlign: "right" }}>Incidencias</th><th>Último acceso</th><th>Acciones</th></tr></thead>
+                <thead><tr><th>Responsable</th><th>Tipo</th><th>Provincia</th><th style={{ textAlign: "right" }}>Puntos asignados</th><th style={{ textAlign: "right" }}>Completados</th><th style={{ textAlign: "right" }}>Incidencias</th><th>Acciones</th></tr></thead>
                 <tbody>
                   {gestorStats.map(gestor => (
                     <tr key={gestor.id}>
                       <td><span className="inline-flex items-center gap-2"><GestorAvatar name={gestor.gestor_nombre} />{gestor.gestor_nombre || "—"}</span></td>
+                      <td>{gestor.esDelegacion ? <span className="gc-badge">Delegación</span> : "Gestor"}</td>
                       <td>{gestor.provincia || "—"}</td>
                       <td className="text-right font-semibold">{gestor.asignados}</td>
                       <td className="text-right">{gestor.completados}</td>
                       <td className="text-right">{gestor.incidencias > 0 ? <b style={{ color: "var(--gc-secondary)" }}>{gestor.incidencias}</b> : "0"}</td>
-                      <td style={{ color: "var(--gc-muted)" }}>—</td>
                       <td><button className="gc-btn-outline" onClick={() => setTab("puntos")}>Ver puntos</button></td>
                     </tr>
                   ))}
@@ -1020,7 +1218,10 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
         {tab === "pagos" && (
           admin ? (
             !pagosResumen.filas.length ? (
-              <div className="gc-empty"><b>Todavía no hay pagos.</b> El pago de un punto se genera cuando pasa a <b>Completado</b> y tiene importe. Ahora mismo hay {pagosResumen.pendientes} punto(s) sin completar.</div>
+              <div className="gc-empty">
+                <b>Todavía no hay pagos.</b> El pago de un punto se genera cuando pasa a <b>Completado</b> y tiene {pagosResumen.porHoras ? "horas reportadas y tarifa" : "importe"}.
+                Ahora mismo hay {pagosResumen.pendientes} punto(s) sin completar{pagosResumen.sinDatos ? ` y ${pagosResumen.sinDatos} completado(s) sin horas` : ""}.
+              </div>
             ) : (
               <div className="space-y-3">
                 <div className="grid gap-3 md:grid-cols-3">
@@ -1028,15 +1229,40 @@ export default function CampanaDetallePage({ params }: { params: { id: string } 
                   <div className="gc-kpi"><p className="gc-kpi-label">Total a pagar</p><p className="gc-kpi-value">{eur(pagosResumen.totalImporte)}</p></div>
                   <div className="gc-kpi"><p className="gc-kpi-label">Pendientes de completar</p><p className="gc-kpi-value">{pagosResumen.pendientes.toLocaleString("es-ES")}</p></div>
                 </div>
+                {pagosResumen.porHoras && (
+                  <p className="gc-note">
+                    Campaña <b>con pago por horas</b> a {campana.tarifa_hora != null ? `${eur(campana.tarifa_hora)}/h` : <b style={{ color: "var(--gc-secondary)" }}>tarifa sin configurar</b>}
+                    {pagosResumen.sinDatos > 0 && <> · <b style={{ color: "var(--gc-secondary)" }}>{pagosResumen.sinDatos} punto(s) completados sin horas</b>: su pago queda bloqueado hasta rellenar la entrada y la salida.</>}
+                  </p>
+                )}
+                {pagosResumen.conKm && (
+                  <p className="gc-note">
+                    Kilometraje a {campana.tarifa_km != null ? `${eur(campana.tarifa_km)}/km` : <b style={{ color: "var(--gc-secondary)" }}>tarifa sin configurar</b>}. Se liquida como línea aparte del trabajo.
+                  </p>
+                )}
                 <div className="gc-table-wrap">
                   <table className="gc-table">
-                    <thead><tr><th>Trabajador</th><th style={{ textAlign: "right" }}>Puntos completados</th><th style={{ textAlign: "right" }}>Importe acumulado</th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th>Trabajador</th>
+                        <th style={{ textAlign: "right" }}>Puntos completados</th>
+                        {pagosResumen.porHoras && <th style={{ textAlign: "right" }}>Horas</th>}
+                        <th style={{ textAlign: "right" }}>{pagosResumen.porHoras ? "Importe por horas" : "Importe acumulado"}</th>
+                        {pagosResumen.conKm && <th style={{ textAlign: "right" }}>Km</th>}
+                        {pagosResumen.conKm && <th style={{ textAlign: "right" }}>Kilometraje</th>}
+                        {pagosResumen.conKm && <th style={{ textAlign: "right" }}>Total</th>}
+                      </tr>
+                    </thead>
                     <tbody>
                       {pagosResumen.filas.map(fila => (
                         <tr key={fila.trabajador}>
                           <td><span className="inline-flex items-center gap-2"><GestorAvatar name={fila.trabajador} size={24} />{fila.trabajador}</span></td>
                           <td className="text-right font-semibold">{fila.puntos}</td>
-                          <td className="text-right font-semibold">{eur(fila.importe)}</td>
+                          {pagosResumen.porHoras && <td className="text-right">{fila.horas.toLocaleString("es-ES", { maximumFractionDigits: 2 })}</td>}
+                          <td className="text-right font-semibold">{eur(fila.trabajo)}</td>
+                          {pagosResumen.conKm && <td className="text-right">{fila.kilometros.toLocaleString("es-ES", { maximumFractionDigits: 2 })}</td>}
+                          {pagosResumen.conKm && <td className="text-right">{eur(fila.kilometraje)}</td>}
+                          {pagosResumen.conKm && <td className="text-right font-semibold">{eur(fila.trabajo + fila.kilometraje)}</td>}
                         </tr>
                       ))}
                     </tbody>

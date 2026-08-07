@@ -65,7 +65,12 @@ export const campoLabels: Record<string, string> = {
   direccion_envio: "la dirección de envío",
   notas: "las notas",
   centro_id: "el centro",
-  picking_cerrado_at: "la fecha de picking"
+  picking_cerrado_at: "la fecha de picking",
+  // v11.5 · Reporte del turno y del desplazamiento (campañas por horas).
+  hora_entrada: "la hora de entrada",
+  hora_salida: "la hora de salida",
+  horas_trabajadas: "las horas trabajadas",
+  kilometros: "el kilometraje"
 };
 
 export const origenLabels: Record<string, string> = {
@@ -77,8 +82,15 @@ export const origenLabels: Record<string, string> = {
   desconocido: "origen no registrado"
 };
 
-/** Campos cuyo cambio mueve dinero: la pantalla los destaca. */
-export const camposSensibles = new Set(["importe", "estado", "fecha_visita", "instalador_id", "instalador_nombre"]);
+/**
+ * Campos cuyo cambio mueve dinero: la pantalla los destaca. Las horas y los
+ * kilómetros entran desde v11.5 porque en una campaña por horas son EXACTAMENTE
+ * lo que se cobra, igual que el importe en una campaña por punto.
+ */
+export const camposSensibles = new Set([
+  "importe", "estado", "fecha_visita", "instalador_id", "instalador_nombre",
+  "hora_entrada", "hora_salida", "horas_trabajadas", "kilometros"
+]);
 
 export function esCampoSensible(campo?: string | null) {
   return Boolean(campo && camposSensibles.has(campo));
@@ -96,6 +108,18 @@ export function formatearValorEvento(campo: string | null | undefined, valor: st
       const numero = Number(texto);
       return Number.isFinite(numero) ? eur(numero) : texto;
     }
+    case "horas_trabajadas": {
+      const numero = Number(texto);
+      return Number.isFinite(numero) ? `${numero.toLocaleString("es-ES", { maximumFractionDigits: 2 })} h` : texto;
+    }
+    case "kilometros": {
+      const numero = Number(texto);
+      return Number.isFinite(numero) ? `${numero.toLocaleString("es-ES", { maximumFractionDigits: 2 })} km` : texto;
+    }
+    case "hora_entrada":
+    case "hora_salida":
+      // La base devuelve "08:30:00": en la bitácora sobra el segundero.
+      return texto.slice(0, 5);
     case "fecha_visita":
     case "picking_cerrado_at":
       return formatDate(texto);

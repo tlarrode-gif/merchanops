@@ -113,6 +113,11 @@ export const camposInternos: Array<{ value: string; label: string }> = [
   { value: "estado", label: "Estado" },
   { value: "fecha_visita", label: "Fecha instalación" },
   { value: "importe", label: "Importe" },
+  // v11.5 · Reporte del turno y del desplazamiento (campañas por horas).
+  { value: "hora_entrada", label: "Hora de entrada" },
+  { value: "hora_salida", label: "Hora de salida" },
+  { value: "horas_trabajadas", label: "Horas trabajadas" },
+  { value: "kilometros", label: "Kilometraje" },
   { value: "gestor_nombre", label: "Gestor" },
   { value: "instalador_nombre", label: "Instalador (lo pone el gestor)" },
   { value: "direccion_envio", label: "Dirección de envío (la pone el gestor)" },
@@ -127,7 +132,11 @@ export function etiquetaCampoInterno(campo: string) {
 const tipoPorCampoInterno: Record<string, ColumnaTipo> = {
   importe: "numero",
   fecha_visita: "fecha",
-  picking_cerrado_at: "fecha"
+  picking_cerrado_at: "fecha",
+  horas_trabajadas: "numero",
+  kilometros: "numero"
+  // hora_entrada / hora_salida quedan como "texto" a propósito: no son fechas y
+  // el formateador de números convertiría "08:30" en un valor sin sentido.
 };
 
 type Result<T> = { data: T; error?: string };

@@ -5,8 +5,9 @@ import { AlertTriangle, ChevronDown, ChevronRight, FileDown, Package, Printer, S
 import { PuntoBadgeEstado } from "@/components/grandes-campanas/campana-badge-estado";
 import { GestorAvatar } from "@/components/grandes-campanas/gestor-avatars";
 import { CampanaColumna, columnasExtraVisibles, formatearValorColumna } from "@/lib/campana-columnas";
-import { trabajadoresDeProvincia } from "@/lib/campana-asignacion";
-import { IncidenciaCampana, PuntoEstado, PuntoVenta, dateOnly, downloadCsv, downloadXlsx, eur, formatDate, puntoEstadoLabels, puntoEstados, puntosCsvRows } from "@/lib/campanas";
+import { mismaProvincia, trabajadoresDeProvincia } from "@/lib/campana-asignacion";
+import { erroresHorasLabels, horasDelPunto, horasEntreMarcas } from "@/lib/campana-horas";
+import { IncidenciaCampana, PuntoEstado, PuntoVenta, dateOnly, downloadCsv, downloadXlsx, eur, formatDate, horaCorta, puntoEstadoLabels, puntoEstados, puntosCsvRows } from "@/lib/campanas";
 import { WorkerAddress, listWorkerAddresses, formatDireccionEnvio } from "@/lib/direcciones-envio";
 
 const PAGE_SIZE = 25;
@@ -96,6 +97,60 @@ function PuntoDireccionEnvio({ punto, saving, onSet }: {
 
 type WorkerOption = { id: string; name: string; province?: string | null };
 
+/** Responsable de zona asignable a un punto: gestor de la casa o delegación. */
+export type ResponsableZonaOption = { id: string; name: string; provinces?: string[] | null; esDelegacion?: boolean };
+
+/**
+ * v11.5 · Desplegable de RESPONSABLE DE ZONA, solo para administración.
+ *
+ * Hasta ahora el único camino para cambiar el gestor de un punto suelto era la
+ * pantalla de asignación rápida (o repartirlo todo de golpe). Como administración
+ * ya no toca instaladores, esta columna es su herramienta fina: mueve un punto de
+ * una zona a otra sin salir de la tabla. Los de la provincia del punto van primero,
+ * porque es la elección correcta el 99 % de las veces.
+ */
+function ResponsableSelect({ punto, responsables, saving, onUpdatePunto }: {
+  punto: PuntoVenta;
+  responsables: ResponsableZonaOption[];
+  saving: boolean;
+  onUpdatePunto: (punto: PuntoVenta, patch: Partial<PuntoVenta>) => Promise<void>;
+}) {
+  const deZona = useMemo(
+    () => responsables.filter(persona => (persona.provinces || []).some(provincia => mismaProvincia(provincia, punto.provincia))),
+    [responsables, punto.provincia]
+  );
+  const otros = useMemo(() => {
+    const ids = new Set(deZona.map(persona => persona.id));
+    return responsables.filter(persona => !ids.has(persona.id));
+  }, [responsables, deZona]);
+  const etiqueta = (persona: ResponsableZonaOption) => `${persona.name}${persona.esDelegacion ? " · delegación" : ""}`;
+  return (
+    <select
+      className="gc-select"
+      style={{ width: 170, padding: "5px 8px", fontSize: 12 }}
+      value={punto.gestor_id || ""}
+      disabled={saving}
+      title="Asignar el responsable de zona es lo que le da acceso a este punto"
+      onChange={event => {
+        const persona = responsables.find(item => item.id === event.target.value);
+        onUpdatePunto(punto, { gestor_id: persona?.id || null, gestor_nombre: persona?.name || null });
+      }}
+    >
+      <option value="">Sin asignar</option>
+      {deZona.length > 0 && (
+        <optgroup label={`En ${punto.provincia || "esta provincia"}`}>
+          {deZona.map(persona => <option key={persona.id} value={persona.id}>{etiqueta(persona)}</option>)}
+        </optgroup>
+      )}
+      {otros.length > 0 && (
+        <optgroup label={deZona.length ? "Otras zonas" : `Nadie cubre ${punto.provincia || "esta provincia"} · otras zonas`}>
+          {otros.map(persona => <option key={persona.id} value={persona.id}>{etiqueta(persona)}</option>)}
+        </optgroup>
+      )}
+    </select>
+  );
+}
+
 /**
  * Desplegable de instalador con los trabajadores DE LA PROVINCIA del punto primero.
  * Antes listaba los 26 trabajadores en bruto, así que el gestor tenía que saberse de
@@ -146,8 +201,11 @@ export function PuntosTabla({
   isAdmin,
   columnas = [],
   workers = [],
+  responsablesZona = [],
   saving,
   logistica = {},
+  pagoPorHoras = false,
+  pagoKilometraje = false,
   onSolicitarMaterial,
   onUpdatePunto,
   onDeletePunto,
@@ -160,9 +218,14 @@ export function PuntosTabla({
   isAdmin: boolean;
   columnas?: CampanaColumna[];
   workers?: Array<{ id: string; name: string; province?: string | null }>;
+  /** v11.5 · Gestores y delegaciones a los que administración puede dar la zona. */
+  responsablesZona?: ResponsableZonaOption[];
   saving: boolean;
   /** Estado logístico por punto (necesidades source_type "campaign"). */
   logistica?: Record<string, { request_id: string | null; status: string | null }>;
+  /** v11.5 · Configuración de pago de la campaña: decide qué columnas se piden. */
+  pagoPorHoras?: boolean;
+  pagoKilometraje?: boolean;
   onSolicitarMaterial?: (punto: PuntoVenta) => void;
   onUpdatePunto: (punto: PuntoVenta, patch: Partial<PuntoVenta>) => Promise<void>;
   onDeletePunto: (punto: PuntoVenta) => Promise<void>;
@@ -210,6 +273,19 @@ export function PuntosTabla({
   const currentPage = Math.min(page, totalPages);
   const pageRows = filtrados.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const importeTotal = filtrados.reduce((sum, punto) => sum + Number(punto.importe || 0), 0);
+  // Totales del reporte, para el pie de la tabla: es donde el gestor comprueba de
+  // un vistazo que lo subido cuadra con lo que le van a pagar a su gente.
+  const horasTotal = useMemo(
+    () => filtrados.reduce((sum, punto) => sum + (horasDelPunto(punto).horas || 0), 0),
+    [filtrados]
+  );
+  const kilometrosTotal = useMemo(
+    () => filtrados.reduce((sum, punto) => sum + Number(punto.kilometros || 0), 0),
+    [filtrados]
+  );
+  // 13 columnas fijas + las que añade la configuración de pago de la campaña. Sin
+  // esta cuenta el detalle desplegado se desalineaba al activar el pago por horas.
+  const totalColumnas = 13 + (pagoPorHoras ? 2 : 0) + (pagoKilometraje ? 1 : 0);
 
   function patchFiltros(partial: Partial<PuntosFiltros>) {
     setFiltros(prev => ({ ...prev, ...partial }));
@@ -221,6 +297,24 @@ export function PuntosTabla({
     await onRegistrarIncidencia(punto, incidenciaTexto.trim());
     setIncidenciaTexto("");
     setIncidenciaPara(null);
+  }
+
+  /**
+   * Guarda una marca horaria y, con ella, las horas que se van a pagar. Van en el
+   * MISMO patch a propósito: si se guardaran por separado, entre los dos UPDATE el
+   * punto tendría una salida nueva con las horas viejas, y ese es exactamente el
+   * estado con el que alguien podría volcar los pagos.
+   */
+  async function guardarTurno(punto: PuntoVenta, patch: Partial<PuntoVenta>) {
+    const entrada = patch.hora_entrada !== undefined ? patch.hora_entrada : punto.hora_entrada;
+    const salida = patch.hora_salida !== undefined ? patch.hora_salida : punto.hora_salida;
+    const calculo = horasEntreMarcas(entrada, salida);
+    // El total solo se reescribe cuando el par de marcas da un número. Con el turno
+    // a medias (se acaba de teclear la entrada y aún falta la salida) se deja como
+    // estaba: si no, escribir la primera hora borraría el total que trajo el Excel.
+    // Y con un turno incoherente tampoco hace falta tocarlo, porque el cálculo del
+    // pago mira primero las marcas y bloquea la línea con su motivo.
+    await onUpdatePunto(punto, calculo.horas !== null ? { ...patch, horas_trabajadas: calculo.horas } : patch);
   }
 
   return (
@@ -294,6 +388,9 @@ export function PuntosTabla({
                 <th>Estado</th>
                 <th>Fecha instalación</th>
                 <th title="Fecha en la que Almacén cerró el picking del material">Picking</th>
+                {pagoPorHoras && <th title="Hora de entrada y de salida reportadas">Turno</th>}
+                {pagoPorHoras && <th style={{ textAlign: "right" }}>Horas</th>}
+                {pagoKilometraje && <th style={{ textAlign: "right" }}>Km</th>}
                 <th>Incid.</th>
                 <th style={{ textAlign: "right" }}>Importe</th>
                 <th className="gc-no-print">Acciones</th>
@@ -303,6 +400,7 @@ export function PuntosTabla({
               {pageRows.map((punto, index) => {
                 const abiertas = abiertasPorPunto.get(punto.id) || 0;
                 const isOpen = expanded === punto.id;
+                const horasPunto = horasDelPunto(punto);
                 return [
                   <tr key={punto.id} className={`gc-row-link ${abiertas > 0 ? "gc-row-incidencia" : ""}`} onClick={() => setExpanded(isOpen ? null : punto.id)}>
                     <td>{isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</td>
@@ -313,13 +411,17 @@ export function PuntosTabla({
                       <LogisticaPill info={logistica[punto.id]} />
                     </td>
                     <td>{punto.provincia || "—"}</td>
-                    <td>
-                      {punto.gestor_nombre
+                    {/* v11.5 · Administración edita la ZONA y solo lee el trabajador;
+                        el gestor o la delegación, justo al revés. */}
+                    <td onClick={event => isAdmin && event.stopPropagation()}>
+                      {isAdmin && responsablesZona.length ? (
+                        <ResponsableSelect punto={punto} responsables={responsablesZona} saving={saving} onUpdatePunto={onUpdatePunto} />
+                      ) : punto.gestor_nombre
                         ? <span className="inline-flex items-center gap-2"><GestorAvatar name={punto.gestor_nombre} size={24} />{punto.gestor_nombre}</span>
                         : <span style={{ color: "var(--gc-muted)" }}>Sin asignar</span>}
                     </td>
                     <td onClick={event => event.stopPropagation()}>
-                      {workers.length ? (
+                      {!isAdmin && workers.length ? (
                         <InstaladorSelect punto={punto} workers={workers} saving={saving} onUpdatePunto={onUpdatePunto} />
                       ) : (punto.instalador_nombre || <span style={{ color: "var(--gc-muted)" }}>—</span>)}
                     </td>
@@ -331,6 +433,27 @@ export function PuntosTabla({
                         ? formatDate(punto.picking_cerrado_at)
                         : <span style={{ color: "var(--gc-muted)" }}>—</span>}
                     </td>
+                    {pagoPorHoras && (
+                      <td className="whitespace-nowrap text-xs">
+                        {punto.hora_entrada || punto.hora_salida
+                          ? `${horaCorta(punto.hora_entrada) || "—"} → ${horaCorta(punto.hora_salida) || "—"}`
+                          : <span style={{ color: "var(--gc-muted)" }}>Sin reportar</span>}
+                      </td>
+                    )}
+                    {pagoPorHoras && (
+                      <td className="text-right font-semibold" title={horasPunto.error ? erroresHorasLabels[horasPunto.error] : undefined}>
+                        {horasPunto.horas != null
+                          ? horasPunto.horas.toLocaleString("es-ES", { maximumFractionDigits: 2 })
+                          // Un turno mal reportado se señala en rojo: es lo que va a
+                          // dejar el pago bloqueado y hay que corregirlo aquí.
+                          : <span style={{ color: horasPunto.error === "sin_datos" ? "var(--gc-muted)" : "var(--gc-secondary)" }}>—</span>}
+                      </td>
+                    )}
+                    {pagoKilometraje && (
+                      <td className="text-right">
+                        {punto.kilometros != null ? punto.kilometros.toLocaleString("es-ES", { maximumFractionDigits: 2 }) : <span style={{ color: "var(--gc-muted)" }}>—</span>}
+                      </td>
+                    )}
                     <td>{abiertas > 0 ? <span className="inline-flex items-center gap-1 font-bold" style={{ color: "var(--gc-secondary)" }}><AlertTriangle className="h-4 w-4" />{abiertas}</span> : "—"}</td>
                     <td className="text-right font-semibold">{punto.importe != null ? eur(punto.importe) : "—"}</td>
                     <td className="gc-no-print" onClick={event => event.stopPropagation()}>
@@ -347,7 +470,7 @@ export function PuntosTabla({
                   </tr>,
                   isOpen && (
                     <tr key={`${punto.id}-detalle`}>
-                      <td colSpan={13} style={{ background: "#fafbfc" }}>
+                      <td colSpan={totalColumnas} style={{ background: "#fafbfc" }}>
                         <div className="grid gap-4 p-3 md:grid-cols-2 lg:grid-cols-3">
                           <div className="space-y-1 text-sm">
                             <p className="text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>Ficha del punto</p>
@@ -393,6 +516,66 @@ export function PuntosTabla({
                                 />
                               </label>
                             </div>
+                            {/* v11.5 · Lo que reporta el trabajador de su visita. Se
+                                pide solo si la campaña lo paga, para no llenar la ficha
+                                de campos que nadie va a rellenar. */}
+                            {(pagoPorHoras || pagoKilometraje) && (
+                              <div className="mt-2 border-t pt-2 gc-no-print">
+                                <p className="mb-1 text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>Reporte de la visita</p>
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  {pagoPorHoras && (
+                                    <label>
+                                      <span className="gc-label">Hora de entrada</span>
+                                      <input
+                                        type="time"
+                                        className="gc-input"
+                                        defaultValue={horaCorta(punto.hora_entrada)}
+                                        disabled={saving}
+                                        onChange={event => guardarTurno(punto, { hora_entrada: event.target.value || null })}
+                                      />
+                                    </label>
+                                  )}
+                                  {pagoPorHoras && (
+                                    <label>
+                                      <span className="gc-label">Hora de salida</span>
+                                      <input
+                                        type="time"
+                                        className="gc-input"
+                                        defaultValue={horaCorta(punto.hora_salida)}
+                                        disabled={saving}
+                                        onChange={event => guardarTurno(punto, { hora_salida: event.target.value || null })}
+                                      />
+                                    </label>
+                                  )}
+                                  {pagoKilometraje && (
+                                    <label>
+                                      <span className="gc-label">Kilometraje reportado (km)</span>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        className="gc-input"
+                                        defaultValue={punto.kilometros ?? ""}
+                                        disabled={saving}
+                                        onBlur={event => {
+                                          const texto = event.target.value.trim();
+                                          const valor = texto === "" ? null : Number(texto);
+                                          if (valor != null && (!Number.isFinite(valor) || valor < 0)) return;
+                                          if (valor !== (punto.kilometros ?? null)) onUpdatePunto(punto, { kilometros: valor });
+                                        }}
+                                      />
+                                    </label>
+                                  )}
+                                </div>
+                                {pagoPorHoras && (
+                                  <p className="mt-1 text-xs" style={{ color: horasPunto.error && horasPunto.error !== "sin_datos" ? "var(--gc-secondary)" : "var(--gc-muted)" }}>
+                                    {horasPunto.horas != null
+                                      ? <>Se pagarán <b>{horasPunto.horas.toLocaleString("es-ES", { maximumFractionDigits: 2 })} h</b>.</>
+                                      : <>No se pueden calcular las horas: {erroresHorasLabels[horasPunto.error!]}.</>}
+                                  </p>
+                                )}
+                              </div>
+                            )}
                             {solicitarDireccionEnvio && onSetDireccionEnvio && (
                               <div className="mt-2 border-t pt-2 gc-no-print">
                                 <p className="mb-1 text-xs font-bold uppercase" style={{ color: "var(--gc-muted)" }}>Dirección de envío (Logística)</p>
@@ -462,7 +645,12 @@ export function PuntosTabla({
             </tbody>
           </table>
           <div className="gc-table-foot">
-            <span><b>{filtrados.length.toLocaleString("es-ES")}</b> de {puntos.length.toLocaleString("es-ES")} puntos · Importe total acumulado: <b>{eur(importeTotal)}</b></span>
+            <span>
+              <b>{filtrados.length.toLocaleString("es-ES")}</b> de {puntos.length.toLocaleString("es-ES")} puntos
+              {pagoPorHoras && <> · Horas reportadas: <b>{horasTotal.toLocaleString("es-ES", { maximumFractionDigits: 2 })}</b></>}
+              {pagoKilometraje && <> · Kilómetros: <b>{kilometrosTotal.toLocaleString("es-ES", { maximumFractionDigits: 2 })}</b></>}
+              {" "}· Importe total acumulado: <b>{eur(importeTotal)}</b>
+            </span>
             <span className="flex flex-wrap items-center gap-2 gc-no-print">
               <button className="gc-btn-outline" onClick={() => downloadXlsx("puntos_campana.xlsx", puntosCsvRows(filtrados))}><FileDown className="h-4 w-4" />Excel</button>
               <button className="gc-btn-outline" onClick={() => downloadCsv("puntos_campana.csv", puntosCsvRows(filtrados))}><FileDown className="h-4 w-4" />CSV</button>
